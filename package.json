@@ -1,0 +1,57 @@
+{
+  "name": "astral-zero",
+  "version": "0.1.0",
+  "description": "Astral Zero - a chaotic 2D arena platformer-shooter where a space janitor cleans low-Earth orbit junk. Built for the NASA Space Apps Challenge 2026: Astro Sweepers.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "author": "Pilla Sri Sai Rahul",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1RY-O/Astral-Zero.git"
+  },
+  "homepage": "https://github.com/1RY-O/Astral-Zero#readme",
+  "bugs": {
+    "url": "https://github.com/1RY-O/Astral-Zero/issues"
+  },
+  "keywords": [
+    "phaser",
+    "phaser3",
+    "game",
+    "platformer",
+    "shooter",
+    "nasa-space-apps"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev:server": "nodemon server.js",
+    "start": "node server.js",
+    "test": "node tests/lobby-ui.test.mjs",
+    "test:camera": "node --import ./tests/register-phaser-stub.mjs tests/camera.test.mjs",
+    "test:all": "npm run test && npm run test:net && npm run test:netdebug && npm run test:combat && npm run test:feedback && npm run test:transport && npm run test:audio && npm run test:fx && npm run test:progression && npm run test:world && npm run test:wiring && npm run test:camera",
+    "test:net": "node tests/net-integration.test.mjs",
+    "test:netdebug": "node tests/netdebug.test.mjs",
+    "test:combat": "node tests/combat-model.test.mjs",
+    "test:feedback": "node tests/feedback.test.mjs",
+    "test:transport": "node tests/transport.test.mjs",
+    "test:audio": "node tests/audio.test.mjs",
+    "test:fx": "node tests/fxpool.test.mjs",
+    "test:progression": "node tests/progression.test.mjs",
+    "test:wiring": "node tests/phase5-wiring.test.mjs",
+    "test:world": "node tests/world.test.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "phaser": "^3.90.0",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "socket.io-client": "^4.8.4",
+    "vite": "^7.3.6"
+  }
+}

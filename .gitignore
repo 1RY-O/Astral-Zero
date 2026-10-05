@@ -147,3 +147,25 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# ─── Astral Zero additions (Phase 1) ─────────────────────────────────
+# Local env (copy .env.example → .env, never commit secrets)
+.env
+
+# OS + IDE noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Phaser / game build artifacts
+# Vite bundles the game into dist/ — build output should never be committed.
+# Source lives in src/ and public/, so this is safe to ignore.
+dist/
+dist-ssr/
+*.aseprite.bak
+
+# Keep placeholder art in git (via public/assets/.gitkeep). Real game art is
+# committed too — it is source, not build output. Only exported art-tool
+# scratch files (e.g. .aseprite backups) are ignored, above.

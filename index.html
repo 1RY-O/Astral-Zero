@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Astral Zero - a fast-paced 2D arena platformer-shooter where a space janitor cleans low-Earth orbit junk."
+    />
+    <title>Astral Zero</title>
+
+    <!-- Inline SVG favicon: avoids a 404 for /favicon.ico before real art exists. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2305070f'/><rect x='11' y='7' width='10' height='18' rx='4' fill='%2338e1ff'/><rect x='13' y='10' width='6' height='4' rx='1.5' fill='%2304263a'/></svg>"
+    />
+
+    <style>
+      /* Full-viewport dark space background so the letterboxed canvas blends in. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #05070f;
+        overflow: hidden;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      }
+
+      /* Phaser injects its canvas here; centre it both axes. */
+      #game-root {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #game-root canvas {
+        display: block;
+        image-rendering: auto;
+      }
+
+      /* Shown until Phaser has booted; removed by main.js. */
+      #boot-status {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        color: #7fe7ff;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        font-size: 14px;
+        pointer-events: none;
+      }
+
+      #boot-status h1 {
+        margin: 0;
+        font-size: 28px;
+        color: #ffffff;
+        letter-spacing: 6px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- The game canvas is rendered into this element by Phaser 3. -->
+    <div id="game-root"></div>
+
+    <!-- Placeholder UI while the Phaser bundle initialises. -->
+    <div id="boot-status">
+      <h1>ASTRAL ZERO</h1>
+      <span>Spinning up the janitor&hellip;</span>
+    </div>
+
+    <!--
+      ES module entry point. Vite resolves the bare "phaser" specifier and
+      bundles the engine for both `npm run dev` and `npm run build`.
+    -->
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

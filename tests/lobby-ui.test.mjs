@@ -209,14 +209,14 @@ assert.ok(modes.descText.text.includes('Two crews'), 'mode description follows s
 // Solo -> Find Match queues.
 net.state.party = null; net.state.queue = null;
 modes.refresh();
-assert.strictEqual(modes.primary.label.text, 'Find Match');
+assert.strictEqual(modes.primary.label.text, 'FIND MATCH');
 modes.primary.zone.h.pointerup();
 assert.deepStrictEqual(calls.pop(), 'queueJoin');
 
 // Queued -> Cancel Search leaves the queue.
 net.state.queue = { mode:'tdm', position:2, playersInQueue:4 };
 modes.refresh();
-assert.strictEqual(modes.primary.label.text, 'Cancel Search');
+assert.strictEqual(modes.primary.label.text, 'SEARCHING');
 modes.primary.zone.h.pointerup();
 assert.deepStrictEqual(calls.pop(), 'queueLeave');
 
@@ -226,7 +226,7 @@ net.state.party = normaliseParty({ code:'AAA111', leaderId:'S2', leaderName:'Bet
   members:[{id:'S2',socketId:'S2',name:'Beta'},{id:'S1',socketId:'S1',name:'Alpha'}],
   memberCount:2, maxSize:4 }, 'S1');
 modes.refresh();
-assert.strictEqual(modes.primary.label.text, 'Waiting for Leader');
+assert.strictEqual(modes.primary.label.text, 'WAITING');
 modes.primary.zone.h.pointerup();
 assert.strictEqual(calls.pop(), undefined, 'non-leader must not start a match');
 
@@ -234,7 +234,7 @@ assert.strictEqual(calls.pop(), undefined, 'non-leader must not start a match');
 net.state.party = normaliseParty({ code:'BBB222', leaderId:'S1', leaderName:'Alpha',
   members:[{id:'S1',socketId:'S1',name:'Alpha'}], memberCount:1, maxSize:4 }, 'S1');
 modes.refresh();
-assert.strictEqual(modes.primary.label.text, 'Start Match');
+assert.strictEqual(modes.primary.label.text, 'START MATCH');
 modes.primary.zone.h.pointerup();
 assert.deepStrictEqual(calls.pop(), 'startPartyMatch');
 

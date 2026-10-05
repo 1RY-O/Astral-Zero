@@ -23,6 +23,7 @@ import { Panel } from '../widgets/Panel.js';
 import { Button } from '../widgets/Button.js';
 import { TextField } from '../widgets/TextField.js';
 import { normalisePartyCode, validatePartyCode } from '../../net/MatchModel.js';
+import * as Motion from '../../core/Motion.js';
 
 export class PartyPanel {
   /**
@@ -45,7 +46,13 @@ export class PartyPanel {
     const w = opts.width;
     const h = opts.height;
 
-    this.panel = new Panel(scene, { x, y, width: w, height: h, title: 'PARTY', depth: this.depth });
+    this.panel = new Panel(scene, {
+      x, y, width: w, height: h,
+      title: 'PARTY',
+      accent: THEME.accentDeep,
+      emphasised: true,
+      depth: this.depth,
+    });
 
     const innerX = x + 20;
     const innerW = w - 40;
@@ -57,27 +64,34 @@ export class PartyPanel {
       .setScrollFactor(0)
       .setWordWrapWidth(innerW);
 
+    // The brief asks for CREATE PARTY to be visually LARGE and primary, with
+    // JOIN WITH CODE clearly secondary. So: bigger button, bigger type, and a
+    // `cta` skin (stronger glow) rather than the old flat `primary`.
     this.createButton = new Button(scene, {
       x: innerX + innerW / 2,
-      y: y + 108,
+      y: y + 116,
       width: innerW,
-      height: 48,
-      label: 'Create Party',
-      skin: 'primary',
+      height: 62,
+      label: 'CREATE PARTY',
+      sublabel: 'sweep with up to 3 friends',
+      skin: 'cta',
+      fontSize: '20px',
+      minHeight: 56,
       depth: this.depth + 2,
+      ariaLabel: 'Create a new party and get a join code',
       onClick: () => this._onCreate(),
     });
 
     this.joinLabel = scene.add
-      .text(innerX, y + 152, 'OR JOIN WITH A CODE', FONTS.tiny)
+      .text(innerX, y + 168, 'JOIN WITH CODE', FONTS.panelTitle)
       .setDepth(this.depth + 1)
       .setScrollFactor(0);
 
     this.codeField = new TextField(scene, {
       x: innerX,
-      y: y + 172,
+      y: y + 194,
       width: innerW - 116,
-      height: 46,
+      height: 50,
       placeholder: 'ABC123',
       maxLength: PARTY.codeLength,
       // Party codes are A-Z0-9 and case-insensitive → normalise as we type.
@@ -88,13 +102,16 @@ export class PartyPanel {
     });
 
     this.joinButton = new Button(scene, {
-      x: innerX + innerW - 52,
-      y: y + 195,
-      width: 104,
-      height: 46,
-      label: 'Join',
+      x: innerX + innerW - 56,
+      y: y + 219,
+      width: 112,
+      height: 50,
+      label: 'JOIN',
       skin: 'accent',
+      fontSize: '16px',
+      minHeight: 48,
       depth: this.depth + 2,
+      ariaLabel: 'Join a party using the code you were given',
       onClick: () => this._onJoin(),
     });
 
@@ -107,7 +124,7 @@ export class PartyPanel {
       .setScrollFactor(0);
 
     this.codeText = scene.add
-      .text(innerX + innerW / 2, y + 88, '------', { ...FONTS.code, fontSize: '34px', fontStyle: '700' })
+      .text(innerX + innerW / 2, y + 96, '------', { ...FONTS.code, fontSize: '40px', fontStyle: '700' })
       .setOrigin(0.5)
       .setDepth(this.depth + 1)
       .setScrollFactor(0)
@@ -115,14 +132,14 @@ export class PartyPanel {
     this.codeText.on('pointerdown', () => this._copyCode());
 
     this.copyHint = scene.add
-      .text(innerX + innerW / 2, y + 116, 'click to copy', FONTS.tiny)
+      .text(innerX + innerW / 2, y + 128, 'tap to copy', FONTS.tiny)
       .setOrigin(0.5)
       .setDepth(this.depth + 1)
       .setScrollFactor(0)
       .setAlpha(0.8);
 
     this.membersTitle = scene.add
-      .text(innerX, y + 142, 'MEMBERS  0/4', FONTS.tiny)
+      .text(innerX, y + 162, 'MEMBERS  0/4', FONTS.panelTitle)
       .setDepth(this.depth + 1)
       .setScrollFactor(0);
 
@@ -131,11 +148,13 @@ export class PartyPanel {
 
     this.leaveButton = new Button(scene, {
       x: innerX + innerW / 2,
-      y: y + h - 40,
+      y: y + h - 36,
       width: innerW,
-      height: 46,
-      label: 'Leave Party',
+      height: 50,
+      label: 'LEAVE PARTY',
       skin: 'danger',
+      fontSize: '15px',
+      minHeight: 48,
       depth: this.depth + 2,
       onClick: () => this._onLeave(),
     });
@@ -331,8 +350,9 @@ export class PartyPanel {
    * @returns {void}
    */
   _highlightCode() {
-    this.codeText.setScale(1);
-    this.scene.tweens.add({
+    // Respect reduced motion: land on the final scale immediately.
+    this.codeText.setScale(Motion.isReduced() ? 1 : 1);
+    Motion.tween(this.scene, {
       targets: this.codeText,
       scaleX: 1.12,
       scaleY: 1.12,

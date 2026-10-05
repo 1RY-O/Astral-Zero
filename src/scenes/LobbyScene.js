@@ -1,16 +1,28 @@
 /**
- * Astral Zero — LobbyScene (Phase 2 entry point).
- * ===========================================================
+ * Astral Zero — LobbyScene (the arcade lobby).
+ * =========================================================
  * The screen every player lands on before a match. It owns NO game logic — it
  * is a pure VIEW over `NetworkManager.state`, which is what keeps it correct:
  * every panel re-renders from state, and state only changes because the
  * backend said so.
  *
- * LAYOUT (1280x720 design space, Scale.FIT handles the rest)
+ * LAYOUT (design surface 1280x720; `Scale.FIT` maps it to the window)
  *
- *   ┌──────────── header: title · connection status pill ─────────────┐
- *   │  [party 380]  [friends 380]   [mode selector (rest)]            │
- *   └──────── overlays: toasts · invite prompt · name gate ───────────┘
+ *   WIDE (>=1024 css px)
+ *   ┌───────────────────────────────────────────────────────────────┐
+ *   │ LOGO              profile              [status]  [⚙ settings] │  header
+ *   ├───┬──────────────────────────────┬────────────────────────────┤
+ *   │ N │        PARTY (focus)          │        GAME MODE           │
+ *   │ A │                              │   FFA / TDM / BOTS / SCRAP │
+ *   │ V │   CREATE PARTY                │                            │
+ *   │   │   JOIN WITH CODE              │      [ FIND MATCH ]        │
+ *   │   ├──────────────────────────────┤                            │
+ *   │   │        FRIENDS                │                            │
+ *   └───┴──────────────────────────────┴────────────────────────────┘
+ *     overlays: toasts · invite prompt · name gate
+ *
+ *   MEDIUM (<1024)  → 2 columns, nav collapses to an icon strip.
+ *   COMPACT (<640)  → single scrolling column, nav becomes a bottom bar.
  *
  * WIRING
  *  - Subscribes to every `net.on(...)` in `create()` and stores the
@@ -25,20 +37,31 @@
  *  ?skipLobby   boot straight into the arena
  *  ?skipName    bypass the name gate even with no saved name
  *  ?server=URL  point the socket at a different backend origin
+ *  ?noLobbyFx   freeze the orbital backdrop (low-end devices / perf checks)
+ *  ?debug       physics bodies + net stats
  */
 
 import Phaser from 'phaser';
 import { SCENES, GAME_CONFIG } from '../config/gameConfig.js';
 import { LOBBY } from '../config/lobbyConfig.js';
-import { THEME, FONTS } from '../config/uiTheme.js';
+import { THEME, FONTS, RADII, MOTION } from '../config/uiTheme.js';
+import { DESIGN, LAYOUTS, currentLayout, isTouchPrimary } from '../config/viewportConfig.js';
 import { net } from '../net/NetworkManager.js';
 import { isLobbySkipped } from '../net/netConfig.js';
 import { PartyPanel } from '../ui/lobby/PartyPanel.js';
 import { FriendsPanel } from '../ui/lobby/FriendsPanel.js';
 import { ModeSelector } from '../ui/lobby/ModeSelector.js';
+import { NavRail } from '../ui/lobby/NavRail.js';
+import { ProfileCard } from '../ui/lobby/ProfileCard.js';
 import { InvitePrompt } from '../ui/lobby/InvitePrompt.js';
 import { NameGate, loadName } from '../ui/lobby/NameGate.js';
 import { ToastLayer } from '../ui/widgets/ToastLayer.js';
+import { Button } from '../ui/widgets/Button.js';
+import { Logo } from '../ui/brand/Logo.js';
+import { OrbitalBackdrop } from '../ui/brand/OrbitalBackdrop.js';
+import { StatusPill } from '../ui/brand/StatusPill.js';
+import { SettingsMenu } from '../ui/menus/SettingsMenu.js';
+import * as Motion from '../core/Motion.js';
 
 export class LobbyScene extends Phaser.Scene {
   constructor() {
@@ -56,52 +79,45 @@ export class LobbyScene extends Phaser.Scene {
     this.net = net;
     this._offs = [];
 
-    this._createBackdrop();
+    // Follow the OS reduced-motion preference for the whole scene.
+    Motion.init();
+
+    // Layout tier is read ONCE here from the live canvas. It determines the
+    // structural arrangement (1 vs 2 vs 3 columns), not just cosmetics.
+    this.layout = currentLayout(this.scale);
+    this.touch = isTouchPrimary(this.scale);
+
+    this.backdrop = new OrbitalBackdrop(this, {
+      width: DESIGN.width,
+      height: DESIGN.height,
+    });
+    if (typeof window !== 'undefined' && window.location.search.includes('noLobbyFx')) {
+      this.backdrop.setActive(false);
+    }
+
     this._createHeader();
-
-    // --- Panel geometry ---------------------------------------------------
-    const top = LOBBY.headerHeight + LOBBY.gutter;
-    const bottom = GAME_CONFIG.height - LOBBY.margin;
-    const colH = bottom - top;
-    const colW = 380;
-    const margin = LOBBY.margin;
-
-    this.partyPanel = new PartyPanel(this, {
-      x: margin,
-      y: top,
-      width: colW,
-      height: colH,
-      net: this.net,
-    });
-
-    this.friendsPanel = new FriendsPanel(this, {
-      x: margin + colW + LOBBY.gutter,
-      y: top,
-      width: colW,
-      height: colH,
-      net: this.net,
-    });
-
-    const modeX = margin * 2 + colW * 2 + LOBBY.gutter * 2;
-    this.modeSelector = new ModeSelector(this, {
-      x: modeX,
-      y: top,
-      width: GAME_CONFIG.width - modeX - margin,
-      height: colH,
-      net: this.net,
-      // Phase 5: the server offers the spectator booth when a room is full.
-      onSpectate: () => this._joinAsSpectator(),
-    });
+    this._createBody();
 
     // --- Overlays ----------------------------------------------------------
-    this.toasts = new ToastLayer(this, { x: GAME_CONFIG.width / 2, y: GAME_CONFIG.height - 24 });
+    this.toasts = new ToastLayer(this, {
+      x: DESIGN.width / 2,
+      y: DESIGN.height - 24,
+      depth: 400,
+    });
     this.invitePrompt = new InvitePrompt(this, { net: this.net });
+
+    // The settings menu is a real, working menu (audio, feedback toggles,
+    // keybinds) — so the ⚙ nav entry points at something that exists.
+    this.settings = new SettingsMenu(this, { depth: 500 });
 
     this._bindNetwork();
     this._refreshAll();
 
     // Optional first-boot name gate (skipped when a name is already saved).
     this._maybeAskName();
+
+    // Entrance: stagger the cards so the lobby assembles rather than snapping.
+    this._animateEntrance();
 
     // Stop feeding a dead scene.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._teardown());
@@ -115,99 +131,224 @@ export class LobbyScene extends Phaser.Scene {
   // =========================================================================
 
   /**
-   * Starfield behind the UI. Same deterministic scatter approach as the arena
-   * so both scenes feel like the same game.
+   * Header: brand mark on the left, profile in the middle-left, the honest
+   * connection pill and a settings button on the right.
    * @returns {void}
    */
-  _createBackdrop() {
-    this.add
-      .rectangle(
-        GAME_CONFIG.width / 2,
-        GAME_CONFIG.height / 2,
-        GAME_CONFIG.width,
-        GAME_CONFIG.height,
-        THEME.bg,
-      )
-      .setScrollFactor(0)
-      .setDepth(-20);
+  _createHeader() {
+    const L = this.layout;
+    const m = L.margin;
 
-    const rand = new Phaser.Math.RandomDataGenerator(['astral-zero-lobby']);
-    for (let i = 0; i < 120; i += 1) {
-      const size = rand.between(1, 3);
-      this.add
-        .rectangle(
-          rand.between(0, GAME_CONFIG.width),
-          rand.between(0, GAME_CONFIG.height),
-          size,
-          size,
-          0xffffff,
-          rand.realInRange(0.08, 0.35),
-        )
-        .setScrollFactor(0)
-        .setDepth(-19);
+    // Header plate: a darker band so the top chrome separates from the panels
+    // without needing a hard border.
+    this.headerBg = this.add.graphics().setScrollFactor(0).setDepth(10);
+    const g = this.headerBg;
+    g.fillStyle(THEME.bgDeep, 0.92);
+    g.fillRect(0, 0, DESIGN.width, L.headerHeight);
+    g.lineStyle(2, THEME.accentDeep, 0.35);
+    g.beginPath();
+    g.moveTo(0, L.headerHeight);
+    g.lineTo(DESIGN.width, L.headerHeight);
+    g.strokePath();
+
+    this.logo = new Logo(this, {
+      x: m + 26,
+      y: L.headerHeight / 2,
+      size: L.tier === 'compact' ? 40 : 48,
+      depth: 12,
+      wordmarkSize: L.tier === 'compact' ? 0.7 : 1,
+    });
+
+    // Profile sits to the right of the wordmark.
+    const profileX = m + (L.tier === 'compact' ? 96 : 178);
+    this.profile = new ProfileCard(this, {
+      x: profileX,
+      y: (L.headerHeight - 52) / 2,
+      width: L.tier === 'compact' ? 118 : 168,
+      net: this.net,
+      depth: 12,
+      onRename: () => this._askName(true),
+    });
+
+    // The status pill is the single source of truth for "am I actually online".
+    this.statusPill = new StatusPill(this, {
+      x: DESIGN.width - m - 122,
+      y: L.headerHeight / 2,
+      net: this.net,
+      depth: 12,
+      showHint: L.tier === 'wide',
+    });
+
+    // A real settings button in the header, so the menu is reachable without
+    // knowing the nav rail's keyboard order.
+    this.settingsButton = new Button(this, {
+      x: DESIGN.width - m - 26,
+      y: L.headerHeight / 2,
+      width: 40,
+      height: 40,
+      label: '\u2699',
+      skin: 'ghost',
+      fontSize: '18px',
+      minHeight: L.minTouch,
+      depth: 12,
+      ariaLabel: 'Open settings',
+      onClick: () => this.settings?.show(),
+    });
+  }
+
+  /**
+   * Body: nav rail + the three content panels, arranged by layout tier.
+   * @returns {void}
+   */
+  _createBody() {
+    const L = this.layout;
+    const m = L.margin;
+    const g = L.gutter;
+    const top = L.headerHeight + g;
+    const bottom = DESIGN.height - m;
+    const railW = L.showNavRail ? L.navRailWidth : 0;
+    const railGap = L.showNavRail ? g : 0;
+    const contentX = m + railW + railGap;
+    const contentW = DESIGN.width - contentX - m;
+    const contentH = bottom - top;
+
+    // --- Nav rail ----------------------------------------------------------
+    this.nav = new NavRail(this, {
+      x: m,
+      y: top,
+      extent: contentH,
+      itemSize: railW,
+      orientation: L.tier === 'compact' ? 'horizontal' : 'vertical',
+      minTouch: L.minTouch,
+      depth: 12,
+      active: 'play',
+      handlers: {
+        home: () => this._focus('home'),
+        play: () => this._focus('play'),
+        friends: () => this._focus('friends'),
+        settings: () => this.settings?.show(),
+      },
+    });
+
+    // --- Columns -----------------------------------------------------------
+    if (L.columns === 3) {
+      // [party+friends] | [mode]
+      const leftW = Math.round(contentW * 0.5);
+      const rightW = contentW - leftW - g;
+      const partyH = Math.round(contentH * 0.58);
+
+      this.partyPanel = new PartyPanel(this, {
+        x: contentX,
+        y: top,
+        width: leftW,
+        height: partyH,
+        net: this.net,
+      });
+
+      this.friendsPanel = new FriendsPanel(this, {
+        x: contentX,
+        y: top + partyH + g,
+        width: leftW,
+        height: contentH - partyH - g,
+        net: this.net,
+      });
+
+      this.modeSelector = new ModeSelector(this, {
+        x: contentX + leftW + g,
+        y: top,
+        width: rightW,
+        height: contentH,
+        net: this.net,
+        minTouch: L.minTouch,
+        onSpectate: () => this._joinAsSpectator(),
+      });
+    } else {
+      // 1 or 2 columns: mode selector on top, party + friends below.
+      const modeH = Math.round(contentH * 0.52);
+      this.modeSelector = new ModeSelector(this, {
+        x: contentX,
+        y: top,
+        width: contentW,
+        height: modeH,
+        net: this.net,
+        minTouch: L.minTouch,
+        onSpectate: () => this._joinAsSpectator(),
+      });
+
+      const lowerTop = top + modeH + g;
+      const lowerH = bottom - lowerTop;
+      if (L.columns === 2) {
+        const half = Math.round(contentW / 2);
+        this.partyPanel = new PartyPanel(this, {
+          x: contentX,
+          y: lowerTop,
+          width: half - Math.round(g / 2),
+          height: lowerH,
+          net: this.net,
+        });
+        this.friendsPanel = new FriendsPanel(this, {
+          x: contentX + half + Math.round(g / 2),
+          y: lowerTop,
+          width: half - Math.round(g / 2),
+          height: lowerH,
+          net: this.net,
+        });
+      } else {
+        // Compact: stack party over friends, each half the remaining height.
+        const half = Math.round(lowerH / 2);
+        this.partyPanel = new PartyPanel(this, {
+          x: contentX,
+          y: lowerTop,
+          width: contentW,
+          height: half - Math.round(g / 2),
+          net: this.net,
+        });
+        this.friendsPanel = new FriendsPanel(this, {
+          x: contentX,
+          y: lowerTop + half + Math.round(g / 2),
+          width: contentW,
+          height: half - Math.round(g / 2),
+          net: this.net,
+        });
+      }
     }
   }
 
   /**
-   * Title bar + connection status pill (repainted by `_paintStatus`).
+   * Stagger the panels in. Under reduced motion this is a no-op that simply
+   * leaves everything visible (Motion.enter lands on the final state).
    * @returns {void}
    */
-  _createHeader() {
-    this.add
-      .text(LOBBY.margin, 22, 'ASTRAL ZERO', { ...FONTS.title, fontSize: '26px' })
-      .setScrollFactor(0)
-      .setDepth(20);
-
-    this.add
-      .text(LOBBY.margin, 52, 'LOBBY  ·  phase 2', { ...FONTS.tiny })
-      .setScrollFactor(0)
-      .setDepth(20);
-
-    this.statusBg = this.add.graphics().setScrollFactor(0).setDepth(20);
-    this.statusText = this.add
-      .text(GAME_CONFIG.width - LOBBY.margin - 12, 34, 'CONNECTING', { ...FONTS.small, fontSize: '13px' })
-      .setOrigin(1, 0.5)
-      .setScrollFactor(0)
-      .setDepth(21);
-
-    this._paintStatus();
+  _animateEntrance() {
+    const cards = [this.partyPanel, this.friendsPanel, this.modeSelector];
+    cards.forEach((panel, i) => {
+      if (!panel) return;
+      const target = panel.panel ?? panel;
+      target?.enter?.(i * MOTION.stagger);
+    });
   }
 
+  // =========================================================================
+  // Nav behaviour
+  // =========================================================================
+
   /**
-   * Repaint the status pill from `net.state`. Three states matter to a player:
-   * offline (can't do anything), connecting, and online-but-old-backend (the
-   * buttons would silently fail because the Phase 2 events do not exist).
+   * Route selections focus a panel. There is no page router, because there
+   * are no pages — the nav expresses the lobby's own structure, and picking
+   * PLAY/FRIENDS draws the eye (and keyboard focus) to that panel.
+   *
+   * @param {'home'|'play'|'friends'} id
    * @returns {void}
    */
-  _paintStatus() {
-    const state = this.net.state;
-
-    const label =
-      state.connection === 'online'
-        ? state.contractOk === false
-          ? 'ONLINE · OLD BACKEND'
-          : 'ONLINE'
-        : state.connection === 'connecting'
-          ? 'CONNECTING…'
-          : 'OFFLINE';
-
-    const colour =
-      state.connection !== 'online'
-        ? THEME.danger
-        : state.contractOk === false
-          ? THEME.warning
-          : THEME.success;
-
-    const width = Math.max(150, this.statusText.width + 34);
-    const x = GAME_CONFIG.width - LOBBY.margin - 12 - width;
-
-    this.statusBg.clear();
-    this.statusBg.fillStyle(0x0b1424, 0.9);
-    this.statusBg.fillRoundedRect(x, 22, width, 24, 12);
-    this.statusBg.lineStyle(1, Phaser.Display.Color.HexStringToColor(colour).color, 0.9);
-    this.statusBg.strokeRoundedRect(x, 22, width, 24, 12);
-
-    this.statusText.setText(label).setColor(colour).setPosition(x + width - 12, 34);
+  _focus(id) {
+    if (id === 'play') this.modeSelector?.primary?.setFocused(true);
+    // FRIENDS has no focusable control to jump to (the add-friend field is
+    // the only input, and it is already visible), so the nav entry simply
+    // marks itself active without stealing focus.
+    else {
+      // HOME returns focus to the brand/primary entry point.
+      this.nav?.setActive('play');
+    }
   }
 
   // =========================================================================
@@ -227,7 +368,7 @@ export class LobbyScene extends Phaser.Scene {
     this._offs.push(this.net.on('friends', refresh));
     this._offs.push(this.net.on('mode', refresh));
     this._offs.push(this.net.on('busy', refresh));
-    this._offs.push(this.net.on('queue', () => this.modeSelector.refreshQueue()));
+    this._offs.push(this.net.on('queue', () => this.modeSelector?.refreshQueue()));
 
     // Notices become toasts. This is the ONLY place error wording is shown,
     // so the phrasing stays in src/net/events.js → describeError.
@@ -250,7 +391,6 @@ export class LobbyScene extends Phaser.Scene {
     this._offs.push(
       this.net.on('match-ready', () => {
         this.toasts.show('info', 'Match found — loading arena…', { durationMs: 1500 });
-        // A short beat so the toast is actually readable before the cut.
         this.time.delayedCall(220, () => this.scene.start(SCENES.ARENA));
       }),
     );
@@ -261,7 +401,8 @@ export class LobbyScene extends Phaser.Scene {
    * @returns {void}
    */
   _refreshAll() {
-    this._paintStatus();
+    this.statusPill?.refresh();
+    this.profile?.refresh();
     this.partyPanel?.refresh();
     this.friendsPanel?.refresh();
     this.modeSelector?.refresh();
@@ -270,15 +411,6 @@ export class LobbyScene extends Phaser.Scene {
 
   /**
    * Join the offered room as a SPECTATOR (Phase 5).
-   *
-   * The server already told us the booth may have space (`canSpectate`), so this
-   * just retries `room_join` for that room. A spectator has no body: the server
-   * drops their input packets and nothing can damage them, which makes watching
-   * a full match a safe option.
-   *
-   * The offer is cleared either way — a stale hint pointing at a finished room
-   * would let the player click into a room that no longer exists.
-   *
    * @returns {Promise<void>}
    */
   async _joinAsSpectator() {
@@ -286,7 +418,7 @@ export class LobbyScene extends Phaser.Scene {
     this.net.state.spectateOffer = null;
     if (!offer) return;
 
-    this.toasts?.show('info', 'Joining as a spectator\u2026');
+    this.toasts?.show('info', 'Joining as a spectator…');
     const res = await this.net.lateJoin({ roomId: offer.roomId ?? undefined });
     if (res?.ok === false) {
       this.toasts?.show(
@@ -296,24 +428,58 @@ export class LobbyScene extends Phaser.Scene {
           : 'Could not join that match as a spectator.',
       );
     }
+    this.modeSelector?.refresh();
   }
 
   /**
-   * Show the name gate the first time (no saved name, no `?skipName`).
+   * Show the name gate. Used both for the first-boot prompt and for the
+   * "edit name" affordance on the profile card.
+   * @param {boolean} [force] - Show even if a name is already saved.
    * @returns {void}
    */
-  _maybeAskName() {
+  _askName(force = false) {
     const skipFlag =
       typeof window !== 'undefined' && window.location.search.includes('skipName');
-    if (skipFlag || loadName()) return;
+    if (!force && (skipFlag || loadName())) return;
 
+    this.nameGate?.destroy();
     this.nameGate = new NameGate(this, {
       net: this.net,
       onDone: () => {
         this.net.requestFriends();
+        this.nameGate = null;
         this._refreshAll();
       },
     });
+  }
+
+  /**
+   * First-boot name gate (only when nothing is saved and `?skipName` is absent).
+   * @returns {void}
+   */
+  _maybeAskName() {
+    this._askName(false);
+  }
+
+  // =========================================================================
+  // Per-frame
+  // =========================================================================
+
+  /**
+   * Ambient update. The pointer drives backdrop parallax, which is what makes
+   * the orbital background feel like it has depth rather than being a flat
+   * wallpaper.
+   * @param {number} time
+   * @param {number} delta
+   * @returns {void}
+   */
+  update(time, delta) {
+    const pointer = this.input?.activePointer;
+    this.backdrop?.update(
+      delta,
+      pointer ? pointer.x : DESIGN.width / 2,
+      pointer ? pointer.y : DESIGN.height / 2,
+    );
   }
 
   // =========================================================================
@@ -321,15 +487,28 @@ export class LobbyScene extends Phaser.Scene {
   // =========================================================================
 
   /**
-   * Detach every listener. Critical: without this each lobby visit adds another
-   * handler set and the UI refreshes N times per event on the second visit.
+   * Detach every listener and destroy every widget. Without this each lobby
+   * visit adds another handler set and the UI refreshes N times per event on
+   * the second visit.
    * @returns {void}
    */
   _teardown() {
     this._offs.forEach((off) => off());
     this._offs = [];
     this.nameGate?.destroy();
+    this.nameGate = null;
     this.toasts?.clear();
+    this.settings?.destroy();
+    this.backdrop?.destroy();
+    this.logo?.destroy();
+    this.statusPill?.destroy();
+    this.profile?.destroy();
+    this.nav?.destroy();
+    this.partyPanel?.destroy();
+    this.friendsPanel?.destroy();
+    this.modeSelector?.destroy();
+    this.invitePrompt?.destroy?.();
+    this.settingsButton?.destroy();
   }
 }
 

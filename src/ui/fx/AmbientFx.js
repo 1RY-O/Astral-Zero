@@ -19,7 +19,14 @@
  *  - `update()` is skipped entirely when the map has no ambience, and the
  *    dust count scales with the map's recipe rather than the viewport, so a
  *    4K screen does not quietly get 4x the objects.
+ *
+ * REDUCED MOTION
+ *  `update()` returns immediately when the player has asked for reduced
+ *  motion, so the atmosphere is still drawn (the map should not look broken)
+ *  but nothing drifts. The decorative pulse tweens are never created either.
  */
+
+import * as Motion from '../../core/Motion.js';
 
 export class AmbientFx {
   /**
@@ -89,7 +96,16 @@ export class AmbientFx {
       const vent = this.scene.add
         .rectangle(x, y, 54, 8, 0x7fe7ff, 0.5)
         .setDepth(this.depth + 1);
+      this._vents.push(vent);
+
       // Independent pulse phase per vent so they do not flash in unison.
+      // A constant alpha is used under reduced motion: the vents still read as
+      // glowing, they simply stop pulsing.
+      if (Motion.isReduced()) {
+        vent.setAlpha(0.6);
+        continue;
+      }
+
       const tween = this.scene.tweens.add({
         targets: vent,
         alpha: { from: 0.28, to: 0.85 },
@@ -100,7 +116,6 @@ export class AmbientFx {
         ease: 'Sine.easeInOut',
       });
       this._tweens.push(tween);
-      this._vents.push(vent);
     }
 
     // --- Floating debris: slow vertical bob + horizontal tumble ------------
@@ -134,7 +149,7 @@ export class AmbientFx {
    * @returns {void}
    */
   update(delta) {
-    if (!this.active) return;
+    if (!this.active || Motion.isReduced()) return;
     // Cap dt so an alt-tab (or a debug pause) cannot teleport everything
     // across the screen on the first frame back.
     const dt = Math.min(delta, 50) / 16.67;

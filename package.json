@@ -30,7 +30,7 @@
     "start": "node server.js",
     "test": "node tests/lobby-ui.test.mjs",
     "test:camera": "node --import ./tests/register-phaser-stub.mjs tests/camera.test.mjs",
-    "test:all": "npm run test && npm run test:net && npm run test:netdebug && npm run test:combat && npm run test:feedback && npm run test:transport && npm run test:audio && npm run test:fx && npm run test:progression && npm run test:world && npm run test:wiring && npm run test:camera",
+    "test:all": "npm run test && npm run test:uiux && npm run test:lobby && npm run test:hud && npm run test:net && npm run test:netdebug && npm run test:combat && npm run test:feedback && npm run test:transport && npm run test:audio && npm run test:fx && npm run test:progression && npm run test:world && npm run test:wiring && npm run test:camera",
     "test:net": "node tests/net-integration.test.mjs",
     "test:netdebug": "node tests/netdebug.test.mjs",
     "test:combat": "node tests/combat-model.test.mjs",
@@ -40,7 +40,10 @@
     "test:fx": "node tests/fxpool.test.mjs",
     "test:progression": "node tests/progression.test.mjs",
     "test:wiring": "node tests/phase5-wiring.test.mjs",
-    "test:world": "node tests/world.test.mjs"
+    "test:world": "node tests/world.test.mjs",
+    "test:uiux": "node tests/uiux.test.mjs",
+    "test:lobby": "node --import ./tests/register-phaser-stub.mjs tests/lobby-scene.test.mjs",
+    "test:hud": "node --import ./tests/register-phaser-stub.mjs tests/hud.test.mjs"
   },
   "dependencies": {
     "cors": "^2.8.6",

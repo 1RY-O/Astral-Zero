@@ -39,6 +39,7 @@ import { InputManager } from '../input/InputManager.js';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
 import { ArenaHud } from '../ui/hud/ArenaHud.js';
 import { CombatFx } from '../ui/fx/CombatFx.js';
+import { Feedback } from '../ui/fx/Feedback.js';
 import { KillFeed } from '../ui/hud/KillFeed.js';
 import { Scoreboard } from '../ui/hud/Scoreboard.js';
 import { Medals } from '../ui/hud/Medals.js';
@@ -151,6 +152,9 @@ export class ArenaScene extends Phaser.Scene {
     });
 
     this.fx = new CombatFx(this);
+
+    // Reusable banner/pulse feedback for REAL events only (see Feedback.CUES).
+    this.feedback = new Feedback(this, { x: 640, y: 176 });
 
     // --- Arsenal-style over-the-shoulder camera ---------------------------
     // Bounds match the arena rect exactly, which is what stops the camera
@@ -1211,6 +1215,7 @@ export class ArenaScene extends Phaser.Scene {
             this.fx?.damageFlash();
             this._shake(null, null, { ms: COMBAT.hurtShakeMs, amount: COMBAT.hurtShakeAmount });
             this.hud?.pulseDamage();
+            this.feedback?.show('damageTaken', { sub: `-${Math.round(damage)} hp` });
           }
           return;
         }
@@ -1237,6 +1242,9 @@ export class ArenaScene extends Phaser.Scene {
           // never reads like a body shot in a spray of fire.
           this.fx?.killConfirm();
           this.audio?.play('killConfirm');
+          this.feedback?.show('debrisCleared', {
+            sub: victimName ? `cleared ${victimName}` : undefined,
+          });
         }
 
         // Kill feed row. Uncredited deaths (no killer) are skipped rather than
@@ -1310,7 +1318,10 @@ export class ArenaScene extends Phaser.Scene {
         // and a chime for every opponent one would be noise, not feedback.
         // Medals are awarded authoritatively in `match_end`; this counter only
         // existed to feed the old local XP maths, which is gone.
-        if (isSelf) this.audio?.play('medal');
+        if (isSelf) {
+          this.audio?.play('medal');
+          this.feedback?.show('combo', { text: text ? 'COMBO' : 'STREAK' });
+        }
       }),
     );
 
@@ -1483,6 +1494,8 @@ export class ArenaScene extends Phaser.Scene {
     this.scoreboard = null;
     this.results?.destroy();
     this.results = null;
+    this.feedback?.destroy();
+    this.feedback = null;
     this.hud?.destroy();
     this.hud = null;
   }

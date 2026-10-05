@@ -4,15 +4,29 @@
  * The in-match UI, drawn on a FIXED camera (scrollFactor 0) so it stays put
  * while the third-person camera pans:
  *
- *   top-left     mode + map + roster counts (+ team tally in TDM)
+ *   top-left     PLAYER block: mode/map + the live OBJECTIVE line
  *   top-centre   match timer, plus TDM team scores
- *   bottom-left  local health bar + control reminder (fades after a few secs)
+ *   bottom-left  HEALTH block: name + health bar + the weapon's cadence
+ *   bottom-right weapon + cadence sweep (the ammo equivalent)
  *   centre       countdown ("3... 2... 1... GO") and the death overlay
- *   top-right    connection state + "Leave Match"
+ *   top-right    connection state + "Leave Match" + carried scrap
+ *
+ * RESPONSIVE
+ * Every position derives from `this.L`, a layout rect computed from the design
+ * surface and the current layout tier — there are no bare `640` / `1280 - 70`
+ * literals left. On a `compact` tier the HUD compacts (smaller type, tighter
+ * gutters, the control hint is dropped) so the gameplay area stays dominant and
+ * the HUD never covers the player or the crosshair.
  *
  * The countdown is driven by the SERVER's `match_state{ phase:'countdown' }`
  * push plus the `countdownMs` from the room manifest, so every client in the
  * room sees the same numbers.
+ *
+ * SCENE PLUGINS GO THROUGH `this.scene`
+ * This widget is a plain class, not a Phaser.Scene, so `this.time` is
+ * `undefined` — every clock/timer read must be `this.scene.time`. It happened
+ * to be masked because the HUD was previously only exercised in a live match;
+ * the headless construction test (`npm run test:hud`) now covers it.
  *
  * HEALTH IS SERVER-OWNED
  * `setHealth` is only ever called from a `player_health_update` or a snapshot.
@@ -23,8 +37,10 @@
 import Phaser from 'phaser';
 import { THEME, FONTS } from '../../config/uiTheme.js';
 import { MATCH_MODES, TEAMS } from '../../config/lobbyConfig.js';
-import { HEALTH, MATCH_UI, SCRAP } from '../../config/netConfig.js';
+import { HEALTH, MATCH_UI, SCRAP, COMBAT } from '../../config/netConfig.js';
 import { Button } from '../widgets/Button.js';
+import { DESIGN, currentLayout } from '../../config/viewportConfig.js';
+import * as Motion from '../../core/Motion.js';
 
 export class ArenaHud {
   /**
@@ -44,25 +60,58 @@ export class ArenaHud {
 
     const mode = MATCH_MODES[this.room.mode] ?? MATCH_MODES.bot_practice;
 
+    // --- Layout rect -------------------------------------------------------
+    // The design surface is fixed at 1280x720, but the TYPE and GUTTERS adapt
+    // to the tier so the HUD is legible when the canvas is scaled down to a
+    // phone. Positions stay in design pixels, which keeps every element locked
+    // to the screen edge on every tier.
+    const tier = currentLayout(scene.scale);
+    this.L = {
+      w: DESIGN.width,
+      h: DESIGN.height,
+      cx: DESIGN.width / 2,
+      compact: tier.tier === 'compact',
+      // Edge gutter shrinks on small screens so the HUD hugs the frame.
+      pad: tier.tier === 'compact' ? 10 : 18,
+      // Font scale for the numeric readouts.
+      scale: tier.tier === 'compact' ? 0.78 : 1,
+    };
+
     // --- Top-left: match identity -----------------------------------------
     this.modeText = scene.add
-      .text(20, 14, `${mode.name.toUpperCase()}  ·  ${this.room.mapId}`, {
+      .text(this.L.pad, this.L.pad, `${mode.name.toUpperCase()}  ·  ${this.room.mapId}`, {
         ...FONTS.h3,
-        fontSize: '17px',
+        fontSize: `${Math.round(17 * this.L.scale)}px`,
       })
       .setDepth(this.depth)
       .setScrollFactor(0)
       .setAlpha(0.92);
 
     this.rosterText = scene.add
-      .text(20, 38, '', FONTS.small)
+      .text(this.L.pad, this.L.pad + 22, '', {
+        ...FONTS.small,
+        fontSize: `${Math.round(12 * this.L.scale)}px`,
+      })
+      .setDepth(this.depth)
+      .setScrollFactor(0);
+
+    // --- Top-left: the OBJECTIVE line --------------------------------------
+    // Only rendered for modes that HAVE an objective the server tracks. FFA and
+    // TDM are pure deathmatches, so showing "DEBRIS REMAINING: —" would be
+    // inventing a stat. scrap_collector has a real, server-reported goal.
+    this.objectiveText = scene.add
+      .text(this.L.pad, this.L.pad + 38, '', {
+        ...FONTS.tiny,
+        fontSize: `${Math.round(12 * this.L.scale)}px`,
+        color: THEME.amber,
+      })
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     // --- Top-right: leave --------------------------------------------------
     this.leaveButton = new Button(scene, {
-      x: 1280 - 70,
-      y: 28,
+      x: this.L.w - this.L.pad - 58,
+      y: this.L.pad + 16,
       width: 116,
       height: 32,
       label: 'Leave',
@@ -72,22 +121,36 @@ export class ArenaHud {
       onClick: () => this.onLeave(),
     });
 
+    // The connection readout is deliberately small and unobtrusive: a player
+    // mid-fight does not need a large status banner, but a drop must still be
+    // noticeable in the corner.
     this.connText = scene.add
-      .text(1280 - 70, 50, '', { ...FONTS.tiny, color: THEME.textFaint })
+      .text(this.L.w - this.L.pad - 58, this.L.pad + 36, '', {
+        ...FONTS.tiny,
+        fontSize: '11px',
+        color: THEME.textFaint,
+      })
       .setOrigin(0.5, 0)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     // --- Centre: countdown / banner ---------------------------------------
     this.banner = scene.add
-      .text(640, 250, '', { ...FONTS.title, fontSize: '76px', fontStyle: '700' })
+      .text(this.L.cx, DESIGN.height * 0.35, '', {
+        ...FONTS.title,
+        fontSize: `${Math.round(76 * this.L.scale)}px`,
+        fontStyle: '900',
+      })
       .setOrigin(0.5)
       .setDepth(this.depth + 2)
       .setScrollFactor(0)
       .setAlpha(0);
 
     this.subBanner = scene.add
-      .text(640, 310, '', { ...FONTS.body, fontSize: '18px' })
+      .text(this.L.cx, DESIGN.height * 0.43, '', {
+        ...FONTS.body,
+        fontSize: `${Math.round(18 * this.L.scale)}px`,
+      })
       .setOrigin(0.5)
       .setDepth(this.depth + 2)
       .setScrollFactor(0)
@@ -95,20 +158,28 @@ export class ArenaHud {
 
     // --- Top-centre: match timer + team scores ------------------------------
     this.timerText = scene.add
-      .text(640, 16, '--:--', { ...FONTS.h3, fontSize: '24px' })
+      .text(this.L.cx, 12, '--:--', {
+        ...FONTS.metricSm,
+        fontSize: `${Math.round(26 * this.L.scale)}px`,
+      })
       .setOrigin(0.5, 0)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     this.teamScoreText = scene.add
-      .text(640, 46, '', { ...FONTS.small, fontSize: '14px' })
+      .text(this.L.cx, 12 + 30 * this.L.scale, '', { ...FONTS.small, fontSize: `${Math.round(14 * this.L.scale)}px` })
       .setOrigin(0.5, 0)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     // TDM sudden death. Hidden until the server sends `overtime: true`.
     this.overtimeText = scene.add
-      .text(640, 68, '', { ...FONTS.tiny, fontSize: '13px', color: THEME.danger, fontStyle: '700' })
+      .text(this.L.cx, 12 + 48 * this.L.scale, '', {
+        ...FONTS.tiny,
+        fontSize: `${Math.round(13 * this.L.scale)}px`,
+        color: THEME.danger,
+        fontStyle: '800',
+      })
       .setOrigin(0.5, 0)
       .setDepth(this.depth)
       .setScrollFactor(0)
@@ -118,7 +189,12 @@ export class ArenaHud {
     // is recoverable and worth telling the player rather than showing a frozen
     // arena with no explanation.
     this.reconnectText = scene.add
-      .text(640, 404, '', { ...FONTS.body, fontSize: '20px', color: THEME.warning })
+      .text(this.L.cx, DESIGN.height * 0.56, '', {
+        ...FONTS.body,
+        fontSize: `${Math.round(20 * this.L.scale)}px`,
+        color: THEME.warning,
+        fontStyle: '800',
+      })
       .setOrigin(0.5)
       .setDepth(this.depth + 3)
       .setScrollFactor(0)
@@ -127,50 +203,72 @@ export class ArenaHud {
     // --- Bottom-left: health + controls hint -------------------------------
     // The bar sits ABOVE the hint text so the two never overlap on short
     // viewports, and the hint fades out entirely once the player is playing.
-    const barY = 646;
+    // The health block is the player's most-consulted readout, so it gets a
+    // name above the bar rather than a bare "HP" label.
+    const barY = DESIGN.height - 74;
     this.hpLabel = scene.add
-      .text(20, barY - 2, 'HP', { ...FONTS.tiny })
+      .text(this.L.pad, barY - 22, 'HEALTH', { ...FONTS.tiny, fontSize: '11px' })
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     this.hpTrack = scene.add
-      .rectangle(44, barY + 4, 200, 14, 0x0a1020, 0.85)
+      .rectangle(this.L.pad + 8, barY + 4, 200, 14, 0x0a1020, 0.85)
       .setOrigin(0, 0.5)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     this.hpFill = scene.add
-      .rectangle(44, barY + 4, 200, 14, 0x4ade80)
+      .rectangle(this.L.pad + 8, barY + 4, 200, 14, 0x4ade80)
       .setOrigin(0, 0.5)
       .setDepth(this.depth + 1)
       .setScrollFactor(0);
 
     this.hpValue = scene.add
-      .text(254, barY - 2, '', { ...FONTS.tiny })
+      .text(this.L.pad + 218, barY - 2, '', { ...FONTS.tiny, fontSize: '11px' })
       .setDepth(this.depth)
       .setScrollFactor(0);
 
+    // On a phone there is no keyboard, so the hint would be both wrong and in
+    // the way. It is omitted rather than shrunk.
     this.hintText = scene.add
-      .text(20, 694, 'A / D move    SPACE jump    mouse aim    LMB fire    TAB scoreboard', FONTS.small)
+      .text(this.L.pad, DESIGN.height - 24, 'A / D move    SPACE jump    mouse aim    LMB fire    TAB scoreboard', {
+        ...FONTS.small,
+        fontSize: `${Math.round(13 * this.L.scale)}px`,
+      })
       .setDepth(this.depth)
       .setScrollFactor(0)
-      .setAlpha(0.7);
+      .setAlpha(0.7)
+      .setVisible(!this.L.compact);
 
     // Fade the hint out once the player has had time to read it.
-    scene.tweens.add({ targets: this.hintText, alpha: 0.2, delay: 7000, duration: 1200 });
+    if (!this.L.compact) {
+      Motion.tween(scene, {
+        targets: this.hintText,
+        alpha: 0.2,
+        delay: 7000,
+        duration: 1200,
+      });
+    }
 
     // --- Top-right: carried scrap (Phase 5, scrap_collector only) ----------
     // Hidden in every other mode: an always-visible "0 / 5" in FFA would be
     // meaningless clutter. `setScrap` shows/hides it.
     this.scrapText = scene.add
-      .text(1280 - 70, 70, '', { ...FONTS.h3, fontSize: '16px', color: '#ffd166' })
+      .text(this.L.w - this.L.pad - 58, this.L.pad + 54, '', {
+        ...FONTS.metricSm,
+        fontSize: '16px',
+        color: THEME.amber,
+      })
       .setOrigin(0.5, 0)
       .setDepth(this.depth)
       .setScrollFactor(0)
       .setVisible(false);
 
     this.bankedText = scene.add
-      .text(1280 - 70, 90, '', { ...FONTS.tiny, color: THEME.warning })
+      .text(this.L.w - this.L.pad - 58, this.L.pad + 76, '', {
+        ...FONTS.tiny,
+        color: THEME.warning,
+      })
       .setOrigin(0.5, 0)
       .setDepth(this.depth)
       .setScrollFactor(0)
@@ -184,25 +282,31 @@ export class ArenaHud {
     // NAME and its cadence, both of which are real, plus a cooldown sweep that
     // visualises the cadence the server actually enforces.
     this.weaponText = scene.add
-      .text(1260, 636, '', { ...FONTS.h3, fontSize: '18px' })
+      .text(this.L.w - this.L.pad, DESIGN.height - 84, '', {
+        ...FONTS.h3,
+        fontSize: `${Math.round(18 * this.L.scale)}px`,
+      })
       .setOrigin(1, 0)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     this.ammoText = scene.add
-      .text(1260, 660, '', { ...FONTS.small, fontSize: '13px' })
+      .text(this.L.w - this.L.pad, DESIGN.height - 60, '', {
+        ...FONTS.small,
+        fontSize: `${Math.round(13 * this.L.scale)}px`,
+      })
       .setOrigin(1, 0)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     this.reloadTrack = scene.add
-      .rectangle(1260, 684, 180, 5, 0x0a1020, 0.85)
+      .rectangle(this.L.w - this.L.pad, DESIGN.height - 40, 180, 5, 0x0a1020, 0.85)
       .setOrigin(1, 0.5)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     this.reloadFill = scene.add
-      .rectangle(1080, 684, 0, 5, COMBAT.tracerColor)
+      .rectangle(this.L.w - this.L.pad - 180, DESIGN.height - 40, 0, 5, COMBAT.tracerColor)
       .setOrigin(0, 0.5)
       .setDepth(this.depth + 1)
       .setScrollFactor(0);
@@ -210,14 +314,18 @@ export class ArenaHud {
     // --- Death / respawn overlay ------------------------------------------
     // Hidden by default; ArenaScene shows it on a server death confirmation.
     this.deathOverlay = scene.add
-      .text(640, 330, '', { ...FONTS.title, fontSize: '34px', color: THEME.danger })
+      .text(this.L.cx, DESIGN.height * 0.46, '', {
+        ...FONTS.title,
+        fontSize: `${Math.round(34 * this.L.scale)}px`,
+        color: THEME.danger,
+      })
       .setOrigin(0.5)
       .setDepth(this.depth + 4)
       .setScrollFactor(0)
       .setAlpha(0);
 
     // --- Countdown timing --------------------------------------------------
-    this.countdownEnd = this.time.now + this.room.countdownMs;
+    this.countdownEnd = this.scene.time.now + this.room.countdownMs;
     this.hp = HEALTH.defaultMax;
     this.maxHp = HEALTH.defaultMax;
     this.timeRemaining = null;
@@ -271,7 +379,7 @@ export class ArenaHud {
    * @returns {void}
    */
   markShot(cooldownMs) {
-    this._shotAt = this.time.now;
+    this._shotAt = this.scene.time.now;
     this._cooldownMs = cooldownMs;
     this.reloadFill.setSize(0, 5);
   }
@@ -316,6 +424,10 @@ export class ArenaHud {
     }
     if (banked !== null && banked !== undefined) {
       this.bankedText.setText(`BANKED ${banked}`);
+      // The objective line reads from the same value, so a deposit visibly
+      // moves the goal rather than only the small corner readout.
+      this.banked = banked;
+      this._paintObjective();
     }
   }
 
@@ -387,14 +499,14 @@ export class ArenaHud {
    */
   showDeathOverlay(respawnMs) {
     this.deathOverlay.setAlpha(1).setText('ELIMINATED');
-    this._respawnAt = this.time.now + respawnMs;
+    this._respawnAt = this.scene.time.now + respawnMs;
 
     this._respawnHandle?.remove(false);
-    this._respawnHandle = this.time.addEvent({
+    this._respawnHandle = this.scene.time.addEvent({
       delay: 100,
       loop: true,
       callback: () => {
-        const left = Math.max(0, Math.ceil((this._respawnAt - this.time.now) / 1000));
+        const left = Math.max(0, Math.ceil((this._respawnAt - this.scene.time.now) / 1000));
         this.deathOverlay.setText(left > 0 ? `Respawning in ${left}` : 'Respawning...');
       },
     });
@@ -414,15 +526,40 @@ export class ArenaHud {
    */
   updateRoster() {
     const { players, bots, teams } = this.room;
-    if (MATCH_MODES[this.room.mode]?.teams) {
+    const mode = MATCH_MODES[this.room.mode];
+
+    if (mode?.teams) {
       this.rosterText
         .setText(`TEAM  ${teams.red.length}  —  ${teams.blue.length}   ·   ${bots.length} bot(s)`)
         .setColor(THEME.textDim);
+    } else {
+      this.rosterText
+        .setText(`${players.length} janitor(s)  ·  ${bots.length} bot(s)`)
+        .setColor(THEME.textDim);
+    }
+
+    this._paintObjective();
+  }
+
+  /**
+   * Render the objective line.
+   *
+   * THIS SHOWS ONLY REAL, SERVER-TRACKED STATE. `scrap_collector` has a bank
+   * limit the server enforces, so the remaining scrap is a genuine number. For
+   * FFA / TDM / bot_practice there is no such number, so the line is hidden
+   * rather than filled with a placeholder.
+   *
+   * @returns {void}
+   */
+  _paintObjective() {
+    const mode = MATCH_MODES[this.room.mode];
+    const limit = mode?.bankLimit;
+    if (!limit) {
+      this.objectiveText.setText('');
       return;
     }
-    this.rosterText
-      .setText(`${players.length} janitor(s)  ·  ${bots.length} bot(s)`)
-      .setColor(THEME.textDim);
+    const banked = this.banked ?? 0;
+    this.objectiveText.setText(`OBJECTIVE  ·  BANK ${banked} / ${limit} SCRAP`);
   }
 
   /**
@@ -431,7 +568,7 @@ export class ArenaHud {
    * @returns {void}
    */
   showPhase(phase) {
-    this.countdownEnd = this.time.now + this.room.countdownMs;
+    this.countdownEnd = this.scene.time.now + this.room.countdownMs;
 
     if (phase === 'countdown') {
       this._showBanner('3', 'Get ready…');
@@ -478,7 +615,7 @@ export class ArenaHud {
     // Cooldown sweep: refill left-to-right over the weapon's cooldown window.
     // Cheap integer math, and the only per-frame work this HUD does.
     if (this._shotAt !== undefined && this._cooldownMs > 0) {
-      const ratio = Phaser.Math.Clamp((this.time.now - this._shotAt) / this._cooldownMs, 0, 1);
+      const ratio = Phaser.Math.Clamp((this.scene.time.now - this._shotAt) / this._cooldownMs, 0, 1);
       this.reloadFill.setSize(180 * ratio, 5);
       if (ratio >= 1) this._shotAt = undefined;
     }
@@ -493,7 +630,7 @@ export class ArenaHud {
     this.connText.setText(status.toUpperCase()).setColor(colour);
 
     // Countdown: ceil the remaining time so it ticks 3 → 2 → 1.
-    const remaining = this.countdownEnd - this.time.now;
+    const remaining = this.countdownEnd - this.scene.time.now;
     if (remaining > 0 && this.banner.text) {
       const label = String(Math.max(1, Math.ceil(remaining / 1000)));
       if (this.banner.text !== label) {
@@ -536,6 +673,7 @@ export class ArenaHud {
     this.reloadFill.destroy();
     this.overtimeText.destroy();
     this.reconnectText.destroy();
+    this.objectiveText.destroy();
     this.scrapText.destroy();
     this.bankedText.destroy();
   }

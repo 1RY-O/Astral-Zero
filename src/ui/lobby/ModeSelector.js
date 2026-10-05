@@ -1,35 +1,45 @@
 /**
- * Astral Zero — ModeSelector (lobby section).
- * ===========================================================
- * Three cards — Free-for-All, Team Deathmatch and Bot Practice — plus the
- * primary action button that acts on the selection.
+ * Astral Zero — ModeSelector (lobby GAME MODE panel + Find Match CTA).
+ * ==========================================================
+ * Two jobs in one panel, because they are one decision:
+ *   1. WHICH mode  — arcade cards built from MATCH_MODES, so a new mode is a
+ *      config entry rather than a code change.
+ *   2. GO         — the big Find Match button, whose label/colour/enabled
+ *      state come from `resolveCta(net.state)`.
  *
- * The cards are data-driven from `MATCH_MODES` in src/config/lobbyConfig.js,
- * so adding a fourth mode later is a config change, not a code change.
+ * THE CTA NEVER FAKES ITS STATE
+ * The button renders exactly one of these, derived from real signals:
+ *   READY · SEARCHING · LOADING · START MATCH · WAITING · OFFLINE
+ * It is disabled whenever acting would be pointless or would be rejected by
+ * the server (offline, waiting on a leader, a command already in flight).
+ * A "searching" button CANCELS the search — the label changes to match the
+ * action, so the button never lies about what pressing it will do.
  *
- * The primary button is CONTEXT AWARE, which is the whole point of this
- * widget: what it says and what it does depends on whether you are solo or
- * in a party, and whether you are the leader:
+ * SELECTED STATE IS NOT COLOUR-ONLY
+ * The selected card gets, in addition to its accent fill: a thicker border,
+ * a `▸` marker in the corner, and a brighter label. All three are shape/weight
+ * changes, so the selection survives greyscale and colourblind vision.
  *
- *   solo, not queued        → "Find Match"          (queue_join)
- *   solo, queued            → "Cancel Search"       (queue_leave)
- *   party member            → "Waiting for Leader"  (disabled)
- *   party leader            → "Start Match"         (party_start_match)
+ * The cards are data-driven from MATCH_MODES, including the server-supported
+ * `scrap_collector`. A mode the backend rejects is simply not in MODE_ORDER,
+ * so the UI cannot offer a mode that does not exist.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, RADII, MOTION, CTA_STATES } from '../../config/uiTheme.js';
 import { MATCH_MODES, MODE_ORDER } from '../../config/lobbyConfig.js';
 import { Panel } from '../widgets/Panel.js';
-import { Button, lighten } from '../widgets/Button.js';
+import { Button } from '../widgets/Button.js';
+import { resolveCta } from '../brand/ConnectionState.js';
+import * as Motion from '../../core/Motion.js';
 
-/**
- * `#38e1ff` → 0x38e1ff. Written out rather than pulling in Phaser's colour
- * helper so this file stays a plain module.
- * @param {string} hex
- * @returns {number}
- */
+/** `#38e1ff` → 0x38e1ff, kept local so this file needs no Phaser import. */
 function hexToInt(hex) {
   return Number.parseInt(String(hex).replace('#', ''), 16) || 0xffffff;
+}
+
+/** Pack a css colour to an int. */
+function cssInt(hex) {
+  return hexToInt(hex);
 }
 
 export class ModeSelector {
@@ -42,96 +52,150 @@ export class ModeSelector {
    * @param {number} opts.height
    * @param {import('../../net/NetworkManager.js').NetworkManager} opts.net
    * @param {number} [opts.depth]
+   * @param {number} [opts.minTouch]
+   * @param {() => void} [opts.onSpectate]
    */
   constructor(scene, opts) {
     this.scene = scene;
     this.net = opts.net;
     this.depth = opts.depth ?? 0;
+    this.onSpectate = opts.onSpectate;
+    this.minTouch = opts.minTouch ?? 40;
 
     const { x, y, width: w, height: h } = opts;
-    this.panel = new Panel(scene, { x, y, width: w, height: h, title: 'GAME MODE', depth: this.depth });
+    this.panel = new Panel(scene, {
+      x,
+      y,
+      width: w,
+      height: h,
+      title: 'GAME MODE',
+      depth: this.depth,
+    });
 
     const innerX = x + 20;
     const innerW = w - 40;
 
-    // --- Mode description (updates with the selection) ---------------------
-    this.descText = scene.add
-      .text(innerX + innerW / 2, y + 50, '', FONTS.dim)
-      .setOrigin(0.5, 0)
-      .setDepth(this.depth + 1)
-      .setScrollFactor(0)
-      .setWordWrapWidth(innerW)
-      .setAlign('center');
-
-    // --- Mode cards --------------------------------------------------------
-    const cardW = (innerW - 2 * 14) / 3;
-    const cardH = 84;
-    const cardY = y + 88;
-
-    /** @type {Record<string, Button>} */
+    // --- Mode cards (stacked rows, arcade style) ---------------------------
+    // A vertical stack reads better than a 3-across row on every tier, and it
+    // gives each mode room for its own accent bar + description line.
     this.cards = {};
-    MODE_ORDER.forEach((modeId, i) => {
-      const mode = MATCH_MODES[modeId];
-      this.cards[modeId] = new Button(scene, {
-        x: innerX + cardW / 2 + i * (cardW + 14),
-        y: cardY + cardH / 2,
-        width: cardW,
-        height: cardH,
-        label: mode.short,
-        sublabel: mode.name,
-        skin: 'neutral',
-        depth: this.depth + 2,
-        onClick: () => this._onSelect(modeId),
-      });
-    });
+    /** @type {Record<string, object>} */
+    this.cardMeta = {};
+    const cardH = 62;
+    const cardGap = 10;
+    const cardY = y + 48;
+    MODE_ORDER.forEach((modeId, i) => this._buildCard(modeId, innerX, cardY + i * (cardH + cardGap), innerW, cardH));
 
-    // --- Queue status line (between the cards and the button) -------------
-    this.statusText = scene.add
-      .text(innerX + innerW / 2, cardY + cardH + 10, '', FONTS.tiny)
+    // --- Selected-mode description ----------------------------------------
+    this.descText = scene.add
+      .text(innerX + innerW / 2, cardY + MODE_ORDER.length * (cardH + cardGap) + 4, '', {
+        ...FONTS.dim,
+        align: 'center',
+        wordWrap: { width: innerW },
+      })
       .setOrigin(0.5, 0)
       .setDepth(this.depth + 1)
       .setScrollFactor(0);
 
-    // --- Primary action ----------------------------------------------------
-    // Phase 5: the server offers the spectator booth when a room is full
-    // (`room_join` ack `canSpectate: true`). Hidden until that hint arrives, so
-    // it never implies spectating is generally available.
-    this.spectate = new Button(scene, {
-      x: 640,
-      y: 596,
-      width: 260,
-      height: 38,
-      label: 'Watch as Spectator',
-      sublabel: 'no body \u00b7 cannot be hit',
-      skin: 'ghost',
-      fontSize: '13px',
-      onClick: () => this.onSpectate?.(),
-    });
-    this.spectate.setVisible(false);
-
+    // --- Find Match CTA ---------------------------------------------------
+    // Anchored to the bottom of the panel; large, high-contrast, easy to hit.
+    const ctaH = Math.max(64, this.minTouch);
     this.primary = new Button(scene, {
       x: innerX + innerW / 2,
-      y: y + h - 38,
+      y: y + h - ctaH / 2 - 14,
       width: innerW,
-      height: 56,
-      label: 'Find Match',
-      sublabel: 'queue for the selected mode',
-      skin: 'primary',
+      height: ctaH,
+      label: 'FIND MATCH',
+      sublabel: 'drop into a debris field',
+      skin: 'cta',
+      fontSize: '22px',
+      minHeight: ctaH,
       depth: this.depth + 2,
       onClick: () => this._onPrimary(),
     });
 
+    // --- Spectate (server offer only) ------------------------------------
+    this.spectate = new Button(scene, {
+      x: innerX + innerW / 2,
+      y: y + h - ctaH - 44,
+      width: Math.min(innerW, 300),
+      height: 36,
+      label: 'Watch as Spectator',
+      sublabel: 'no body · cannot be hit',
+      skin: 'ghost',
+      fontSize: '12px',
+      minHeight: 36,
+      depth: this.depth + 2,
+      onClick: () => this.onSpectate?.(),
+    });
+    this.spectate.setVisible(false);
+
+    // --- Queue status line ------------------------------------------------
+    this.statusText = scene.add
+      .text(innerX + innerW / 2, y + h - ctaH - 8, '', FONTS.tiny)
+      .setOrigin(0.5, 1)
+      .setDepth(this.depth + 1)
+      .setScrollFactor(0);
+
     this.refresh();
   }
 
-  // =========================================================================
-  // Rendering
-  // =========================================================================
+  /**
+   * Build one arcade mode card: accent stripe, short code, name, and a
+   * selection marker that is a SHAPE (▸) rather than a colour.
+   * @param {string} modeId
+   * @param {number} x - Left edge.
+   * @param {number} y - Top edge.
+   * @param {number} w
+   * @param {number} h
+   * @returns {void}
+   */
+  _buildCard(modeId, x, y, w, h) {
+    const mode = MATCH_MODES[modeId];
+    const accent = cssInt(mode.accent);
+
+    const card = new Button(this.scene, {
+      x: x + w / 2,
+      y: y + h / 2,
+      width: w,
+      height: h,
+      label: mode.short,
+      sublabel: mode.name,
+      skin: 'neutral',
+      fontSize: '17px',
+      minHeight: this.minTouch,
+      depth: this.depth + 2,
+      toggle: true,
+      selected: false,
+      ariaLabel: `${mode.name} — ${mode.description}`,
+      onClick: () => this._onSelect(modeId),
+    });
+
+    // Selection marker — a triangle in the left gutter, hidden unless this
+    // card is selected. A shape difference, so selection is colour-independent.
+    const marker = this.scene.add
+      .text(x + 14, y + h / 2, '▸', { ...FONTS.bodyStrong, fontSize: '18px', color: mode.accent })
+      .setOrigin(0.5)
+      .setDepth(this.depth + 3)
+      .setScrollFactor(0)
+      .setVisible(false);
+
+    this.cards[modeId] = card;
+    this.cardMeta[modeId] = { marker, accent, x, y, w, h };
+
+    // BUG-GUARD: Button.redraw() runs on every hover/press transition and would
+    // wipe the selected styling painted here, making a selected card flash back
+    // to "unselected" the moment the pointer crossed it. Re-apply our paint
+    // after the base redraw so selection is stable under hover.
+    const baseRedraw = card.redraw.bind(card);
+    card.redraw = () => {
+      baseRedraw();
+      this._paintCard(modeId, Boolean(this.cards[modeId]?.selected));
+    };
+  }
 
   /**
-   * Repaint one card in its selected or unselected state. The selected card
-   * is tinted with the MODE's own accent colour (FFA is pink, TDM is green,
-   * Bot Practice is amber), so the colour itself tells you what you picked.
+   * Repaint one card for its selected/unselected state.
    * @param {string} modeId
    * @param {boolean} selected
    * @returns {void}
@@ -139,34 +203,43 @@ export class ModeSelector {
   _paintCard(modeId, selected) {
     const card = this.cards[modeId];
     const mode = MATCH_MODES[modeId];
-    const accent = hexToInt(mode.accent);
-    const left = card.cx - card.width / 2;
-    const top = card.cy - card.height / 2;
+    const meta = this.cardMeta[modeId];
+    const accent = meta.accent;
+    const left = meta.x;
+    const top = meta.y;
+    const w = meta.w;
+    const h = meta.h;
+    const r = RADII.card;
 
+    // Paint directly onto the card's Graphics (which Button owns) so the
+    // press/hover transforms still apply to the same object.
     const g = card.bg;
     g.clear();
 
     if (selected) {
-      g.fillStyle(lighten(accent, -0.74), 0.95);
-      g.fillRoundedRect(left, top, card.width, card.height, 10);
-      g.lineStyle(2, accent, 0.95);
-      g.strokeRoundedRect(left, top, card.width, card.height, 10);
+      // Tinted with the mode accent, a THICK border, and a bright label.
+      g.fillStyle(darken(accent, 0.78), 0.98);
+      g.fillRoundedRect(left, top, w, h, r);
+      g.lineStyle(4, accent, 1); // thicker = shape cue for selection
+      g.strokeRoundedRect(left, top, w, h, r);
+      g.fillStyle(accent, 1);
+      g.fillRoundedRect(left, top + 6, 5, h - 12, 3); // accent stripe
       card.label.setColor(mode.accent);
-      card.sublabel?.setAlpha(0.95);
-      return;
+      card.sublabel?.setColor(THEME.textPrimary).setAlpha(1);
+    } else {
+      g.fillStyle(0x0f1830, 1);
+      g.fillRoundedRect(left, top, w, h, r);
+      g.lineStyle(2, 0x2b3d5e, card.zone.isOver ? 0.9 : 0.55);
+      g.strokeRoundedRect(left, top, w, h, r);
+      card.label.setColor(card.enabled ? THEME.textDim : THEME.textFaint);
+      card.sublabel?.setColor(THEME.textFaint).setAlpha(card.enabled ? 0.85 : 0.5);
     }
 
-    // Unselected: the button's own neutral skin + faint accent text.
-    g.fillStyle(0x111b30, 1);
-    g.fillRoundedRect(left, top, card.width, card.height, 10);
-    g.lineStyle(1, 0x2b3d5e, card.zone.isOver ? 0.9 : 0.6);
-    g.strokeRoundedRect(left, top, card.width, card.height, 10);
-    card.label.setColor(card.enabled ? THEME.textDim : THEME.textFaint);
-    card.sublabel?.setAlpha(card.enabled ? 0.8 : 0.45);
+    meta.marker.setVisible(selected);
   }
 
   /**
-   * Re-render from `net.state` (mode + party + queue + busy).
+   * Re-render from `net.state` (mode + party + queue + busy + connection).
    * @returns {void}
    */
   refresh() {
@@ -181,41 +254,26 @@ export class ModeSelector {
     for (const modeId of MODE_ORDER) {
       const card = this.cards[modeId];
       card.setEnabled(!busy && !queued);
+      card.setSelected(modeId === selected);
       this._paintCard(modeId, modeId === selected);
     }
 
-    this.descText.setText(MATCH_MODES[selected]?.description ?? '');
+    const mode = MATCH_MODES[selected];
+    this.descText.setText(mode?.description ?? '');
 
-    // --- Primary button is context aware -----------------------------------
-    // A non-leader's button is inert: it still explains the situation, but it
-    // must not fire `party_start_match`, which the server would reject.
-    const follower = Boolean(party) && !party.isLeader;
-    this.primary.setEnabled(!busy && !follower);
+    // --- CTA is entirely state-derived ------------------------------------
+    const cta = resolveCta(state, CTA_STATES);
+    this.primary.setLabel(cta.label);
+    this.primary.setSublabel(cta.sub);
+    this.primary.setSkin(cta.tone === 'error' ? 'danger' : cta.tone === 'warning' ? 'warning' : cta.tone === 'neutral' ? 'neutral' : 'cta');
+    this.primary.setEnabled(cta.enabled);
+    // A searchable CTA is a "cancel" affordance, so the skin is warning-tinted
+    // to distinguish it from the "go" state at a glance.
+    if (cta.key === 'queued') this.primary.setSkin('warning');
 
-    if (queued) {
-      this.primary.setLabel('Cancel Search');
-      this.primary.setSkin('danger');
-      this.primary.sublabel?.setText(`queued for ${MATCH_MODES[state.queue.mode]?.name ?? 'a match'}`);
-    } else if (party?.isLeader) {
-      this.primary.setLabel('Start Match');
-      this.primary.setSkin('primary');
-      this.primary.sublabel?.setText(
-        `start ${MATCH_MODES[selected].name} for ${party.memberCount} janitor(s)`,
-      );
-    } else if (party) {
-      this.primary.setLabel('Waiting for Leader');
-      this.primary.setSkin('neutral');
-      this.primary.sublabel?.setText(`${party.leaderName ?? 'The leader'} picks the mode and starts`);
-    } else {
-      this.primary.setLabel('Find Match');
-      this.primary.setSkin('primary');
-      this.primary.sublabel?.setText(`queue for ${MATCH_MODES[selected].name}`);
-    }
-
-    // Spectate offer is only meaningful when we are NOT already queued and the
-    // server actually offered it.
-    const offer = state.spectateOffer ?? null;
-    this.spectate.setVisible(Boolean(offer) && !queued && !busy);
+    // Spectate offer only when the server actually offered it and we are not
+    // already searching.
+    this.spectate.setVisible(Boolean(state.spectateOffer) && !queued && !busy && !state.room);
 
     this.statusText.setText(busy ? 'working…' : '');
     if (!queued) this.statusText.setColor(THEME.textFaint);
@@ -240,9 +298,6 @@ export class ModeSelector {
   // =========================================================================
   // Actions
   // =========================================================================
-// =========================================================================
-  // Actions
-  // =========================================================================
 
   /**
    * @param {string} modeId
@@ -253,19 +308,21 @@ export class ModeSelector {
   }
 
   /**
-   * Route the primary button to the right backend command.
+   * Route the primary button to the right backend command, guarded by the
+   * exact same conditions the button's enabled state used, so a programmatic
+   * call can never send a request the server would reject.
    * @returns {void}
    */
   _onPrimary() {
     const state = this.net.state;
+    const cta = resolveCta(state, CTA_STATES);
+    if (!cta.enabled) return;
 
     if (state.queue) {
       this.net.queueLeave();
       return;
     }
     if (state.party) {
-      // The button is disabled for followers, but re-check here too so a
-      // programmatic call can never send a request the server will reject.
       if (!state.party.isLeader) {
         this.net.setNotice('error', 'Only the party leader can start the match.');
         return;
@@ -280,10 +337,26 @@ export class ModeSelector {
   destroy() {
     this.panel.destroy();
     Object.values(this.cards).forEach((c) => c.destroy());
+    Object.values(this.cardMeta).forEach((m) => m.marker?.destroy());
     this.primary.destroy();
+    this.spectate.destroy();
     this.descText.destroy();
     this.statusText.destroy();
   }
+}
+
+/**
+ * Darken a packed colour toward black.
+ * @param {number} color
+ * @param {number} amount 0..1 (0 = unchanged, 1 = black)
+ * @returns {number}
+ */
+function darken(color, amount) {
+  const r = (color >> 16) & 0xff;
+  const g = (color >> 8) & 0xff;
+  const b = color & 0xff;
+  const mix = (c) => Math.round(c * (1 - amount));
+  return (mix(r) << 16) | (mix(g) << 8) | mix(b);
 }
 
 export default ModeSelector;

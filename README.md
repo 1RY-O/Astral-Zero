@@ -126,11 +126,14 @@ socket.on('player_move', ({ id, x, y }) => moveRemoteAvatar(id, x, y));
 socket.on('bot_spawn', (bot) => spawnBot(bot));
 ```
 
-> Needs `npm install socket.io-client` when Phase 2 netcode lands (not a dep yet —
-> Phase 1 frontend runs offline).
+> `socket.io-client` **is** a dev dependency as of Phase 2 — the Phaser client has a
+> full netcode layer (`src/net/`) and the lobby/arena both run live. See
+> [FRONTEND.md](./FRONTEND.md).
 
 **3. Check compatibility at boot:** `GET /api/info → socketEventsVersion` must equal the
-version your netcode was written against (`1.0.0-phase1`).
+version your netcode was written against. The client probes this at boot
+(`NetworkManager._probeContract`) and surfaces an `OUTDATED SERVER` state rather
+than letting every button fail silently.
 
 ## 5. REST endpoints (stub)
 
@@ -156,13 +159,24 @@ version your netcode was written against (`1.0.0-phase1`).
 | `jumpscare_trigger`, `match_state` | S → C | Reserved server-only stubs |
 | `error_event` | S → C | `{ code, message }` uniform errors |
 
-## 7. Roadmap (post-Phase 1)
+## 7. Client status
 
-- [ ] **Phase 2:** `socket.io-client` in Phaser, authoritative movement + shooting, HP truth, bot spawner + AI, funny bot-name pool, 3 maps (`junkyard` → `solar-array` → `dead-satellite`), difficulty curves.
-- [ ] **Phase 3:** mid-fight puzzles, jumpscares, rocket-jump validation, pickups/scores, name entry polish.
-- [ ] **Stretch:** multiplayer rooms / matchmaking / lag compensation / persistence / anti-cheat.
+The Phaser client is well beyond the original Phase 1 skeleton. As shipped
+today it has: full Socket.io netcode with prediction/reconciliation, party +
+friends + matchmaking lobbies, authoritative combat, bot AI, three maps, an
+audio engine, progression, a spectator camera, and the arcade UI/UX overhaul
+(lobby, loading screen, HUD, responsive + accessible). The client's own roadmap
+and architecture live in [FRONTEND.md](./FRONTEND.md) and
+[docs/UIUX.md](./docs/UIUX.md); the wire contract lives in
+[`websocket_events.md`](./websocket_events.md).
 
-## 8. Contributing
+## 8. Roadmap (open)
+
+- [ ] Mid-fight puzzles, jumpscares, rocket-jump validation.
+- [ ] Persistent storage (all state is still in-memory).
+- [ ] Real sprite/audio assets — the client is currently fully procedural.
+
+## 9. Contributing
 
 - Event change? Update **three** places: `websocket_events.md` + `src/sockets/events.js` + changelog row, then bump `SOCKET_EVENTS_VERSION`.
 - Keep handlers in `src/sockets/index.js` thin; future game systems get their own modules (e.g. `src/game/bots.js` — backend-only name, no clash with `src/scenes/`).

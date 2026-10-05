@@ -11,27 +11,31 @@ instant acceleration, satisfying jumps, and 360° mouse aiming.
 
 ---
 
-## Status: Phase 2 — Lobby, Party, Friends & Third-Person Camera ✅
+## Status: UI/UX Overhaul — Arcade Lobby, Loading Screen & HUD ✅
 
-| Feature | Status |
+| Area | Status |
 | --- | --- |
-| Phaser 3 + Arcade Physics setup | ✅ |
-| Strong gravity + Raze-style movement | ✅ |
-| Run (`A`/`D`, `←`/`→`) and jump (`Space`/`W`/`↑`) | ✅ |
-| Gray-box arena (solid floor + 4 floating platforms) | ✅ |
-| **Arsenal-style over-the-shoulder camera** | ✅ |
-| **SocketClient + NetworkManager (Phase 2 contract)** | ✅ |
-| **Lobby: create/join party, 6-char code, live member list (max 4)** | ✅ |
-| **Friends: add by name/ID, list, one-click "Invite to Party"** | ✅ |
-| **Mode selection: FFA / TDM / Bot Practice** | ✅ |
-| **Solo queue + party-leader match start** | ✅ |
-| **Lobby → Arena transition on match-ready (roster passed through)** | ✅ |
-| **Bot spawning + per-mode/team tinting in the arena** | ✅ |
-| **First-match protection messaging** | ✅ |
-| Shooting, damage authority, bot AI, mid-fight HUD | ⏳ Phase 3 |
+| Phaser 3 + Arcade Physics, movement, jumping, aiming | ✅ |
+| Arsenal-style over-the-shoulder camera | ✅ |
+| SocketClient + NetworkManager (contract `1.4.0-phase5`) | ✅ |
+| Party (create/join/6-char code, live roster, max 4) | ✅ |
+| Friends (add by name/ID, list, one-click invite) | ✅ |
+| Mode selection + solo queue + party-leader start | ✅ |
+| Authoritative netcode: prediction, reconciliation, interpolation | ✅ |
+| Bot AI, combat authority, lag compensation, respawn/scoring | ✅ |
+| Audio engine (synthesized), progression, spectator cam | ✅ |
+| **Original Astral Zero brand mark + orbital backdrop** | ✅ NEW |
+| **Real loading screen driven by boot milestones** | ✅ NEW |
+| **Arcade lobby: brand header, nav rail, Party focus, mode cards** | ✅ NEW |
+| **Find Match CTA reflecting the true match state machine** | ✅ NEW |
+| **Four-state connection pill (incl. RECONNECTING)** | ✅ NEW |
+| **Game-first HUD with a responsive layout rect** | ✅ NEW |
+| **Reusable feedback component (real events only)** | ✅ NEW |
+| **Reduced-motion support across all new UI** | ✅ NEW |
+| **Responsive tiers (320 / 768 / 1024 / 1440+)** | ✅ NEW |
 
-> **See [docs/PHASE2.md](./docs/PHASE2.md) for the full Phase 2 walkthrough** —
-> camera tuning values, socket event mapping, and how to test every flow.
+> **See [docs/UIUX.md](./docs/UIUX.md)** for the design system, the state
+> machines, the accessibility decisions, and the manual test checklist.
 
 ## Requirements
 
@@ -56,7 +60,11 @@ Open **<http://localhost:5173>**.
 | `npm run preview` | Serve the built bundle locally to verify it |
 | `npm start` | Production: one Express server hosts game + API + sockets |
 | `npm test` | Lobby/UI behaviour tests (no browser needed) |
+| `npm run test:uiux` | Design system: connection/CTA states, tiers, a11y, boot |
+| `npm run test:lobby` | LobbyScene builds at every breakpoint, no overlap/leaks |
+| `npm run test:hud` | ArenaHud builds at every breakpoint, bounds-checked |
 | `npm run test:camera` | Third-person camera tests (framing + visibility) |
+| `npm run test:all` | **Everything** (15 suites) |
 | `npm run test:net` | Netcode: reconciliation, interpolation, combat, bot AI |
 | `npm run test:netdebug` | The `?debug` netcode telemetry readout |
 | `npm run test:combat` | Combat prediction vs. the server weapon table |
@@ -84,6 +92,7 @@ The backend has its own scripts — see the [main README](./README.md).
 | `?skipName` | Skip the name prompt even with no saved name |
 | `?server=URL` | Point the socket at a different backend (LAN/mobile testing) |
 | `?fastToasts` | Shorten toast dwell time while iterating on the UI |
+| `?noLobbyFx` | Freeze the orbital backdrop (low-end devices / perf checks) |
 
 Append e.g. `?debug` to the URL: <http://localhost:5173/?debug>.
 
@@ -114,6 +123,9 @@ Astral-Zero/
 ├── tests/
 │   ├── lobby-ui.test.mjs      # Party/friends/mode behaviour (npm test)
 │   ├── camera.test.mjs        # Over-the-shoulder framing (npm run test:camera)
+│   ├── uiux.test.mjs          # ★ Design system: states, tiers, a11y, boot
+│   ├── lobby-scene.test.mjs   # ★ LobbyScene builds at every breakpoint
+│   ├── hud.test.mjs           # ★ ArenaHud builds at every breakpoint
 │   └── phaser-stub.mjs        # Lets game modules load headlessly
 └── src/
     ├── main.js                # Phaser.Game bootstrap, scene registration
@@ -121,9 +133,12 @@ Astral-Zero/
     │   ├── gameConfig.js      # ★ movement feel + arena layout
     │   ├── lobbyConfig.js     # ★ party limits, modes, teams, spawn points
     │   ├── cameraConfig.js    # ★ over-the-shoulder camera tuning
-    │   └── uiTheme.js         # ★ shared colours + fonts for all UI
+    │   ├── uiTheme.js         # ★ design tokens: colours, type, radii, motion
+    │   └── viewportConfig.js  # ★ responsive tiers + hit-area floors
     ├── core/
-    │   └── Emitter.js         # Tiny pub/sub (no Phaser dependency)
+    │   ├── Emitter.js         # Tiny pub/sub (no Phaser dependency)
+    │   ├── Motion.js          # ★ reduced-motion choke point
+    │   └── Settings.js        # Persisted preferences (localStorage)
     ├── net/
     │   ├── SocketClient.js    # Only file that touches socket.io-client
     │   ├── NetworkManager.js  # ★ game-facing facade + all lobby/match state
@@ -138,13 +153,17 @@ Astral-Zero/
     │   ├── Player.js          # Local player: movement, jumping, aiming
     │   └── RemoteActor.js     # Other humans + bots (interpolated)
     ├── ui/
-    │   ├── widgets/           # Panel, Button, TextField, ToastLayer
-    │   ├── lobby/             # Party, Friends, ModeSelector, Invite, NameGate
-    │   └── hud/               # ArenaHud (countdown, roster, leave)
+    │   ├── widgets/           # Panel, Button, TextField, ToastLayer, Slider
+    │   ├── lobby/             # Party, Friends, ModeSelector, NavRail, Profile
+    │   ├── brand/             # ★ Logo, OrbitalBackdrop, StatusPill, ConnectionState
+    │   ├── boot/              # ★ DOM loading screen (runs before Phaser)
+    │   ├── fx/                # CombatFx, Feedback, FxPool, AmbientFx
+    │   ├── hud/               # ArenaHud, Scoreboard, KillFeed, Medals, …
+    │   └── menus/             # SettingsMenu
     └── scenes/
         ├── BootScene.js       # Generates gray-box textures procedurally
         ├── PreloadScene.js    # Asset manifest (placeholder for real art)
-        ├── LobbyScene.js      # ★ Phase 2 entry point
+        ├── LobbyScene.js      # ★ Arcade lobby entry point
         └── ArenaScene.js      # Arena + camera + match spawn
 ```
 
@@ -156,9 +175,30 @@ Astral-Zero/
 
 **All tuning is centralised.** Gravity, jump height and the arena layout live in
 `src/config/gameConfig.js`; party limits, game modes and team colours in
-`src/config/lobbyConfig.js`; the camera in `src/config/cameraConfig.js`; and
-every UI colour and font in `src/config/uiTheme.js`. Tune the game there
-without touching gameplay logic.
+`src/config/lobbyConfig.js`; the camera in `src/config/cameraConfig.js`; the
+entire visual design system (colours, type scale, radii, motion tokens) in
+`src/config/uiTheme.js`; and the responsive breakpoints in
+`src/config/viewportConfig.js`. Tune the game there without touching gameplay
+logic.
+
+**The UI cannot lie about state.** `src/ui/brand/ConnectionState.js` is a pure
+function from the real `net.state` to what the player is shown. The status
+pill and the Find Match CTA both read it, so they are structurally incapable of
+disagreeing — a dead socket renders a disabled `OFFLINE` button, never a
+clickable `FIND MATCH`. There is exactly one source of truth for four states
+(`CONNECTING` / `ONLINE` / `RECONNECTING` / `OFFLINE`) and six CTA states.
+
+**Responsiveness without touching the camera.** The design surface stays pinned
+at 1280×720, because the Arsenal camera's framing maths is tuned around that
+arena. Instead the *layout* is classified into `compact` / `medium` / `wide`
+from the displayed canvas, and the lobby re-flows into 1 / 2 / 3 columns with
+a matching hit-area floor (44 px, or 48 px on touch). The camera therefore
+cannot regress, and the menus still work on a phone.
+
+**Reduced motion is global, not per-widget.** `src/core/Motion.js` wraps every
+tween. With `prefers-reduced-motion: reduce`, `Motion.tween()` runs at 0 ms so
+objects land on their FINAL value instantly — a "skip the tween" approach would
+strand buttons and bars at their start values, which is a bug, not a preference.
 
 **Scenes never touch the network directly.** They read `net.state` and call
 intent methods (`net.createParty()`, `net.queueJoin()`, …). `NetworkManager`

@@ -172,16 +172,11 @@ export class OrbitalBackdrop {
     }
 
     for (let i = 0; i < 4; i += 1) {
-      const beacon = this.scene.add.star
-        ? null
-        : this.scene.add.rectangle(
-            this.rand.between(0, this.w),
-            this.rand.between(0, this.h),
-            4,
-            4,
-            0x9fe8ff,
-            0.9,
-          );
+      const bx = this.rand.between(0, this.w);
+      const by = this.rand.between(0, this.h);
+      const beacon = typeof this.scene.add.star === 'function'
+        ? this.scene.add.star(bx, by, 5, 2, 4, 0x9fe8ff, 0.9)
+        : this.scene.add.rectangle(bx, by, 4, 4, 0x9fe8ff, 0.9);
       this.nearLayer.add(beacon);
       if (!Motion.isReduced()) {
         Motion.tween(this.scene, {

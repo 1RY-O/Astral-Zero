@@ -128,8 +128,11 @@ export const LAYOUTS = Object.freeze({
  */
 export function currentLayout(scale) {
   try {
-    const display = scale?.gameSize ?? scale?.displaySize;
-    const width = display?.width ?? scale?.parentSize?.width ?? DESIGN.width;
+    // Prefer the DISPLAYED canvas size (CSS px): with Scale.FIT the gameSize
+    // is the fixed design resolution, so reading it would pin every device to
+    // the wide tier and the medium/compact layouts would never activate.
+    const display = scale?.displaySize ?? scale?.parentSize ?? scale?.gameSize;
+    const width = display?.width ?? DESIGN.width;
     return LAYOUTS[tierFor(width)];
   } catch {
     return LAYOUTS.wide;

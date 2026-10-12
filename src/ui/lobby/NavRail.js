@@ -95,9 +95,16 @@ export class NavRail {
         y: cy,
         width: size,
         height: Math.max(size, this.minTouch),
-        label: route.label,
+        // The GLYPH is the icon (drawn large); the WORD is its caption. Rendering
+        // the glyph is what makes these read as icons rather than plain text —
+        // the glyph field existed but was previously never drawn, so the rail
+        // showed only words. The glyph is a simple, original Unicode symbol
+        // (⌂ ▶ ☺ ⚙), consistent with the StatusPill/settings-button convention —
+        // no external image URLs that could 404 into a placeholder box.
+        label: route.glyph,
+        sublabel: route.label,
         skin: 'nav',
-        fontSize: size < 70 ? '11px' : '12px',
+        fontSize: size < 70 ? '22px' : '26px',
         minHeight: this.minTouch,
         depth: this.depth,
         toggle: true,

@@ -50,6 +50,58 @@ const PROFILES = {
   }),
 };
 
+/**
+ * Canonical difficulty tiers, in ascending order. These are the FOUR the game
+ * design asks for, mapped onto the three modifier rows above (advanced shares
+ * the aggressive profile — see below). Server-authoritative: a client may
+ * REQUEST a tier, but the server validates it against THIS list and silently
+ * falls back to `normal` for anything unrecognised, so a tampered payload can
+ * never spawn an undefined behaviour.
+ */
+export const DIFFICULTY_TIERS = Object.freeze(['beginner', 'normal', 'advanced', 'elite']);
+
+/**
+ * Alias table: the design's four named tiers → the profile row that implements
+ * them. `advanced` and `elite` both lean on `aggressive`; `elite` is tightened
+ * a touch further at roll time (see profileFor). `beginner` == `easy`.
+ */
+const TIER_TO_PROFILE = Object.freeze({
+  beginner: 'easy',
+  normal: 'normal',
+  advanced: 'aggressive',
+  elite: 'aggressive',
+});
+
+/**
+ * Validate a client-requested difficulty tier. Returns a canonical tier name,
+ * or `null` when the input is not one we recognise (caller decides the
+ * fallback — matchmaking uses `normal`).
+ * @param {unknown} input
+ * @returns {'beginner'|'normal'|'advanced'|'elite'|null}
+ */
+export function normaliseDifficulty(input) {
+  if (typeof input !== 'string') return null;
+  const key = input.trim().toLowerCase();
+  return DIFFICULTY_TIERS.includes(key) ? key : null;
+}
+
+/** The profile row that implements a tier (defaults to normal). */
+function profileForTier(tier) {
+  const profileKey = TIER_TO_PROFILE[tier] || 'normal';
+  const base = PROFILES[profileKey] || PROFILES.normal;
+  // Elite is the aggressive row with a slightly tighter reaction + aim, so the
+  // top tier is genuinely harder without a separate frozen profile to drift.
+  if (tier === 'elite') {
+    return {
+      ...base,
+      difficulty: 'elite',
+      reactionMs: Math.max(80, Math.round(base.reactionMs * 0.7)),
+      missMul: base.missMul * 0.85,
+    };
+  }
+  return { ...base, difficulty: tier };
+}
+
 const MIX_BY_MODE = {
   bot_practice: [['easy', 0.7], ['normal', 1.0]],
   ffa: [['easy', 0.2], ['normal', 0.8], ['aggressive', 1.0]],
@@ -59,8 +111,21 @@ const MIX_BY_MODE = {
 /**
  * Roll a difficulty for a mode (cumulative table above) and return a
  * FRESH modifier object (never the frozen profile — callers may jitter).
+ *
+ * @param {string} mode
+ * @param {string|null} [forcedTier] - When the room pinned a difficulty (e.g. a
+ *   Bot Practice room the player configured), EVERY bot rolls that tier instead
+ *   of the per-mode mix. Server-authoritative: the tier was already validated
+ *   by `normaliseDifficulty` before it reached the room.
  */
-export function rollPersonality(mode = 'ffa') {
+export function rollPersonality(mode = 'ffa', forcedTier = null) {
+  if (forcedTier) {
+    const base = profileForTier(forcedTier);
+    return {
+      ...base,
+      aggression: base.aggression * (0.9 + Math.random() * 0.2),
+    };
+  }
   const table = MIX_BY_MODE[mode] || MIX_BY_MODE.ffa;
   const r = Math.random();
   let difficulty = table[table.length - 1][0];
@@ -85,9 +150,12 @@ export function profileFor(difficulty) {
 
 /**
  * Attach a rolled personality to a sim entity (idempotent).
+ * @param {object} entity
+ * @param {string} mode
+ * @param {string|null} [forcedTier] - Pin every bot to this validated tier.
  * @returns the personality row
  */
-export function ensurePersonality(entity, mode = 'ffa') {
-  if (!entity.personality) entity.personality = rollPersonality(mode);
+export function ensurePersonality(entity, mode = 'ffa', forcedTier = null) {
+  if (!entity.personality) entity.personality = rollPersonality(mode, forcedTier);
   return entity.personality;
 }

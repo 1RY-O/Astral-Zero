@@ -35,9 +35,10 @@
  */
 
 import Phaser from 'phaser';
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, HP_RAMP, SURFACES, PALETTE } from '../../config/uiTheme.js';
 import { MATCH_MODES, TEAMS } from '../../config/lobbyConfig.js';
 import { HEALTH, MATCH_UI, SCRAP, COMBAT } from '../../config/netConfig.js';
+import { CHARACTER_TIERS } from '../../shared/characters.js';
 import { Button } from '../widgets/Button.js';
 import { DESIGN, currentLayout } from '../../config/viewportConfig.js';
 import * as Motion from '../../core/Motion.js';
@@ -49,12 +50,14 @@ export class ArenaHud {
    * @param {object} opts.room - Normalised room (MatchModel.normaliseRoom).
    * @param {import('../../net/NetworkManager.js').NetworkManager} opts.net
    * @param {() => void} [opts.onLeave]
+   * @param {() => void} [opts.onReset] - Practice reset (bot_practice only).
    * @param {number} [opts.depth]
    */
   constructor(scene, opts) {
     this.scene = scene;
     this.net = opts.net;
     this.onLeave = opts.onLeave ?? (() => {});
+    this.onReset = opts.onReset ?? (() => {});
     this.depth = opts.depth ?? 200;
     this.room = opts.room;
 
@@ -95,6 +98,20 @@ export class ArenaHud {
       .setDepth(this.depth)
       .setScrollFactor(0);
 
+    // S14.1: which kit we are ACTUALLY running — the server-confirmed
+    // character, tier band and role. Presentation only: every stat it names
+    // is applied server-side, and without this line a player has no way to
+    // tell their selection took effect.
+    this.characterText = scene.add
+      .text(this.L.pad, this.L.pad + 54, '', {
+        ...FONTS.small,
+        fontSize: `${Math.round(11 * this.L.scale)}px`,
+        color: THEME.accent,
+      })
+      .setDepth(this.depth)
+      .setScrollFactor(0)
+      .setAlpha(0.85);
+
     // --- Top-left: the OBJECTIVE line --------------------------------------
     // Only rendered for modes that HAVE an objective the server tracks. FFA and
     // TDM are pure deathmatches, so showing "DEBRIS REMAINING: —" would be
@@ -120,6 +137,23 @@ export class ArenaHud {
       depth: this.depth + 1,
       onClick: () => this.onLeave(),
     });
+
+    // --- Top-right: practice reset (bot_practice only) ----------------------
+    // Restarts the session with the same practice options: leave + re-queue
+    // is one tap, no app refresh. Hidden in every other mode.
+    this.resetButton = new Button(scene, {
+      x: this.L.w - this.L.pad - 58,
+      y: this.L.pad + 54,
+      width: 116,
+      height: 32,
+      label: '↻ Reset',
+      skin: 'ghost',
+      fontSize: '12px',
+      depth: this.depth + 1,
+      ariaLabel: 'Reset practice session with the same setup',
+      onClick: () => this.onReset(),
+    });
+    this.resetButton.setVisible(this.room.mode === 'bot_practice');
 
     // The connection readout is deliberately small and unobtrusive: a player
     // mid-fight does not need a large status banner, but a drop must still be
@@ -172,6 +206,20 @@ export class ArenaHud {
       .setDepth(this.depth)
       .setScrollFactor(0);
 
+    // Practice pacing notice (bot_practice only): grace countdown / passive.
+    // Display only — enforcement is server-side. Driven by setPracticeNotice.
+    this.practiceText = scene.add
+      .text(this.L.cx, 12 + 48 * this.L.scale, '', {
+        ...FONTS.tiny,
+        fontSize: `${Math.round(13 * this.L.scale)}px`,
+        color: THEME.accent,
+        fontStyle: '800',
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(this.depth)
+      .setScrollFactor(0)
+      .setVisible(false);
+
     // TDM sudden death. Hidden until the server sends `overtime: true`.
     this.overtimeText = scene.add
       .text(this.L.cx, 12 + 48 * this.L.scale, '', {
@@ -212,13 +260,13 @@ export class ArenaHud {
       .setScrollFactor(0);
 
     this.hpTrack = scene.add
-      .rectangle(this.L.pad + 8, barY + 4, 200, 14, 0x0a1020, 0.85)
+      .rectangle(this.L.pad + 8, barY + 4, 200, 14, SURFACES.trackBg, 0.85)
       .setOrigin(0, 0.5)
       .setDepth(this.depth)
       .setScrollFactor(0);
 
     this.hpFill = scene.add
-      .rectangle(this.L.pad + 8, barY + 4, 200, 14, 0x4ade80)
+      .rectangle(this.L.pad + 8, barY + 4, 200, 14, HP_RAMP.full)
       .setOrigin(0, 0.5)
       .setDepth(this.depth + 1)
       .setScrollFactor(0);
@@ -231,7 +279,7 @@ export class ArenaHud {
     // On a phone there is no keyboard, so the hint would be both wrong and in
     // the way. It is omitted rather than shrunk.
     this.hintText = scene.add
-      .text(this.L.pad, DESIGN.height - 24, 'A / D move    SPACE jump    mouse aim    LMB fire    TAB scoreboard', {
+      .text(this.L.pad, DESIGN.height - 24, 'A / D move    SPACE / W / ↑ jump    mouse aim    LMB fire    F / RMB mop    Q swap weapon    TAB scoreboard', {
         ...FONTS.small,
         fontSize: `${Math.round(13 * this.L.scale)}px`,
       })
@@ -300,7 +348,7 @@ export class ArenaHud {
       .setScrollFactor(0);
 
     this.reloadTrack = scene.add
-      .rectangle(this.L.w - this.L.pad, DESIGN.height - 40, 180, 5, 0x0a1020, 0.85)
+      .rectangle(this.L.w - this.L.pad, DESIGN.height - 40, 180, 5, SURFACES.trackBg, 0.85)
       .setOrigin(1, 0.5)
       .setDepth(this.depth)
       .setScrollFactor(0);
@@ -347,7 +395,12 @@ export class ArenaHud {
     const ratio = Phaser.Math.Clamp(this.hp / Math.max(1, this.maxHp), 0, 1);
 
     this.hpFill.setSize(Math.max(0, 200 * ratio), 14);
-    this.hpFill.setFillStyle(ratio > 0.6 ? 0x4ade80 : ratio > 0.3 ? 0xffd166 : 0xff6b8b);
+    const fill = ratio > HP_RAMP.fullAbove
+      ? HP_RAMP.full
+      : ratio > HP_RAMP.criticalBelow
+        ? HP_RAMP.hurt
+        : HP_RAMP.critical;
+    this.hpFill.setFillStyle(fill);
     this.hpValue.setText(`${Math.max(0, Math.round(this.hp))} / ${Math.round(this.maxHp)}`);
   }
 
@@ -394,13 +447,13 @@ export class ArenaHud {
    * @returns {void}
    */
   pulseDamage() {
-    this.hpTrack.setFillStyle(0xff6b8b, 0.95);
+    this.hpTrack.setFillStyle(HP_RAMP.critical, 0.95);
     this.scene.tweens.add({
       targets: this.hpTrack,
       alpha: { from: 1, to: 0.85 },
       duration: 90,
       yoyo: true,
-      onComplete: () => this.hpTrack.setFillStyle(0x0a1020, 0.85),
+      onComplete: () => this.hpTrack.setFillStyle(SURFACES.trackBg, 0.85),
     });
   }
 
@@ -432,6 +485,36 @@ export class ArenaHud {
   }
 
   /**
+   * S14.1 — show the SERVER-CONFIRMED character (presentation only).
+   * Every stat this chip names is applied by the server; the line exists so a
+   * player can tell their selection actually took effect.
+   * @param {object} c a CHARACTERS entry { name, role, tier }
+   * @returns {void}
+   */
+  setCharacter(c) {
+    if (!this.characterText) return;
+    if (!c?.name) {
+      this.characterText.setText('');
+      return;
+    }
+    const tier = CHARACTER_TIERS[c.tier];
+    const band = tier ? `  ·  ${tier.band}` : '';
+    const role = c.role ? `  ·  ${String(c.role).toUpperCase()}` : '';
+    this.characterText.setText(`${String(c.name).toUpperCase()}${band}${role}`);
+  }
+
+  /**
+   * S14.5 — adopt the server's control-point state and repaint the objective
+   * line. The client never decides ownership; it renders the last snapshot.
+   * @param {object|null} cp the snapshot's `control` field
+   * @returns {void}
+   */
+  setControl(cp) {
+    this.control = cp && cp.enabled !== false ? cp : null;
+    this._paintObjective();
+  }
+
+  /**
    * Show or hide the reconnect banner (Phase 4).
    * @param {boolean} active
    * @param {string} [label]
@@ -444,6 +527,16 @@ export class ArenaHud {
       alpha: active ? 1 : 0,
       duration: active ? 180 : 320,
     });
+  }
+
+  /**
+   * Practice pacing notice (bot_practice only). Empty text hides the line.
+   * @param {string} text
+   * @returns {void}
+   */
+  setPracticeNotice(text) {
+    this.practiceText.setText(text ?? '');
+    this.practiceText.setVisible(Boolean(text));
   }
 
   /**
@@ -553,6 +646,36 @@ export class ArenaHud {
    */
   _paintObjective() {
     const mode = MATCH_MODES[this.room.mode];
+
+    // S14.5: control_point's objective line renders the SERVER's snapshot
+    // verbatim — owner, contender and contested state are never invented
+    // here, and with no snapshot yet the line stays empty rather than
+    // guessing "neutral".
+    if (this.room.mode === 'control_point') {
+      const cp = this.control;
+      if (!cp) {
+        this.objectiveText.setText('');
+        return;
+      }
+      if (cp.state === 'contested') {
+        this.objectiveText.setText('OBJECTIVE  ·  PLATFORM CONTESTED').setColor(THEME.amber);
+        return;
+      }
+      const owner = cp.owner ?? 'neutral';
+      if (owner === 'neutral') {
+        this.objectiveText.setText('OBJECTIVE  ·  PLATFORM NEUTRAL — TAKE IT').setColor(THEME.amber);
+        return;
+      }
+      const pct = Math.round(Math.max(0, Math.min(100, Number(cp.progress) || 0)));
+      const challenger = cp.contender && cp.contender !== owner && pct > 0
+        ? `  —  ${String(cp.contender).toUpperCase()} ${pct}%`
+        : '';
+      this.objectiveText
+        .setText(`OBJECTIVE  ·  PLATFORM HELD: ${String(owner).toUpperCase()}${challenger}`)
+        .setColor(THEME.amber);
+      return;
+    }
+
     const limit = mode?.bankLimit;
     if (!limit) {
       this.objectiveText.setText('');
@@ -655,11 +778,14 @@ export class ArenaHud {
 
     this.modeText.destroy();
     this.rosterText.destroy();
+    this.characterText?.destroy();
     this.connText.destroy();
     this.banner.destroy();
     this.subBanner.destroy();
     this.hintText.destroy();
     this.leaveButton.destroy();
+    this.resetButton.destroy();
+    this.practiceText.destroy();
     this.timerText.destroy();
     this.teamScoreText.destroy();
     this.hpLabel.destroy();

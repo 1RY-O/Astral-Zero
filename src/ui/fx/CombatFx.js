@@ -24,7 +24,7 @@
 
 import Phaser from 'phaser';
 import { COMBAT } from '../../config/netConfig.js';
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, COMBAT_FX, PALETTE, BORDERS } from '../../config/uiTheme.js';
 import { FxPool } from './FxPool.js';
 
 /**
@@ -79,8 +79,8 @@ export class CombatFx {
         .text(0, 0, '', {
           fontFamily: FONTS.family,
           fontStyle: '700',
-          color: '#ffffff',
-          stroke: '#0a1020',
+          color: COMBAT_FX.damageConfirmed,
+          stroke: COMBAT_FX.numberStroke,
           strokeThickness: 4,
         })
         .setOrigin(0.5)
@@ -142,7 +142,7 @@ export class CombatFx {
     g.clear();
     g.lineStyle(COMBAT.tracerGlowWidth, color, 0.28);
     g.lineBetween(x1, y1, x2, y2);
-    g.lineStyle(COMBAT.tracerWidth, 0xffffff, 0.95);
+    g.lineStyle(COMBAT.tracerWidth, COMBAT_FX.tracer, 0.95);
     g.lineBetween(x1, y1, x2, y2);
     g.lineStyle(COMBAT.tracerWidth + 3, color, 0.8);
     g.lineBetween(headX, headY, x2, y2);
@@ -291,7 +291,7 @@ export class CombatFx {
    * @param {boolean} [opts.crit]
    * @returns {void}
    */
-  damageNumber(x, y, amount, { color = '#ffffff', crit = false } = {}) {
+  damageNumber(x, y, amount, { color = COMBAT_FX.damageConfirmed, crit = false } = {}) {
     // Pooled: one Text + one Tween per hit was the single biggest source of
     // mid-fight GC churn, since a mag dump can land several numbers a second.
     const label = this.numberPool.acquire(COMBAT.damageNumberMs);

@@ -32,23 +32,19 @@
  *    fact that hover only redraws when the hover state actually changes.
  */
 
-import { THEME, FONTS, RADII, MOTION } from '../../config/uiTheme.js';
+import { BUTTON_SKINS, THEME, FONTS, PALETTE, RADII, BORDERS, SHADOWS, MOTION } from '../../config/uiTheme.js';
 import * as Motion from '../../core/Motion.js';
 
-/** Visual states → (fill, border, text colour, glow alpha). */
-const SKINS = {
-  primary: { fill: 0x1479a8, border: 0x5ad8ff, text: '#ffffff', glow: 0.34 },
-  accent: { fill: 0x1d2b4d, border: 0x7fe7ff, text: '#e8f4ff', glow: 0.18 },
-  neutral: { fill: 0x182242, border: 0x33456e, text: '#cfe2f5', glow: 0.1 },
-  danger: { fill: 0x5c1f38, border: 0xff6b8b, text: '#ffe1e8', glow: 0.24 },
-  ghost: { fill: 0x0a1120, border: 0x25355a, text: '#8fa3bf', glow: 0.06 },
-  success: { fill: 0x1c5a37, border: 0x4ade80, text: '#e6ffee', glow: 0.26 },
-  warning: { fill: 0x6b4a12, border: 0xffc247, text: '#fff3d6', glow: 0.28 },
-  /** The big Find Match CTA. */
-  cta: { fill: 0x0f6f9e, border: 0x7fe7ff, text: '#ffffff', glow: 0.4 },
-  /** Navigation rail item. */
-  nav: { fill: 0x0e1730, border: 0x25355a, text: '#a9bcd8', glow: 0.06 },
-};
+/**
+ * Visual states → (fill, border, text colour, glow alpha).
+ *
+ * Lives in the theme now. It was a local table even though every value in it is
+ * a re-spelling of a brand colour that already existed there — which is why
+ * "find the duplicated hex" never flagged it. The component owns no colours.
+ *
+ * Re-exported under its old name so any external caller keeps working.
+ */
+export const SKINS = BUTTON_SKINS;
 
 export class Button {
   /**
@@ -173,9 +169,14 @@ export class Button {
     if (!keyboard) return;
 
     this._keyHandler = (event) => {
-      if (!this.enabled) return;
+      // Activation is FOCUS-GATED (see the class contract: Tab focuses,
+      // Enter/Space activate). Without this check every enabled button in the
+      // scene fires on ANY Space/Enter press — so jumping (Space) in the arena
+      // silently triggered the HUD Leave/Reset buttons and kicked the player
+      // out of the match, and menus fired every control at once.
+      if (!this.enabled || !this._focused) return;
       if (event.code === 'Enter' || event.code === 'Space') {
-        // Prevent Space from scrolling the page.
+        // Prevent Space from scrolling the page while activating the control.
         event.preventDefault?.();
         this.activate();
       } else if (event.code === 'Escape') {
@@ -205,7 +206,8 @@ export class Button {
     // A selected toggle adopts the primary skin regardless of its base skin,
     // so "selected" is unmistakable at a glance.
     if (this.toggle && this.selected) {
-      base = { ...base, fill: 0x1479a8, border: 0x7fe7ff, text: '#ffffff', glow: 0.36 };
+      const selected = SKINS.primary;
+      base = { ...base, fill: selected.fill, border: selected.border, text: selected.text, glow: 0.36 };
     }
 
     if (!this.enabled) {
@@ -257,7 +259,7 @@ export class Button {
     g.fillRoundedRect(left, top, this.width, this.height, r);
 
     // Top inner highlight — gives the button a lit-from-above feel.
-    g.fillStyle(0xffffff, 0.07);
+    g.fillStyle(PALETTE.white, SHADOWS.panelInner);
     g.fillRoundedRect(left + 4, top + 3, this.width - 8, Math.max(2, this.height * 0.16), 2);
 
     // Border. A toggle's selected state gets a visibly thicker border, so the
@@ -270,7 +272,7 @@ export class Button {
     // A high-contrast white ring OUTSIDE the button. Shape change, not colour
     // change, so it is visible to a colourblind player and in greyscale.
     if (this._focused && this.enabled) {
-      g.lineStyle(3, 0xffffff, 0.95);
+      g.lineStyle(BORDERS.base, PALETTE.white, 0.95);
       g.strokeRoundedRect(left - 6, top - 6, this.width + 12, this.height + 12, r + 6);
     }
 

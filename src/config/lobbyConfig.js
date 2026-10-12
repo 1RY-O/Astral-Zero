@@ -51,12 +51,21 @@ export const PARTY = {
  * `id` values are exactly the strings sent to the backend (`party_set_mode`,
  * `queue_join`, `party_start_match`) and expected back in the match payload.
  */
+/**
+ * Each mode carries its accent in BOTH encodings: `accent` as a CSS string for
+ * Phaser text, `accentInt` as a packed int for Graphics. Widgets used to run
+ * their own `#hex → 0xhex` converter to bridge the two, which put a codec in
+ * every file that happened to need one.
+ */
+import { PALETTE, SEMANTIC, SEMANTIC_CSS } from './uiTheme.js';
+
 export const MATCH_MODES = {
   ffa: {
     id: 'ffa',
     name: 'Free-for-All',
     short: 'FFA',
-    accent: '#ff6b8b',
+    accent: SEMANTIC.danger,
+    accentInt: PALETTE.red,
     description: 'No teams. Every janitor for themselves — last one sweeping wins.',
     minPlayers: 2,
     maxPlayers: PARTY.maxMembers,
@@ -68,7 +77,8 @@ export const MATCH_MODES = {
     id: 'tdm',
     name: 'Team Deathmatch',
     short: 'TDM',
-    accent: '#4ade80',
+    accent: SEMANTIC.success,
+    accentInt: PALETTE.green,
     description: 'Two crews of two. Shared goal, shared trash pile.',
     minPlayers: 2,
     maxPlayers: 4,
@@ -82,7 +92,8 @@ export const MATCH_MODES = {
     id: 'bot_practice',
     name: 'Bot Practice',
     short: 'BOTS',
-    accent: '#ff9f43',
+    accent: SEMANTIC_CSS.amberHot,
+    accentInt: PALETTE.amberHot,
     description: 'Friendly scrapyard sparring against bots only. Zero stakes, max mop time.',
     minPlayers: 1,
     maxPlayers: 4,
@@ -102,7 +113,8 @@ export const MATCH_MODES = {
     id: 'scrap_collector',
     name: 'Scrap Collector',
     short: 'SCRAP',
-    accent: '#ffd166',
+    accent: SEMANTIC.warning,
+    accentInt: PALETTE.amberLight,
     description: 'Hoard the debris and bank it. First to 20 scrap wins the shift.',
     minPlayers: 2,
     maxPlayers: 8,
@@ -112,10 +124,34 @@ export const MATCH_MODES = {
     /** Server's `gameModes.scrap_collector.bankLimit`. */
     bankLimit: 20,
   },
+  /**
+   * S14.5 (contract 1.4.0): 4v4 around a single contested point in the middle.
+   *
+   * Deliberately NOT `friendly: false`-by-accident — this is competitive like
+   * tdm, but the win condition is ground, not bodies. Two teams means the point
+   * is contested the moment both crews are near it, which is the whole design.
+   */
+  control_point: {
+    id: 'control_point',
+    name: 'Control Point',
+    short: 'CP',
+    accent: SEMANTIC_CSS.cyanEdge,
+    accentInt: PALETTE.cyanEdge,
+    description: 'Two crews, one platform. Hold it to score — a contested point freezes solid.',
+    minPlayers: 2,
+    maxPlayers: 8,
+    teams: true,
+    teamCount: 2,
+    teamNames: ['Cyan Crew', 'Amber Crew'],
+    botCount: 0,
+    friendly: false,
+    /** Server's `gameModes.control_point.controlPoint.scoreLimit`. */
+    scoreLimit: 150,
+  },
 };
 
 /** Display order of the mode cards in the selector. */
-export const MODE_ORDER = ['ffa', 'tdm', 'bot_practice', 'scrap_collector'];
+export const MODE_ORDER = ['ffa', 'tdm', 'control_point', 'bot_practice', 'scrap_collector'];
 
 /** Mode selected before the player touches anything. */
 export const DEFAULT_MODE = 'ffa';
@@ -125,9 +161,9 @@ export const DEFAULT_MODE = 'ffa';
  * tints so a player can always tell who they are rooting for.
  */
 export const TEAMS = {
-  red: { id: 'red', name: 'Cyan Crew', color: '#38e1ff', colorInt: 0x38e1ff },
-  blue: { id: 'blue', name: 'Amber Crew', color: '#ff9f43', colorInt: 0xff9f43 },
-  solo: { id: 'solo', name: 'Solo', color: '#7fe7ff', colorInt: 0x7fe7ff },
+  red: { id: 'red', name: 'Cyan Crew', color: SEMANTIC_CSS.cyanEdge, colorInt: PALETTE.cyanEdge },
+  blue: { id: 'blue', name: 'Amber Crew', color: SEMANTIC_CSS.amberHot, colorInt: PALETTE.amberHot },
+  solo: { id: 'solo', name: 'Solo', color: SEMANTIC_CSS.cyanLight, colorInt: PALETTE.cyanLight },
 };
 
 /**

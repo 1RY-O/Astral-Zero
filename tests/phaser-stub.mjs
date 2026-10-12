@@ -54,6 +54,7 @@ export const Math = {
 export const Scale = { FIT: 1, CENTER_BOTH: 3, NO_CENTER: 0 };
 export const AUTO = 0;
 export const Events = { READY: 'ready' };
+export const BlendModes = { NORMAL: 0, ADD: 1 };
 
 
 
@@ -78,6 +79,7 @@ const Phaser = {
   Scale,
   AUTO,
   Events,
+  BlendModes,
   Scene,
   Display,
   Input,

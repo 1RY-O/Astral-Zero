@@ -21,7 +21,7 @@
 
 import express from 'express';
 import config from '../server-config.js';
-import { SOCKET_EVENTS, SOCKET_EVENTS_VERSION } from '../sockets/events.js';
+import { SOCKET_EVENTS, SOCKET_EVENTS_VERSION, GAME_MODE_LIST } from '../sockets/events.js';
 import { stats as playerStats } from '../players/playerStore.js';
 import { stats as partyStats } from '../parties/partyManager.js';
 import { stats as roomStats } from '../rooms/roomManager.js';
@@ -61,7 +61,10 @@ router.get('/info', (_req, res) => {
     transport: 'socket.io (JSON payloads, see websocket_events.md)',
     supportedSocketEvents: Object.values(SOCKET_EVENTS),
     // -- Phase 2: locked design surface (mirrors websocket_events.md §7) --
-    gameModes: ['ffa', 'tdm', 'bot_practice', 'scrap_collector'],
+    // Derived from the shared mode registry (GAME_MODES) rather than a
+    // hand-written list, so a mode the server actually accepts — S14.5's
+    // `control_point` included — is never missing from the advertised surface.
+    gameModes: GAME_MODE_LIST,
     maps: [
       { id: 'orbital_junkyard', name: 'Orbital Junkyard' },
       { id: 'reactor_core', name: 'Reactor Core' },

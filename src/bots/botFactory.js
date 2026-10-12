@@ -15,7 +15,7 @@
  */
 
 import config from '../server-config.js';
-import { resolveMap } from '../game/maps.js';
+import { resolveMap, safeSpawnTable } from '../game/maps.js';
 
 const BOT_TYPES = ['chaser', 'shooter', 'brute', 'kamikaze'];
 
@@ -24,9 +24,11 @@ let botSeq = 0;
 /**
  * Map-table spawn (Phase 5): floor spread + platform tops with jitter,
  * so bots materialise ON surfaces of whatever arena the room rolled.
+ * Hazard volumes are excluded, like human spawns (maps.safeSpawnTable).
  */
 function mapSpawn(map, index) {
-  const pts = map.spawns && map.spawns.length ? map.spawns : [{ x: 640, y: 650 }];
+  const table = safeSpawnTable(map);
+  const pts = table.length ? table : [{ x: 640, y: 650 }];
   const p = pts[index % pts.length];
   const jitter = () => (Math.random() - 0.5) * 60;
   return { x: Math.round(p.x + jitter()), y: p.y };

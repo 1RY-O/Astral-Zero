@@ -28,6 +28,9 @@
  * server will never receive — better a clearly-disabled, explained button.
  */
 
+import { CONNECTION_STATES, PALETTE, SEMANTIC } from '../../config/uiTheme.js';
+
+
 /** @typedef {import('../../net/NetworkManager.js').NetworkManager} NetworkManager */
 
 /**
@@ -51,7 +54,7 @@ export function resolveConnection(state = {}, states) {
       // rather than letting every button fail silently.
       if (state.contractOk === false) {
         return withHint(
-          { key: 'online', label: 'OUTDATED SERVER', color: 0xffd166, text: '#ffd166', tone: 'warning' },
+          { key: 'online', label: 'OUTDATED SERVER', color: PALETTE.amberLight, text: SEMANTIC.amberLight, tone: 'warning' },
           state,
           'the server does not support the lobby yet',
         );
@@ -105,13 +108,11 @@ function withHint(entry, state, hint) {
  * @returns {{key:string, label:string, sub:string, enabled:boolean, tone:string}}
  */
 export function resolveCta(state = {}, ctas) {
-  const conn = resolveConnection(state, {
-    idle: { label: 'CONNECTING', color: 0x7fe7ff, text: '#7fe7ff', tone: 'info' },
-    connecting: { label: 'CONNECTING', color: 0xffd166, text: '#ffd166', tone: 'warning' },
-    online: { label: 'ONLINE', color: 0x4ade80, text: '#4ade80', tone: 'success' },
-    reconnecting: { label: 'RECONNECTING', color: 0xffd166, text: '#ffd166', tone: 'warning' },
-    offline: { label: 'OFFLINE', color: 0xff6b8b, text: '#ff6b8b', tone: 'error' },
-  });
+  // The connection table is IMPORTED, not re-declared. It used to be spelled
+  // out inline here, byte-for-byte identical to CONNECTION_STATES — the exact
+  // failure the token system prevents: two files claiming the same knowledge,
+  // free to disagree at any moment.
+  const conn = resolveConnection(state, CONNECTION_STATES);
 
   // 1. No link → OFFLINE, whatever the party/queue state says. A queued or
   //    in-party button is meaningless without a socket.

@@ -12,7 +12,7 @@
  * tracking, otherwise the value snaps the moment your finger outruns the handle.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, SURFACES, PALETTE } from '../../config/uiTheme.js';
 
 export class Slider {
   /**
@@ -47,7 +47,7 @@ export class Slider {
       .setScrollFactor(0);
 
     this.track = scene.add
-      .rectangle(x + width / 2, y, width, 6, 0x0a1020, 0.9)
+      .rectangle(x + width / 2, y, width, 6, SURFACES.trackBg, 0.9)
       .setDepth(depth)
       .setScrollFactor(0);
 
@@ -65,25 +65,56 @@ export class Slider {
 
     // Generous invisible hit area: a 6px track is very hard to grab.
     this.hit = scene.add
-      .rectangle(x + width / 2, y, width, 30, 0xffffff, 0)
+      .rectangle(x + width / 2, y, width, 30, PALETTE.white, 0)
       .setOrigin(0.5)
       .setDepth(depth + 3)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
 
     this._dragging = false;
+    this.visible = true;
     this._render();
 
-    this.hit.on('pointerdown', (pointer) => {
+    // Named handlers so destroy() can detach them. The scene-level listeners
+    // are what let a drag survive the pointer leaving the slider bounds — but
+    // they MUST be removed on teardown, or every settings open/close (and every
+    // lobby revisit) leaks two input listeners per slider.
+    this._onPointerDown = (pointer) => {
       this._dragging = true;
       this._setFromPointer(pointer);
-    });
-    // Listening on the scene, not the hit area, so the drag survives the pointer
-    // leaving the slider bounds.
-    scene.input.on('pointermove', (pointer) => {
+    };
+    this._onPointerMove = (pointer) => {
       if (this._dragging) this._setFromPointer(pointer);
-    });
-    scene.input.on('pointerup', () => { this._dragging = false; });
+    };
+    this._onPointerUp = () => { this._dragging = false; };
+
+    this.hit.on('pointerdown', this._onPointerDown);
+    scene.input.on('pointermove', this._onPointerMove);
+    scene.input.on('pointerup', this._onPointerUp);
+  }
+
+  /**
+   * Show/hide the whole slider. A hidden slider also drops its hit-testing, so
+   * it can neither intercept a click meant for a panel behind it nor be dragged
+   * while "closed" — a settings panel that is closed must be genuinely inert.
+   * @param {boolean} visible
+   * @returns {Slider} this
+   */
+  setVisible(visible) {
+    const v = Boolean(visible);
+    this.labelText?.setVisible?.(v);
+    this.valueText?.setVisible?.(v);
+    this.track?.setVisible?.(v);
+    this.fill?.setVisible?.(v);
+    this.handle?.setVisible?.(v);
+    this.hit?.setVisible?.(v);
+    if (v) this.hit?.setInteractive?.({ useHandCursor: true });
+    else {
+      this._dragging = false;
+      this.hit?.disableInteractive?.();
+    }
+    this.visible = v;
+    return this;
   }
 
   /** @param {number} v @returns {string} */
@@ -124,6 +155,10 @@ export class Slider {
 
   /** @returns {void} */
   destroy() {
+    // Detach the scene-level drag listeners first — they outlive the widget's
+    // own objects and would otherwise keep firing on a destroyed slider.
+    this.scene.input?.off('pointermove', this._onPointerMove);
+    this.scene.input?.off('pointerup', this._onPointerUp);
     this.labelText.destroy();
     this.valueText.destroy();
     this.track.destroy();

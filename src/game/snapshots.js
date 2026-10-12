@@ -51,6 +51,27 @@ export function buildSnapshot(room, now = Date.now()) {
     phase: room.phase,
     entities,
     tokens: (room.sim?.tokens || []).map((t) => ({ ...t, time: now })),
+    // S14.4 mimics ride the same snapshot as tokens — one authoritative frame
+    // carries both, so the decoy can never be drawn in a position the server
+    // is not using for collision.
+    // S14.5: the control point rides every snapshot so the client bar is always
+    // the server's bar — it renders, it never decides an owner.
+    control: room.controlPoint?.enabled
+      ? {
+        x: room.controlPoint.x,
+        y: room.controlPoint.y,
+        radius: room.controlPoint.cfg.radius,
+        owner: room.controlPoint.owner,
+        progress: Math.round(room.controlPoint.progress),
+        contender: room.controlPoint.contender,
+        state: room.controlPoint.lastEvent,
+      }
+      : null,
+    mimics: room.mimics?.enabled
+      ? room.mimics.list
+        .filter((mk) => mk.state !== 'stunned')
+        .map((mk) => ({ id: mk.id, x: Math.round(mk.x), y: Math.round(mk.y), state: mk.state }))
+      : [],
   };
 }
 

@@ -11,7 +11,7 @@
  * retyping a name every refresh is pure friction.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, SURFACES } from '../../config/uiTheme.js';
 import { Panel } from '../widgets/Panel.js';
 import { Button } from '../widgets/Button.js';
 import { TextField } from '../widgets/TextField.js';
@@ -66,7 +66,7 @@ export class NameGate {
 
     // Dim the lobby behind the gate so focus is obvious.
     this.scrim = scene.add
-      .rectangle(640, 360, 1280, 720, 0x03050b, 0.72)
+      .rectangle(640, 360, 1280, 720, SURFACES.scrim, 0.72)
       .setDepth(this.depth - 1)
       .setScrollFactor(0)
       .setInteractive(); // swallow clicks so nothing behind is clickable

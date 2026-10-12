@@ -34,7 +34,7 @@ let projSeq = 0;
  * @param {object} weapon weapons.js row
  * @returns {object} projectile
  */
-export function spawnProjectile(owner, aimX, aimY, weapon) {
+export function spawnProjectile(owner, aimX, aimY, weapon, damageMul = 1) {
   projSeq += 1;
   const dx = aimX - owner.x;
   const dy = aimY - (owner.y - 20);
@@ -54,7 +54,9 @@ export function spawnProjectile(owner, aimX, aimY, weapon) {
     vx: Math.cos(ang) * weapon.speed,
     vy: Math.sin(ang) * weapon.speed,
     angle: ang,
-    damage: weapon.damage,
+    // S14: the character's damage multiplier is baked into the SHELL, so the
+    // authoritative hit resolves against the character the player actually is.
+    damage: Math.max(1, Math.round(weapon.damage * (damageMul || 1))),
     radius: weapon.radius,
     splash: weapon.splash || 0,
     knockback: weapon.knockback || 0,
@@ -88,9 +90,11 @@ function enemiesOnly(owner, e, now) {
  * @param {number} dt tick seconds
  * @param {number} now server ms
  * @param {object} bounds { minX, maxX, ceilingY, groundY } arena clip
- * @returns {object[]} hits [{ proj, victim, direct: bool, falloff }]
+ * @param {object[]} [mimics] S14.4 live mimics — tested BEFORE entities, since a
+ *   decoy sitting in front of a player should eat the shot they aimed at it.
+ * @returns {object[]} hits [{ proj, victim, direct, falloff } | { proj, mimic }]
  */
-export function stepProjectiles(projectiles, entities, dt, now, bounds) {
+export function stepProjectiles(projectiles, entities, dt, now, bounds, mimics = null) {
   const hits = [];
   const bodyR = config.sim?.entityRadius || 14;
   for (const p of projectiles) {
@@ -109,6 +113,22 @@ export function stepProjectiles(projectiles, entities, dt, now, bounds) {
         splashHits(p, entities, now, hits, p.x, p.y);
       }
       continue;
+    }
+
+    // S14.4 mimic contact: only ARMED mimics are hittable (a dormant/arming
+    // one is protected so the decoy keeps reading as an ordinary token).
+    if (mimics && mimics.length) {
+      let mk = null;
+      for (const cand of mimics) {
+        if (cand.state !== 'armed' || cand.dead) continue;
+        const rr = p.radius + 18;
+        if (Math.hypot(p.x - cand.x, p.y - (cand.y - 18)) <= rr) { mk = cand; break; }
+      }
+      if (mk) {
+        p.dead = true;
+        hits.push({ proj: p, mimic: mk });
+        continue;
+      }
     }
 
     // Entity contact: first valid body along the path wins.

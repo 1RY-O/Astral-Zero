@@ -16,6 +16,7 @@
  */
 
 import { SOCKET_EVENTS } from '../events.js';
+import { allow as allowEvent } from '../limits.js';
 import { getBySocket, setQueueMode, setRoomId, hasFinishedRealMatch } from '../../players/playerStore.js';
 import { getRoom, getRoomForSocket, getAnyRoom, removeSpectator } from '../../rooms/roomManager.js';
 import {
@@ -31,6 +32,16 @@ export function registerMatchmakingHandlers(io, socket) {
 
   // -- queue_join ---------------------------------------------------------------
   socket.on(SOCKET_EVENTS.QUEUE_JOIN, (payload = {}, ack) => {
+    // Matchmaking allocates a room per accepted join, and a leave immediately
+    // follows in a spam loop — so this is the one door that must be ceilinged.
+    if (!allowEvent('queue_join', socket.id)) {
+      socket.emit(SOCKET_EVENTS.ERROR, {
+        code: 'RATE_LIMITED',
+        message: 'Too many queue requests. Wait a moment and try again.',
+      });
+      if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
+      return;
+    }
     const player = getBySocket(socket.id);
     if (!player) {
       if (typeof ack === 'function') ack({ ok: false, error: 'NOT_JOINED' });
@@ -50,6 +61,13 @@ export function registerMatchmakingHandlers(io, socket) {
       { id: player.id, socketId: socket.id, name: player.name },
       payload.mode || 'ffa',
       payload.mapId || 'junkyard',
+      // Bot Practice tuning is OPTIONAL and validated server-side; other modes
+      // ignore it. Sending it is safe for older servers (extra keys are inert).
+      { botCount: payload.botCount, difficulty: payload.difficulty, graceMs: payload.graceMs, passive: payload.passive },
+      // S14.6: ranked is a QUEUE VARIANT, not a mode. Strict `=== true` — a
+      // truthy string can never make a casual queue rated. The server decides
+      // whether the request survives (rated-mode allow-list, protection).
+      payload.ranked === true,
     );
     if (!res.ok) {
       socket.emit(SOCKET_EVENTS.ERROR, {
@@ -62,6 +80,7 @@ export function registerMatchmakingHandlers(io, socket) {
     setQueueMode(socket.id, res.instant ? null : res.mode);
     console.log(
       `[Astral Zero] queue_join ${player.name} → ${res.mode}` +
+        (res.ranked ? ' (ranked)' : '') +
         (res.firstMatchProtection ? ' (first-match protection)' : '') +
         (res.roomId ? ` room=${res.roomId}` : ` pos=${res.position}`),
     );
@@ -81,6 +100,10 @@ export function registerMatchmakingHandlers(io, socket) {
   // Phase 5: spectators leave through the same door (seat freed, no roster
   // change, no stash).
   socket.on(SOCKET_EVENTS.ROOM_LEAVE, (_payload = {}, ack) => {
+    if (!allowEvent('room_leave', socket.id)) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
+      return;
+    }
     const specRoom = getAnyRoom(socket.id);
     if (specRoom && !getRoomForSocket(socket.id)) {
       removeSpectator(specRoom.id, socket.id);
@@ -106,6 +129,10 @@ export function registerMatchmakingHandlers(io, socket) {
   // A full room WITHOUT the flag still answers ROOM_FULL, but now with a
   // `canSpectate: true` hint so lobby UI can offer the booth in one click.
   socket.on(SOCKET_EVENTS.ROOM_JOIN, (payload = {}, ack) => {
+    if (!allowEvent('room_join', socket.id)) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
+      return;
+    }
     const done = (res) => {
       if (typeof ack === 'function') ack(res);
     };
@@ -144,12 +171,38 @@ export function registerMatchmakingHandlers(io, socket) {
 
   // -- match_end (client REQUESTS an early finish; server broadcasts results) -----------
   // Body optional: { reason? }. Server re-stamps results + lobby return.
-  // Phase 5: spectators may also call it (they're in the room; host checks
-  // stay a Phase 6 problem — the request is still just a request).
+  // Phase 6: authorized, not merely "in the room".
+  //
+  // This used to accept any socket the room map knew about — including every
+  // SPECTATOR, who has no body in the match at all. A spectator could therefore
+  // end a live match for everyone in it. Ending a match is a mutation of shared
+  // authoritative state on other players' behalf, so it now requires being a
+  // seated PARTICIPANT (a human in the roster), never a booth observer.
   socket.on(SOCKET_EVENTS.MATCH_END, (payload = {}, ack) => {
     const room = getAnyRoom(socket.id);
     if (!room) {
       if (typeof ack === 'function') ack({ ok: false, error: 'NOT_IN_ROOM' });
+      return;
+    }
+    // Spectators are seated in the room but are not participants.
+    if (getSpectatorRoom(socket.id) === room) {
+      socket.emit(SOCKET_EVENTS.ERROR, {
+        code: 'SPECTATING',
+        message: 'Spectators may not end a match.',
+      });
+      if (typeof ack === 'function') ack({ ok: false, error: 'SPECTATING' });
+      return;
+    }
+    // Must actually be in the roster (not merely remembered by the room index).
+    const isParticipant = (room.humans ?? room.players ?? []).some(
+      (p) => p.socketId === socket.id || p.id === socket.id,
+    );
+    if (!isParticipant) {
+      socket.emit(SOCKET_EVENTS.ERROR, {
+        code: 'NOT_PARTICIPANT',
+        message: 'Only a match participant may end the match.',
+      });
+      if (typeof ack === 'function') ack({ ok: false, error: 'NOT_PARTICIPANT' });
       return;
     }
     const ended = performMatchEnd(room.id, payload.reason || 'manual');

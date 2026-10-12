@@ -36,8 +36,11 @@ import { NET_TICK } from '../config/netConfig.js';
 function makeSample({
   id, time, x = 0, y = 0, vx = 0, vy = 0,
   hp = 100, maxHp = 100, facing = 1, alive = true, seq = 0,
+  // Spawn protection rides the wire (see src/game/entities.js toWire) so local
+  // hit PREDICTION can obey the same invulnerability the server enforces.
+  protected: isProtected = false,
 }) {
-  return { id, time, x, y, vx, vy, hp, maxHp, facing, alive, seq };
+  return { id, time, x, y, vx, vy, hp, maxHp, facing, alive, seq, protected: isProtected };
 }
 
 export class SnapshotBuffer {
@@ -89,7 +92,8 @@ export class SnapshotBuffer {
       last.x === sample.x &&
       last.y === sample.y &&
       last.hp === sample.hp &&
-      last.alive === sample.alive
+      last.alive === sample.alive &&
+      last.protected === sample.protected
     ) {
       return;
     }

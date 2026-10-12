@@ -292,7 +292,29 @@ export function normaliseRoom(payload = {}, { localPlayerId = null } = {}) {
     countdownMs: Number.isFinite(room.countdownMs) ? room.countdownMs : 3000,
     localPlayerId,
     raw: room,
+    // Practice pacing (bot_practice only; 0/false elsewhere). Passed through
+    // so the HUD can render the grace countdown; enforcement stays server-side.
+    graceMs: Number.isFinite(Number(room.graceMs)) ? Number(room.graceMs) : 0,
+    graceUntil: Number.isFinite(Number(room.graceUntil)) ? Number(room.graceUntil) : 0,
+    passive: room.passive === true,
   };
+}
+
+/**
+ * Pick the authoritative wire map for world construction.
+ *
+ * Precedence: the live stream's map (it saw `room_joined` / `match_state`
+ * after subscribing) wins; otherwise the adopted room's verbatim `raw.map`
+ * (the normal entry path adopts the manifest in the lobby, before the arena
+ * subscribes, so the stream slot is empty). Null when nothing has arrived —
+ * the caller must build nothing rather than invent geometry.
+ *
+ * @param {object|null} streamMap - `MatchStream.getMap()`.
+ * @param {object|null} room - Normalised room (`normaliseRoom` output).
+ * @returns {object|null} Wire map, or null.
+ */
+export function selectWireMap(streamMap, room) {
+  return streamMap ?? room?.raw?.map ?? null;
 }
 
 /**

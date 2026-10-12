@@ -18,7 +18,7 @@
  * single alpha change, and so it stays crisp at any zoom.
  */
 
-import { THEME, FONTS, RADII } from '../../config/uiTheme.js';
+import { THEME, FONTS, RADII, PALETTE } from '../../config/uiTheme.js';
 
 export class Logo {
   /**
@@ -65,7 +65,7 @@ export class Logo {
 
     // --- Cleanup swoosh: a brighter inner arc, thicker, with a gradient feel
     // built from two stacked strokes of decreasing width.
-    g.lineStyle(size * 0.16, 0x1e88b0, 1);
+    g.lineStyle(size * 0.16, PALETTE.cyanDeep2, 1);
     g.beginPath();
     g.arc(x, y, r * 0.62, Math.PI * 0.9, Math.PI * 1.85, false);
     g.strokePath();
@@ -126,10 +126,18 @@ export class Logo {
     const gap = this.size * 0.78;
     const left = this.x + gap;
 
+    // FONTS.logo.fontSize is the STRING '38px' (a Phaser text style value), so
+    // it cannot be used in arithmetic — `'38px' * n` is NaN. Derive a real pixel
+    // size from a NUMBER here instead, then append 'px'. This is the bug that
+    // produced a `fontSize: 'NaNpx'` wordmark (which Phaser fell back to a huge
+    // default for), rendering the oversized "ASTRAL ZERO" behind the lobby.
+    const titleSize = Math.round(22 * scaleFactor);
+    const subSize = Math.round(11 * scaleFactor);
+
     this.title = this.scene.add
       .text(left, this.y - 14 * scaleFactor, 'ASTRAL ZERO', {
         ...FONTS.logo,
-        fontSize: `${Math.round(FONTS.logo.fontSize * 14 * scaleFactor * 0.14)}px`,
+        fontSize: `${titleSize}px`,
       })
       .setOrigin(0, 0.5)
       .setDepth(this.depth + 1)
@@ -138,7 +146,7 @@ export class Logo {
     this.subtitle = this.scene.add
       .text(left + 2, this.y + 15 * scaleFactor, 'ORBITAL CLEANUP', {
         ...FONTS.logoSub,
-        fontSize: `${Math.round(11 * scaleFactor)}px`,
+        fontSize: `${subSize}px`,
       })
       .setOrigin(0, 0.5)
       .setDepth(this.depth + 1)

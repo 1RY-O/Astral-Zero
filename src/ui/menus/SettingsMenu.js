@@ -15,7 +15,7 @@
  * and takes effect immediately (ArenaScene checks it at the point it shakes).
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, SURFACES } from '../../config/uiTheme.js';
 import { Slider } from '../widgets/Slider.js';
 import { Button } from '../widgets/Button.js';
 import { settings } from '../../core/Settings.js';
@@ -39,7 +39,7 @@ export class SettingsMenu {
 
     const { width, height } = scene.scale;
     this.root.add(
-      scene.add.rectangle(width / 2, height / 2, width, height, 0x03060d, 0.9).setScrollFactor(0),
+      scene.add.rectangle(width / 2, height / 2, width, height, SURFACES.scrim, 0.9).setScrollFactor(0),
     );
     this.root.add(
       scene.add
@@ -103,6 +103,14 @@ export class SettingsMenu {
       this.masterSlider, this.sfxSlider, this.uiSlider,
       ...this.toggles, this.resetButton, this.closeButton,
     ];
+
+    // START HIDDEN. The widgets above are plain scene objects (not children of
+    // the invisible `root` container), so they default to VISIBLE and would sit
+    // on top of the lobby — leaking the audio sliders over Create Party — until
+    // the first open. Establishing the closed state here means a closed menu is
+    // genuinely inert: invisible, non-interactive, and unfocusable from the
+    // start, and reopening simply re-shows these same nodes (no duplicates).
+    this.hide();
   }
 
   /**

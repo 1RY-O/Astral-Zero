@@ -169,3 +169,6 @@ dist-ssr/
 # Keep placeholder art in git (via public/assets/.gitkeep). Real game art is
 # committed too — it is source, not build output. Only exported art-tool
 # scratch files (e.g. .aseprite backups) are ignored, above.
+
+# Astral Zero — durable player profiles (see src/players/persistence.js)
+data/

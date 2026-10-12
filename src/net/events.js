@@ -14,8 +14,14 @@
  *   S→C  server pushes, client listens only
  */
 
-/** Contract version this client was written against (see `/api/info`). */
-export const EXPECTED_SOCKET_EVENTS_VERSION = '1.4.0-phase5';
+/**
+ * Contract version this client was written against (see `/api/info`).
+ *
+ * `1.5.0-s14` — the S14 additive set (character selection, ranked board,
+ * orbital shifts, mimics, control point). Only a genuinely older MAJOR is
+ * treated as incompatible; every 1.x contract speaks the lobby events.
+ */
+export const EXPECTED_SOCKET_EVENTS_VERSION = '1.5.0-s14';
 
 export const NET_EVENTS = Object.freeze({
   // --- Connection lifecycle -------------------------------------------------
@@ -146,6 +152,18 @@ export const NET_EVENTS = Object.freeze({
   /** S→C `{ roomId, phase, mode, mapId, players, bots, entities,
    *   countdownMs }` — countdown → playing → gameover → lobby. */
   MATCH_STATE: 'match_state',
+  // S14: character / loadout selection (C→S) + the accepted update (S→C).
+  CHARACTER_SET: 'character_set',
+  CHARACTER_UPDATE: 'character_update',
+  // S14: ranked standing + leaderboard.
+  RANKED_UPDATE: 'ranked_update',
+  RANKED_BOARD: 'ranked_board',
+  // S14.3: orbital shift warn → shift → settled, with the live geometry.
+  ORBITAL_SHIFT: 'orbital_shift',
+  // S14.4: decoy scrap tokens that arm and chase.
+  MIMIC_EVENT: 'mimic_event',
+  // S14.5: control-point capture / decay / unlock.
+  OBJECTIVE_EVENT: 'objective_event',
 });
 /**
  * Server→client only. SocketClient refuses to emit these: the backend would
@@ -158,6 +176,12 @@ export const SERVER_ONLY_EVENTS = Object.freeze([
   // everyone in the room, so SocketClient refuses them outright.
   NET_EVENTS.ENTITY_SNAPSHOT,
   NET_EVENTS.ENTITY_DEATH,
+  // S14: the server owns character selection echoes, rating and arena shifts.
+  NET_EVENTS.CHARACTER_UPDATE,
+  NET_EVENTS.RANKED_UPDATE,
+  NET_EVENTS.ORBITAL_SHIFT,
+  NET_EVENTS.MIMIC_EVENT,
+  NET_EVENTS.OBJECTIVE_EVENT,
   NET_EVENTS.ENTITY_RESPAWN,
   NET_EVENTS.PLAYER_HEALTH_UPDATE,
   NET_EVENTS.SCORE_UPDATE,

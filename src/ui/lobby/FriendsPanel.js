@@ -14,7 +14,7 @@
  *   so the player never fires a request the backend would only reject.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, SURFACES } from '../../config/uiTheme.js';
 import { Panel } from '../widgets/Panel.js';
 import { Button } from '../widgets/Button.js';
 import { TextField } from '../widgets/TextField.js';
@@ -33,6 +33,8 @@ export class FriendsPanel {
    * @param {number} opts.height
    * @param {import('../../net/NetworkManager.js').NetworkManager} opts.net
    * @param {number} [opts.depth]
+   * @param {number} [opts.accent] - Panel accent override (packed int).
+   * @param {string} [opts.subtitle] - Small line under the title.
    */
   constructor(scene, opts) {
     this.scene = scene;
@@ -43,7 +45,11 @@ export class FriendsPanel {
     const innerX = x + 20;
     const innerW = w - 40;
 
-    this.panel = new Panel(scene, { x, y, width: w, height: h, title: 'FRIENDS', depth: this.depth });
+    this.panel = new Panel(scene, {
+      x, y, width: w, height: h,
+      title: 'FRIENDS', subtitle: opts.subtitle,
+      accent: opts.accent, depth: this.depth,
+    });
 
     // --- Add-friend row ----------------------------------------------------
     this.addField = new TextField(scene, {
@@ -164,7 +170,7 @@ export class FriendsPanel {
     const y = this.listTop + index * (ROW_H + ROW_GAP);
 
     const bg = scene.add.graphics();
-    bg.fillStyle(0x0b1424, 0.9);
+    bg.fillStyle(SURFACES.panelRow, 0.9);
     bg.fillRoundedRect(0, 0, w, ROW_H, 8);
     bg.lineStyle(1, THEME.panelBorder, 0.5);
     bg.strokeRoundedRect(0, 0, w, ROW_H, 8);

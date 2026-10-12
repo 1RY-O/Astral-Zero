@@ -204,5 +204,31 @@ section('No-shot path is allocation-free and well-formed');
   ok(Object.isFrozen(a), 'the shared no-shot object is frozen (callers cannot corrupt it)');
 }
 
+// ===========================================================================
+section('Held trigger SUSTAINS fire (regression: the 3-shot jam)');
+// ===========================================================================
+{
+  // Hold the trigger for 3 s of simulated 60fps frames. Previously the
+  // maxShotsPerPull cap halted fire after 3 rounds, so the gun "jammed" while
+  // held — despite the tutorial promising "hold for sustained fire".
+  const cfg = { getOrigin: () => ({ x: 0, y: 600, angle: 0 }), getTargets: () => [] };
+  let clock = 0;
+  const rifle = new Combat({ ...cfg, weapon: WEAPONS['scrap-rifle'], now: () => clock });
+  let shots = 0;
+  for (let t = 0; t <= 3000; t += 16) {
+    clock = t;
+    if (rifle.tryFire(true, t === 0).fired) shots += 1;
+  }
+  ok(shots >= 8, `held fire continues well past 3 rounds (${shots} shots in 3s)`);
+  const maxPossible = Math.ceil(3000 / WEAPONS['scrap-rifle'].cooldownMs) + 1;
+  ok(shots <= maxPossible, `held fire is still bounded by the weapon cooldown (${shots} <= ${maxPossible})`);
+
+  // A single tap still fires exactly once (the cooldown blocks the rest).
+  let t2 = 0;
+  const tap = new Combat({ ...cfg, weapon: WEAPONS['scrap-rifle'], now: () => t2 });
+  ok(tap.tryFire(true, true).fired, 'a tap fires once');
+  ok(!tap.tryFire(true, false).fired, 'the same tap does not fire again on the next frame');
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nAll passed');
 process.exit(failures ? 1 : 0);

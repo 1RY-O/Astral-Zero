@@ -33,14 +33,17 @@
 
 import Phaser from 'phaser';
 import { MATCH_MODES, TEAMS, HUD } from '../config/lobbyConfig.js';
+import { feetToCentre } from '../shared/coords.js';
 import { HealthBar } from '../ui/hud/HealthBar.js';
 
 /** Tint per actor kind, keyed by mode + team. */
+import { PALETTE } from '../config/uiTheme.js';
+
 function colourFor(mode, team, isBot) {
   if (MATCH_MODES[mode]?.friendly) return isBot ? TEAMS.blue.colorInt : TEAMS.solo.colorInt;
   if (team === 'red') return TEAMS.red.colorInt;
   if (team === 'blue') return TEAMS.blue.colorInt;
-  return isBot ? 0xff6b8b : TEAMS.solo.colorInt;
+  return isBot ? PALETTE.red : TEAMS.solo.colorInt;
 }
 
 export class RemoteActor {
@@ -78,7 +81,7 @@ export class RemoteActor {
       .text(entity.x, entity.y + HUD.nameTagOffset, this._label(entity), {
         fontFamily: 'Segoe UI, system-ui, sans-serif',
         fontSize: HUD.nameTagFontSize,
-        color: entity.isBot ? '#ff9f43' : '#cfe2f5',
+        color: entity.isBot ? PALETTE.amberHot : PALETTE.ink200Css,
       })
       .setOrigin(0.5, 1)
       .setDepth(9);
@@ -118,9 +121,20 @@ export class RemoteActor {
    * @param {number} y
    * @returns {void}
    */
-  setTarget(x, y) {
+  /**
+   * Set the authoritative target position.
+   *
+   * TAKES FEET-SPACE y (what the server reports) and converts to this actor's
+   * sprite-centre space once, here, at the boundary. Doing the conversion in one
+   * place is what keeps remote players, bots, nametags and health bars all
+   * sitting on the floor the server says they are on — see src/shared/coords.js.
+   * @param {number} x
+   * @param {number} feetY
+   * @returns {void}
+   */
+  setTarget(x, feetY) {
     if (Number.isFinite(x)) this.targetX = x;
-    if (Number.isFinite(y)) this.targetY = y;
+    if (Number.isFinite(feetY)) this.targetY = feetToCentre(feetY);
   }
 
   /**
@@ -156,7 +170,7 @@ export class RemoteActor {
   die() {
     if (!this.alive) return;
     this.alive = false;
-    this.sprite.setTint(0x556070);
+    this.sprite.setTint(PALETTE.deathTint);
     this.scene.tweens.add({ targets: [this.sprite, this.tag], alpha: 0, duration: 260 });
     this.healthBar.setVisible(false);
   }
@@ -168,11 +182,12 @@ export class RemoteActor {
    * @param {number} [hp]
    * @returns {void}
    */
-  respawn(x, y, hp = this.maxHp) {
+  respawn(x, feetY, hp = this.maxHp) {
     this.alive = true;
     this.hp = hp;
-    this.setTarget(x, y);
-    this.sprite.setPosition(x, y).setTint(this.baseColour).setAlpha(1);
+    this.setTarget(x, feetY);
+    const p = { x, y: feetToCentre(feetY) };
+    this.sprite.setPosition(p.x, p.y).setTint(this.baseColour).setAlpha(1);
     this.tag.setAlpha(1);
     this.healthBar.setHp(hp, this.maxHp);
   }

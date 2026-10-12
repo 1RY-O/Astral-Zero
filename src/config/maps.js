@@ -37,6 +37,8 @@
  * @param {string} [fallbackId] - Map id, used only for naming + ambience.
  * @returns {object} Normalised map: geometry from the server, ambience local.
  */
+import { ART, PALETTE } from './uiTheme.js';
+
 export function mapFromWire(wireMap, fallbackId = 'orbital_junkyard') {
   const src = wireMap && typeof wireMap === 'object' ? wireMap : null;
   const id = src?.id ?? fallbackId;
@@ -71,13 +73,13 @@ export function mapFromWire(wireMap, fallbackId = 'orbital_junkyard') {
 export function ambienceFor(id) {
   switch (id) {
     case 'reactor_core':
-      return Object.freeze({ dust: 30, vents: 4, debris: 6, tint: 0x12060a, starAlpha: 0.45, glow: 0xff9f43 });
+      return Object.freeze({ dust: 30, vents: 4, debris: 6, tint: ART.ambient.tintJunkyard, starAlpha: 0.45, glow: PALETTE.amberHot });
     case 'biodome':
-      return Object.freeze({ dust: 40, vents: 1, debris: 10, tint: 0x07140c, starAlpha: 0.35, glow: 0x4ade80 });
+      return Object.freeze({ dust: 40, vents: 1, debris: 10, tint: ART.ambient.tintBiodome, starAlpha: 0.35, glow: PALETTE.green });
     case 'orbital_junkyard':
     case 'junkyard':
     default:
-      return Object.freeze({ dust: 26, vents: 2, debris: 5, tint: 0x05070f, starAlpha: 0.5, glow: 0x7fe7ff });
+      return Object.freeze({ dust: 26, vents: 2, debris: 5, tint: PALETTE.void2, starAlpha: 0.5, glow: PALETTE.cyanLight });
   }
 }
 

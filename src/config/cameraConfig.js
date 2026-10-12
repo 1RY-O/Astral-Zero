@@ -36,6 +36,8 @@ export const CAMERA = {
    * Horizontal anchor as a fraction of the viewport width.
    * 0.5 would be dead-centre (classic follow-cam). ~0.32 pushes the player
    * to the left third and opens up the aiming side — the Arsenal look.
+   * (At the default zoom the whole arena fits, so the anchor only takes
+   * effect while zoomed in; it is kept so zoomed moments keep their framing.)
    */
   anchorXRatio: 0.32,
 
@@ -49,36 +51,55 @@ export const CAMERA = {
   /**
    * Zoom while idle/walking — the default "third person" distance.
    *
-   * WHY > 1: the gray-box arena is exactly 1280x720, i.e. the same size as
-   * the viewport. At zoom 1.0 Phaser clamps `scroll` to 0 because the visible
-   * area already fills the world, which would freeze the camera dead-centre
-   * and make the whole over-the-shoulder framing impossible. Zooming in
-   * shrinks the visible area (1049x590 at 1.22), which re-opens a ~230px pan
-   * range on both axes so the anchor + aim lead can actually move.
+   * 1.0 shows the ENTIRE 1280x720 arena: player, nearby enemies and
+   * surroundings in one readable frame. The old 1.22 default cropped ~15% off
+   * every edge, so players could not tell where they stood or what approached.
+   * At exactly 1.0 the visible area equals the arena rect, so the camera locks
+   * to (0,0): no pan, no jitter, no empty-space views — the calmest possible
+   * default. Zoom only ever rises ABOVE 1.0 (subtle aim tighten), never below,
+   * so the arena edge is never crossed.
    */
-  baseZoom: 1.22,
-  /** Extra zoom-in when aiming (Arsenal-style tighten-up). ~0.18 = subtle. */
-  aimZoomBonus: 0.18,
-  /** Zoom pulled back at top running speed so fast movement stays readable. */
-  sprintZoomOut: 0.12,
+  baseZoom: 1.0,
+  /** Extra zoom-in when aiming. Small: readability first, punch second. */
+  aimZoomBonus: 0.1,
+  /** Zoom pulled back at top running speed. 0 = never zoom out past base. */
+  sprintZoomOut: 0,
   /**
-   * Hard clamps. `maxZoom` is deliberately far below "inside the head"
-   * (~3x would be first person) — the player must ALWAYS be visible.
+   * Hard clamps. `minZoom` is exactly 1.0 (zooming out past the arena rect
+   * would show void); `maxZoom` stays far below "inside the head" (~3x would
+   * be first person) — the player must ALWAYS be visible.
    */
-  minZoom: 0.95,
-  maxZoom: 1.5,
+  minZoom: 1.0,
+  maxZoom: 1.2,
 
   // --- Overscan ------------------------------------------------------------
   /**
    * Extra world margin added around the arena for camera bounds ONLY.
    *
-   * Without it, the player standing at an arena edge would push the desired
-   * scroll past the world rect, Phaser would clamp it, and the framing would
-   * snap to centre — exactly the pop this camera is meant to avoid. The
-   * overscan buys room for the shoulder bias and aim lead to work near the
-   * edges. Nothing is drawn out here; it is headroom, not new level.
+   * WHY IT CANNOT BE 0: Phaser's `clampX` pins the camera scroll to `bounds.x`
+   * whenever the bounds rect is not WIDER than the viewport
+   * (`bw = max(bx, bx + bounds.width - displayWidth)` collapses to `bx`). Every
+   * map in this project is narrower and shorter than the 1280x720 viewport, so
+   * with zero padding the scroll is pinned to a single value on every axis —
+   * which silently disables the off-centre anchor, the aim lead, the shoulder
+   * bias and the jump lead. The player then walks around inside a FIXED frame,
+   * and every framing parameter in this file becomes dead code while blank void
+   * is visible past the arena edges.
+   *
+   * So the padding is a floor, not a constant: it is grown whatever the
+   * viewport needs for the camera to be able to actually move (see
+   * `_boundsPadding`). The arena itself is never left behind — the overscan is
+   * empty headroom used by the framing maths, exactly as the comment above
+   * intends.
    */
-  boundsPadding: 240,
+  boundsPadding: 0,
+  /**
+   * The framing headroom the overscan must always leave available on each side,
+   * in world px. Covers the largest framing offset the rig can ask for
+   * (aimLeadPixels + shoulderBias) so the scroll is never clamped while the
+   * player is mid-screen.
+   */
+  framingOverscan: 220,
 
   // --- Responsiveness ------------------------------------------------------
   /**

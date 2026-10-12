@@ -16,7 +16,7 @@
  * two banners anyone actually reads are the ones about them.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, COMBAT_FX } from '../../config/uiTheme.js';
 import { MEDALS } from '../../config/netConfig.js';
 
 export class Medals {
@@ -65,7 +65,7 @@ export class Medals {
         fontSize: `${size}px`,
         fontStyle: '700',
         color,
-        stroke: '#0a1020',
+        stroke: COMBAT_FX.numberStroke,
         strokeThickness: 5,
       })
       .setOrigin(0.5)

@@ -27,6 +27,7 @@
  */
 
 import * as Motion from '../../core/Motion.js';
+import { ART, SURFACES } from '../../config/uiTheme.js';
 
 export class AmbientFx {
   /**
@@ -77,7 +78,7 @@ export class AmbientFx {
           Math.random() * this.height,
           2,
           2,
-          0x9fd4ff,
+          ART.ambient.mote,
           0.12 + Math.random() * 0.22,
         )
         .setDepth(this.depth);
@@ -94,7 +95,7 @@ export class AmbientFx {
       const x = ((i + 1) / (vents + 1)) * this.width;
       const y = this.height - 92;
       const vent = this.scene.add
-        .rectangle(x, y, 54, 8, 0x7fe7ff, 0.5)
+        .rectangle(x, y, 54, 8, ART.ambient.vent, 0.5)
         .setDepth(this.depth + 1);
       this._vents.push(vent);
 

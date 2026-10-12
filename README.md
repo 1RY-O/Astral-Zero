@@ -1,19 +1,25 @@
-# ★ Astral Zero — Backend (Phase 1 Skeleton)
+# ★ Astral Zero — Backend & Multiplayer Server
 
-> Fast-paced 2D arena platformer-shooter. You are a heavily armed **space janitor**
-> cleaning low-Earth orbit junk — Raze 3 / Unreal Flash 3 feel, Phaser 3 + Arcade Physics,
-> bright/cartoonish 2D look, bouncy exaggerated movement.
+> Fast-paced 2D multiplayer arena shooter set in chaotic orbital junkyards. You are a
+> zero-gravity **Space Janitor** fighting rogue AI machines and other players while
+> collecting salvage, navigating shifting platforms, and exploiting momentum-based
+> movement. Phaser 3 + Arcade Physics, Node + Express + Socket.io, bright/cartoonish
+> 2D look, bouncy exaggerated movement.
 >
-> **Phase 1 scope:** Express + Socket.io server skeleton, static hosting for the Phaser
-> game, and a frozen JSON event contract. **No game logic, bot AI, or multiplayer rooms yet.**
+> **Current state:** the authoritative multiplayer server is implemented and live —
+> a 20 Hz server-authoritative simulation, party/friends/matchmaking lobbies, bot AI
+> with difficulty tiers, server combat, scoring, lag compensation, late-join/reconnect,
+> a scrap economy, and the arcade UI/UX overhaul. The socket contract is
+> **`1.5.0-s14`**. See [FRONTEND.md](./FRONTEND.md) for the client and
+> [docs/](./docs/) for design notes.
 
 ---
 
 ## 1. Tech stack
 
 > 🎮 **Looking for the game client?** The Phaser 3 client (run it, controls,
-> project structure, movement tuning) is documented separately in
-> **[`FRONTEND.md`](./FRONTEND.md)**. This README covers the backend only.
+> project structure, movement tuning, UI/UX) is documented separately in
+> **[`FRONTEND.md`](./FRONTEND.md)** and **[`docs/UIUX.md`](./docs/UIUX.md)**.
 
 | Layer | Tech |
 |---|---|
@@ -22,8 +28,13 @@
 | Transport | Socket.io over WebSocket (JSON payloads, see `websocket_events.md`) |
 | Dev | `nodemon` for backend hot reload, `dotenv` for `PORT` / `CORS_ORIGIN` |
 
-Single-player vs bots is the priority. Multiplayer rooms are a stretch goal —
-the socket contract already reserves names so the frontend never breaks later.
+The server runs **one authoritative fixed-step simulation** (`src/game/loop.js`) at
+**20 Hz**. It owns match/room membership, matchmaking, character/bot spawning,
+movement validation, collision, hits, damage, cooldowns, scoring, win conditions,
+match timers, orbital-shift state, and every reward. The client predicts and
+interpolates for responsiveness but never declares its own damage, rewards, hits,
+match results, unlocks, or rating changes. There is **no second competing
+simulation loop**.
 
 ## 2. Project structure
 
@@ -112,7 +123,7 @@ const socket = import.meta.env.DEV
   : io();                       // production: same origin
 
 socket.on('connected', ({ socketEventsVersion }) => {
-  if (socketEventsVersion !== '1.0.0-phase1') {
+  if (!socketEventsVersion.startsWith('1.4')) {
     console.warn('Backend contract changed — update Phaser netcode!');
   }
   socket.emit('player_join',
@@ -146,40 +157,80 @@ than letting every button fail silently.
 
 ## 6. Socket events (summary — details in `websocket_events.md`)
 
-| Event | Direction | Phase 1 behavior |
+Contract **`1.5.0-s14`**. Names live in `src/sockets/events.js`; shapes live in
+`websocket_events.md`. The authoritative groups:
+
+| Group | Events | Behavior |
 |---|---|---|
-| `connected` | S → C | Welcome + version handshake |
-| `player_join` / `player_leave` | C → S / S ⇒ C | Join broadcast; leave on disconnect |
-| `player_move` | C → S ⇒ C | 20–30 Hz relay, sender `id` added |
-| `player_shoot` | C → S ⇒ C | Per-shot relay (no hit detection yet) |
-| `player_melee` | C → S ⇒ C | Mop-swing relay with `swingId` de-dupe |
-| `player_health_update` | relay | Stub: anyone may report; 🔒 server-authoritative in Phase 2 |
-| `bot_spawn` / `bot_update` / `bot_death` | S → C | Shapes frozen; server ignores client emits (+ `error_event`) |
-| `puzzle_solved`, `rocket_jump`, `pickup_collected` | C → S ⇒ C | Reserved stubs: log + rebroadcast |
-| `jumpscare_trigger`, `match_state` | S → C | Reserved server-only stubs |
-| `error_event` | S → C | `{ code, message }` uniform errors |
+| Connection | `connected` | Welcome + contract-version handshake |
+| Identity | `player_join` / `player_leave` | Keys friends + first-match protection; leave on disconnect |
+| Authoritative sim | `player_input` (primary), `entity_snapshot` (20 Hz), `entity_death`, `entity_respawn`, `score_update` | Client sends **intent**; server resolves physics, hits, damage, scoring |
+| Combat | `player_shoot` / `player_melee` | Validated triggers; the server spawns shells / arc-tests melee |
+| Bots | `bot_spawn` / `bot_update` / `bot_death` | Server-driven AI (chase/strafe/flee, difficulty tiers); client emits ignored |
+| Parties | `party_create/join/leave/start_match/invite(_invited)/update` | Max 4, 6-char code, leader starts, whole party moves together |
+| Friends | `friend_add/remove/list/update` | In-memory, survives reconnect by normalized name |
+| Matchmaking | `queue_join/leave/update`, `match_found` | Solo queue + party start + bot fill + first-match protection |
+| Rooms | `room_joined/leave/update`, `room_join` (late), `match_end` | Authoritative roster; return to lobby on end |
+| Extras | `streak_event` (medals), `scrap_event` (economy), `pickup_collected` | Additive Phase 4/5 systems |
+| Errors | `error_event` | Uniform `{ code, message }` envelope |
 
-## 7. Client status
+**Bot Practice matchmaking (locked requirement):** `mode: "bot_practice"` never
+enters the public queue — the server boots a dedicated AI-only room for the
+requester instantly, with validated/clamped `botCount` + `difficulty`. A duplicate
+request while seated is rejected with `ALREADY_IN_MATCH`. See §7 of
+`websocket_events.md`.
 
-The Phaser client is well beyond the original Phase 1 skeleton. As shipped
-today it has: full Socket.io netcode with prediction/reconciliation, party +
-friends + matchmaking lobbies, authoritative combat, bot AI, three maps, an
-audio engine, progression, a spectator camera, and the arcade UI/UX overhaul
-(lobby, loading screen, HUD, responsive + accessible). The client's own roadmap
-and architecture live in [FRONTEND.md](./FRONTEND.md) and
-[docs/UIUX.md](./docs/UIUX.md); the wire contract lives in
-[`websocket_events.md`](./websocket_events.md).
+## 7. Implemented vs. planned
 
-## 8. Roadmap (open)
+### Implemented (verified by `npm run test:all`)
 
-- [ ] Mid-fight puzzles, jumpscares, rocket-jump validation.
-- [ ] Persistent storage (all state is still in-memory).
-- [ ] Real sprite/audio assets — the client is currently fully procedural.
+- **Authoritative 20 Hz simulation** — server physics, movement validation, collision.
+- **Party system** — create/join/leave/invite, 6-char code, leader starts, whole party moves together.
+- **Friends system** — add/remove/list, in-memory, survives reconnect by normalized name.
+- **Matchmaking** — solo queue + party start + bot fill + **first-match protection**.
+- **Bot Practice** — dedicated AI-only room, **never enters the public queue**, server-validated `botCount` + `difficulty`.
+- **Rooms & lifecycle** — authoritative roster, countdown → playing → end → lobby, spectators, late-join, reconnect grace.
+- **Bot AI** — chase/strafe/flee/jump, team-aware, four difficulty tiers (`beginner/normal/advanced/elite`), personalities.
+- **Server combat** — projectiles, melee arcs, lag-compensated hits, death/respawn, spawn protection.
+- **Scoring & win conditions** — ffa/tdm limits + overtime, scrap_collector banking, control-point holding, medals/streaks, XP.
+- **Scrap economy** — collectible tokens, carry cap, deposit stations.
+- **Three maps**, an **audio engine**, **progression**, a **spectator camera**.
+- **Arcade UI/UX** — lobby, boot screen, HUD, responsive tiers, accessible (see `docs/UIUX.md`).
+- Client netcode with **prediction/reconciliation** and snapshot interpolation (`src/net/`).
+- **Season 14** (contract `1.5.0-s14`, all server-authoritative):
+  - **Character roster + tiers** with signature weapons, movement skills, abilities and **loadout variants** (`src/shared/characters.js`, `src/shared/loadouts.js`). Selection is validated against the shared roster and the player's persisted unlocks, so a locked or unknown character is refused rather than silently swapped.
+  - **Ranked** — placement series then Elo on `ffa`/`tdm` only, written once per eligible match from server-scored `match_end`. Draws, abandoned matches, parties, practice and scrap never move a ladder; unrated modes can never be flagged ranked. See `websocket_events.md` §28.
+  - **Orbital shifts** — telegraphed platform drift with a warn → shift → settle machine.
+  - **Scrap Mimics** — decoy tokens that arm and chase, paying more than the token they imitated.
+  - **Control Point** — a contested point that freezes while both teams are on it.
+  - **Durable profiles** — a debounced, atomic JSON store (`src/players/persistence.js`); set `persistence.enabled: false` to run fully in-memory.
+
+### Planned / partially implemented (NOT complete — do not treat as shipped)
+
+- **Three distinct currencies** — combat scrap (match) exists; progression tokens and cosmetic credits are not separated yet.
+- **Scrap Boxes & character unlocks** — drop odds, pity, duplicate protection. Only the starter character unlocks today.
+- **Season Pass & mastery** — XP and a `mastery` map exist; there is no pass, track or mastery reward chain.
+- **Team character uniqueness** (no duplicate characters per team).
+- **Real sprite/audio assets** — the client is currently fully procedural (zero art committed).
+- Mid-fight puzzles, jumpscares, rocket-jump validation.
+
+## 8. Testing
+
+```bash
+npm test            # party/friends/mode/leader-permission behaviour
+npm run test:bots   # Bot Practice bypasses the public queue (regression)
+npm run test:all    # every suite (UI, lobby, HUD, netcode, combat, bots, camera…)
+npm run build       # production bundle → dist/
+```
+
+`tests/phaser-stub.mjs` lets the real game modules load in plain Node, so most
+suites run without a browser or a backend. `tests/matchmaking-bots.test.mjs`
+drives the real matchmaking manager against a fake Socket.io server.
 
 ## 9. Contributing
 
-- Event change? Update **three** places: `websocket_events.md` + `src/sockets/events.js` + changelog row, then bump `SOCKET_EVENTS_VERSION`.
-- Keep handlers in `src/sockets/index.js` thin; future game systems get their own modules (e.g. `src/game/bots.js` — backend-only name, no clash with `src/scenes/`).
+- Event change? Update **three** places: `websocket_events.md` + `src/sockets/events.js` + changelog row, then bump `SOCKET_EVENTS_VERSION` (breaking) or the MINOR (additive). **The current contract is `1.5.0-s14`.**
+- Keep handlers thin; future game systems get their own modules under `src/game/` (backend-only names, no clash with `src/scenes/`).
 - Backend scripts: `npm run dev:server` (nodemon) / `npm start`. Game scripts: `npm run dev` (Vite) / `npm run build`.
 
 ---

@@ -41,7 +41,16 @@
  * telemetry on score rows). All ADDITIVE — 1.0–1.3 keeps working.
  */
 
-export const SOCKET_EVENTS_VERSION = '1.4.0-phase5';
+/**
+ * Wire contract version.
+ *
+ * `1.5.0-s14` is a MINOR bump for an ADDITIVE change set: S14 adds the
+ * character/loadout selection pair, the ranked board + rating push, and the
+ * orbital-shift / mimic / objective events, plus the `control_point` mode.
+ * Nothing was renamed, removed or re-shaped, so an older reader still works —
+ * which is exactly what `version.startsWith('1.')` on the client tolerates.
+ */
+export const SOCKET_EVENTS_VERSION = '1.5.0-s14';
 
 export const SOCKET_EVENTS = Object.freeze({
   // --- Connection lifecycle (Socket.io built-ins + our hello) ---
@@ -111,6 +120,15 @@ export const SOCKET_EVENTS = Object.freeze({
 
   // --- Phase 5: scrap economy (additive) ---
   SCRAP_EVENT: 'scrap_event', // S->C { kind: drop|pickup|deposit, byId, amount, ... }
+
+  // --- S14: characters, loadouts, ranked (additive) ---
+  CHARACTER_SET: 'character_set', // C->S { character, variant? } validated selection
+  CHARACTER_UPDATE: 'character_update', // S->C { character, variant, unlocked, profile } accepted selection
+  RANKED_UPDATE: 'ranked_update', // S->C { placed, rating, league, seasonId, ... } after a ranked match
+  RANKED_BOARD: 'ranked_board', // C->S {} read-only standings request → ranked_update
+  ORBITAL_SHIFT: 'orbital_shift', // S->C { type: warning|shift|settled, platforms, geometry } arena shift
+  MIMIC_EVENT: 'mimic_event', // S->C { kind: spawn|arm|lunge|bite|hit|kill } decoy token
+  OBJECTIVE_EVENT: 'objective_event', // S->C { kind: capture|decay|unlock, team, from } control point
 });
 
 /**
@@ -126,6 +144,11 @@ export const SOCKET_EVENTS = Object.freeze({
 export const GAME_MODES = Object.freeze({
   FFA: 'ffa',
   TDM: 'tdm',
+  // S14.5: control_point is a REAL server mode (gameModes.control_point +
+  // room support). It lives here so the queue validates it — the lobby card
+  // for it has existed since the objective mode shipped, and without this
+  // entry `queue_join { mode: 'control_point' }` was answered with BAD_MODE.
+  CONTROL: 'control_point',
   BOT_PRACTICE: 'bot_practice',
   SCRAP: 'scrap_collector',
 });

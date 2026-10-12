@@ -43,16 +43,25 @@ export function tryFire(room, e, aimX, aimY, io, EV, now = Date.now()) {
   if (!e?.alive) return { ok: false, error: 'DEAD' };
   if (now < (e.fireCooldownUntil || 0)) return { ok: false, error: 'COOLDOWN' };
   const weapon = weaponFor(e.weaponId);
-  e.fireCooldownUntil = now + weapon.cooldownMs * (e.cooldownScale || 1);
+  // S14 character handling: the weapon row is the base, the character scales
+  // cadence, damage and splash on top. `charDamageMul` is applied here at the
+  // SOURCE, so the projectile that flies — and therefore the authoritative hit
+  // resolution and every damage number derived from it — carries the character's
+  // damage. Nothing downstream can disagree.
+  const cooldownMul = (e.cooldownScale || 1) * (e.charCooldownMul ?? 1);
+  const shot = (e.charSplashMul && e.charSplashMul !== 1)
+    ? { ...weapon, splash: Math.round(weapon.splash * e.charSplashMul) }
+    : weapon;
+  e.fireCooldownUntil = now + weapon.cooldownMs * cooldownMul;
   e.lastAimX = aimX;
   e.lastAimY = aimY;
 
   // Bloom widens each shot's cone; single taps stay laser-true.
   const heatCfg = config.sim?.heat || {};
   e.heat = Math.min(1, (e.heat || 0) + (heatCfg.perShot ?? 0.22));
-  const hot = { ...weapon, spread: weapon.spread + e.heat * (heatCfg.maxBloom ?? 0.075) };
+  const hot = { ...shot, spread: shot.spread + e.heat * (heatCfg.maxBloom ?? 0.075) };
 
-  const proj = spawnProjectile(e, aimX, aimY, hot);
+  const proj = spawnProjectile(e, aimX, aimY, hot, e.charDamageMul ?? 1);
   if (!proj) return { ok: false, error: 'BAD_AIM' };
   room.sim?.projectiles?.push(proj);
   // Phase 5 telemetry: accepted pulls feed accuracy + room totals.

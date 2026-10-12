@@ -57,6 +57,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this._coyoteTimer = 0;
     /** Ms of buffered jump left (input grace before landing). */
     this._jumpBufferTimer = 0;
+    /**
+     * True once the early-release cut has been applied to the current jump.
+     * Guards against applying it twice, and is cleared on the next takeoff so
+     * each jump gets exactly one cut. Mirrors the authoritative sim.
+     */
+    this.jumpReleased = false;
     /** Current aim angle in radians; 0 = pointing right. */
     this._aimAngle = AIM.initialAngle;
     /** Aim indicator sprite (owned by the scene, positioned each frame). */
@@ -76,10 +82,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
    * the platforms exist.
    * @param {Phaser.GameObjects.GameObject[]} platforms - Static bodies.
    * @param {Phaser.Physics.Arcade.ArcadePhysics} physics
-   * @returns {void}
+   * @returns {Phaser.Physics.Arcade.Collider} The collider (owned by the scene,
+   *   which re-registers it if a late authoritative map rebuilds the world).
    */
   registerCollisions(platforms, physics) {
-    physics.add.collider(this, platforms);
+    return physics.add.collider(this, platforms);
   }
 
   /**
@@ -156,11 +163,26 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       this._jumpBufferTimer = Math.max(0, this._jumpBufferTimer - delta);
     }
 
+    // --- Variable jump height -------------------------------------------------
+    // Releasing the key early cuts the remaining rise. The authoritative
+    // simulation does exactly the same (src/game/physics.js), so a short tap and
+    // a long hold produce the SAME arc on both sides — otherwise the local
+    // prediction floats off the server's trajectory mid-flight.
+    if (
+      this.body.velocity.y < 0 &&
+      !intent.jumpHeld &&
+      !this.jumpReleased
+    ) {
+      this.body.velocity.y *= PLAYER.jumpReleaseFactor;
+      this.jumpReleased = true;
+    }
+
     // --- Execute the jump ---------------------------------------------------
     // Allowed while grounded OR inside the coyote grace window.
     const canJump = onGround || this._coyoteTimer > 0;
     if (canJump && this._jumpBufferTimer > 0) {
       this.body.setVelocityY(PLAYER.jumpVelocity);
+      this.jumpReleased = false;
 
       // Consume both timers so a single press can't double-jump.
       this._jumpBufferTimer = 0;
@@ -177,22 +199,22 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
    * Aim toward the cursor. The body stays upright (flipping only for
    * readability) while the muzzle marker rotates a full 360 degrees to show
    * the exact aim direction toward the pointer.
+   *
+   * The angle SNAPS to the canonical aim target every frame — deliberately no
+   * easing. An eased aim (`RotateTo` toward the cursor) lags behind fast mouse
+   * movement, so the cursor, the laser sight, the barrel and the fired round
+   * visibly disagreed (worse at high zoom / screen edges). All four now share
+   * one target, so agreement is structural rather than approximate.
    * @param {import('../input/InputManager.js').InputIntent} intent
    */
   _updateAim(intent) {
-    // Vector from the player's centre to the world-space cursor.
+    // Vector from the player's centre to the canonical world-space cursor.
     const dx = intent.aimX - this.x;
     const dy = intent.aimY - this.y;
     const distance = Math.hypot(dx, dy);
 
     if (distance > 1) {
-      // Ease toward the cursor angle; RotateTo always takes the short way
-      // around the circle, avoiding a spin the long way at +/-PI.
-      this._aimAngle = Phaser.Math.Angle.RotateTo(
-        this._aimAngle,
-        Math.atan2(dy, dx),
-        AIM.smoothing,
-      );
+      this._aimAngle = Math.atan2(dy, dx);
 
       // Flip the body so the visor "looks" toward the cursor side.
       this.setFlipX(dx < 0);
@@ -232,6 +254,22 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       this.setScale(this._scaleSquashX, this._scaleSquashY);
       this.setRotation(Phaser.Math.Linear(this.rotation, 0, lerp));
     }
+  }
+
+  /**
+   * Clear pending jump forgiveness windows (coyote + buffer).
+   *
+   * Call on respawn, room entry and match restart: a jump pressed in the
+   * dying frames must not auto-fire the moment the fresh body lands, and a
+   * stale buffer must never survive a scene transition.
+   * @returns {void}
+   */
+  resetJump() {
+    this._coyoteTimer = 0;
+    this._jumpBufferTimer = 0;
+    // A respawn must not inherit "the jump key was already released", which
+    // would silently halve the first jump's impulse after death.
+    this.jumpReleased = false;
   }
 
   /**

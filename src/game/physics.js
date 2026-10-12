@@ -43,10 +43,14 @@ export function stepEntity(e, intent, dt, now = Date.now(), map = null) {
     e.vy = 0;
     return;
   }
-  const maxSpeed = sim().maxSpeed || 260;
+  // S14: a character's speed / jump multipliers are stamped onto the entity by
+  // applyCharacter() and read here. They are SERVER-side values — the client
+  // cannot influence them, and they are deliberately multiplicative on the
+  // shared base tuning so a balance change lands on every character at once.
+  const maxSpeed = (sim().maxSpeed || 260) * (e.charSpeedMul ?? 1);
   const airControl = sim().airControl ?? 0.7;
   const gravity = sim().gravity || 1800;
-  const jumpV = sim().jumpVelocity || 640;
+  const jumpV = (sim().jumpVelocity || 640) * (e.charJumpMul ?? 1);
   const radius = sim().entityRadius || 14;
 
   // -- Horizontal: exponential approach to target velocity -------------------

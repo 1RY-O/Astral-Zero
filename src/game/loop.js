@@ -43,6 +43,11 @@ import { initMatchClock, recordTeamKill, checkWin, scoreboard } from './scoring.
 import { buildSnapshot, buildBotUpdate } from './snapshots.js';
 import { createEntity } from './entities.js';
 import { listRooms } from '../rooms/roomManager.js';
+import { isKnownCharacter, STARTER_CHARACTER } from '../shared/characters.js';
+import { resolveLoadout } from '../shared/loadouts.js';
+import { initShifts, tickShifts, activeGeometry } from './shifts.js';
+import { initMimics, tickMimics, damageMimic } from './mimics.js';
+import { initControlPoint, tickControlPoint } from './control.js';
 
 let ioRef = null;
 let EV = null;
@@ -105,13 +110,54 @@ const tickStats = { samples: 0, totalMs: 0 };
  * Build room.sim from the spawn roster (called once at room boot, before
  * countdown ends — entities exist but don't move until phase === 'playing').
  */
+/**
+ * Stamp a character onto an entity (server-authoritative).
+ *
+ * The client's `character` field is a REQUEST, validated here against the shared
+ * roster. An unknown id silently becomes the starter rather than an error: a
+ * typo should not brick a match, and the player still gets a playable body.
+ * Every stat the character brings is written onto the entity so the rest of the
+ * simulation (physics, combat, respawn) can read it without importing the roster.
+ *
+ * @param {object} e sim entity (mutated)
+ * @param {string} requestedId client-requested character id
+ * @param {object} room
+ * @returns {object} the applied character row
+ */
+function applyCharacter(e, requestedId, room) {
+  // Character identity is server-owned: the profile's saved selection is the
+  // source, and `requestedId` (only present on a queue that named one) can never
+  // override an unlocked, validated choice.
+  const id = isKnownCharacter(requestedId) ? requestedId : STARTER_CHARACTER;
+  const { character: c, variantId, stats } = resolveLoadout(id, e.loadoutVariant);
+  e.character = c.id;
+  e.tier = c.tier;
+  e.weaponId = c.weapon;
+  e.loadoutVariant = variantId;
+  // Stat carriers the rest of the sim reads. damageScale is MULTIPLIED later by
+  // the mode (practice halves it), so this stays the character-only component.
+  e.charDamageMul = stats.damageMul;
+  e.charCooldownMul = stats.fireRateMul;
+  e.charSpeedMul = stats.speedMul;
+  e.charJumpMul = stats.jumpMul;
+  e.charHp = stats.hp;
+  e.maxHp = stats.hp;
+  e.hp = stats.hp;
+  e.charSplashMul = stats.splashMul ?? 1;
+  return c;
+}
+
 export function initSim(room) {
   const entities = new Map();
   for (const p of room.players || []) {
     const e = createEntity(p, p.socketId || p.id);
     e.cooldownScale = 1;
     e.damageScale = 1;
-    e.weaponId = 'scrap-rifle';
+    // S14: the character is stamped SERVER-SIDE from the player's validated
+    // selection (room.players carries `character`, set at matchmaking). The
+    // client never dictates stats — it only names one, and a bad name falls
+    // back to the starter.
+    applyCharacter(e, p.character, room);
     entities.set(e.id, e);
   }
   for (const b of room.bots || []) {
@@ -119,12 +165,14 @@ export function initSim(room) {
     // Phase 4: personality first (difficulty mix per mode), then the trigger
     // cadence compounds mode temperament × personality (easy practice bots
     // end up ~2.4× slower than aggressive ffa bots — by construction).
-    const pers = ensurePersonality(e, room.mode);
+    // A room may PIN a difficulty (validated server-side at matchmaking), in
+    // which case every bot rolls that tier instead of the per-mode mix.
+    const pers = ensurePersonality(e, room.mode, room.difficulty || null);
     e.cooldownScale = fireCooldownScale(room.mode) * (pers.cooldownMul || 1);
     // Friendly practice stays friendly: practice bots deal half damage so a
     // first-timer gets a lesson, not a spawn-camp. (Real modes: full damage.)
     e.damageScale = room.mode === 'bot_practice' ? 0.5 : 1;
-    e.weaponId = 'scrap-rifle';
+    applyCharacter(e, b.character, room);
     entities.set(e.id, e);
   }
   room.sim = {
@@ -143,6 +191,11 @@ export function initSim(room) {
   // Phase 5: createRoom always stamps room.map (resolved def); unit-built
   // rooms that skip createRoom get the legacy arena here as a backstop.
   if (!room.map) room.map = resolveRoomMap(room.mapId);
+  // S14.3/S14.4: orbital shifts and scrap mimics each start disabled unless the
+  // mode opts in (server-config), so adding a mode never inherits a predator.
+  initShifts(room);
+  initMimics(room);
+  initControlPoint(room);
   return room.sim;
 }
 
@@ -184,7 +237,7 @@ function tickRoom(room, dt, now) {
       const pick = ids[intent.weaponSlot % ids.length];
       if (pick) e.weaponId = pick;
     }
-    stepEntity(e, intent, dt, now, room.map);
+    stepEntity(e, intent, dt, now, activeGeometry(room));
 
     // -- 3. Fire (level-based: held fire shoots at weapon cadence) ----------------
     // Shared validated path with the socket bridge (triggers.js).
@@ -210,6 +263,15 @@ function tickRoom(room, dt, now) {
   // Phase 4 shell cap: oldest fizzle first (full-auto rooms stay bounded).
   enforceCaps(sim);
 
+  // S14.3 orbital shifts: advance the warn → shift → settle machine. Returns a
+  // transition ONLY when the phase changes, so the emit below is once-per-event,
+  // never per frame. Telegraph first, geometry moves on commit (planShift has
+  // already guaranteed no player is inside a moving platform).
+  const shiftEvt = tickShifts(room, now);
+  if (shiftEvt) {
+    ioRef?.to(room.id)?.emit(EV.ORBITAL_SHIFT, { roomId: room.id, ...shiftEvt, timestamp: now });
+  }
+
   // -- 5. Projectiles → damage ------------------------------------------------------
   // Phase 5: shell clip bounds come from the MAP (arenas differ now).
   const B = room.map?.bounds || {};
@@ -218,10 +280,31 @@ function tickRoom(room, dt, now) {
     maxX: B.maxX ?? 1240,
     ceilingY: B.ceilingY ?? 40,
     groundY: B.groundY ?? 650,
-  });
+  }, room.mimics?.enabled ? room.mimics.list : null);
   let killsThisTick = 0;
   const vmax = (config.sim?.maxSpeed || 260) * 1.5; // knockback may spike past run speed — cap it
   for (const h of hits) {
+    // S14.4: a shot that struck an ARMED mimic pays out scrap instead of blood.
+    if (h.mimic) {
+      if (damageMimic(room, h.mimic, h.proj.damage, h.proj.ownerId, now)) {
+        const shooter = sim.entities.get(h.proj.ownerId);
+        if (h.mimic.state === 'stunned') {
+          ioRef?.to(room.id)?.emit(EV.MIMIC_EVENT, {
+            roomId: room.id, kind: 'kill', id: h.mimic.id,
+            byId: h.proj.ownerId, byName: shooter?.name || null,
+            x: Math.round(h.mimic.x), y: Math.round(h.mimic.y), timestamp: now,
+          });
+          if (shooter) { shooter.mimicsKilled = (shooter.mimicsKilled || 0) + 1; }
+        } else {
+          ioRef?.to(room.id)?.emit(EV.MIMIC_EVENT, {
+            roomId: room.id, kind: 'hit', id: h.mimic.id,
+            byId: h.proj.ownerId, byName: shooter?.name || null,
+            hp: Math.max(0, h.mimic.hp), timestamp: now,
+          });
+        }
+      }
+      continue;
+    }
     // Knockback juice (applied even on lethal hits — corpses can slide).
     h.victim.vx += Math.sign(h.victim.x - h.proj.x || 1) * (h.proj.knockback || 0) * 0.4;
     h.victim.vx = Math.max(-vmax, Math.min(vmax, h.victim.vx));
@@ -233,6 +316,24 @@ function tickRoom(room, dt, now) {
       if (killEvt.killerId) recordTeamKill(room, killEvt.killerTeam);
     }
   }
+  // S14.4 mimic AI: spawn / arm / chase / bite. Runs after projectiles so a
+  // mimic cannot bite in the same tick a player shot it. Returns events, and
+  // emits happen here — one emission site, never inside the module.
+  // S14.5 control point: presence → contested → capture → score. Runs with the
+  // rest of the objective tick; checkWin() reads its totals for the win check.
+  if (room.controlPoint?.enabled) tickControlPoint(room, dt, now, ioRef, EV);
+
+  if (room.mimics?.enabled) {
+    const mEvts = tickMimics(room, dt, now, ioRef, EV);
+    for (const me of mEvts) {
+      ioRef?.to(room.id)?.emit(EV.MIMIC_EVENT, { roomId: room.id, ...me, timestamp: now });
+      // A bite that lands for real is a death — it must reach the killfeed and
+      // refresh the scoreboard. `applyHit` already routed it through `kill()`
+      // with a null killer, so no opponent earns a kill or a streak from it.
+      if (me.kind === 'bite' && me.killed) pushScores(room, now);
+    }
+  }
+
   if (killsThisTick > 0) pushScores(room, now);
 
   // -- 5b. Hazard volumes (Phase 5): fractional DoT, uncredited ------------------------

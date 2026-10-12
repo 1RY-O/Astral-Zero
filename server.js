@@ -24,6 +24,7 @@ import { Server } from 'socket.io';
 import config from './src/server-config.js';
 import createApp from './src/app.js';
 import { initSockets } from './src/sockets/index.js';
+import { initPersistence, closePersistence } from './src/players/persistence.js';
 
 // --- 1. Express app (static hosting + REST stub) ---------------------------
 const app = createApp();
@@ -43,6 +44,10 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e6, // 1 MB — prevents accidental huge payloads
 });
 
+// Load durable player profiles BEFORE any socket handler can read one, so a
+// returning player is never briefly treated as a new one.
+if (config.persistence?.enabled !== false) initPersistence();
+
 // Register all Phase 1 event handlers (skeleton: log + acknowledge only).
 initSockets(io);
 
@@ -58,7 +63,21 @@ httpServer.listen(config.port, () => {
 });
 
 // Graceful shutdown so nodemon / Ctrl+C doesn't leave the port hanging.
-process.on('SIGTERM', () => {
-  console.log('[Astral Zero] SIGTERM received, closing server...');
+let shuttingDown = false;
+/**
+ * Close the listener, flush pending profile writes, then exit.
+ * The flush MUST happen before exit: a debounced write that never lands is a
+ * silently lost ranked rating.
+ * @param {string} signal
+ */
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Astral Zero] ${signal} received, closing server...`);
+  closePersistence();
   httpServer.close(() => process.exit(0));
-});
+  // Do not hang forever on a stuck keep-alive socket.
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

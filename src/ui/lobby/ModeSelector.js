@@ -26,21 +26,18 @@
  */
 
 import { THEME, FONTS, RADII, MOTION, CTA_STATES } from '../../config/uiTheme.js';
+import { SURFACES, BORDERS, PALETTE } from '../../config/uiTheme.js';
 import { MATCH_MODES, MODE_ORDER } from '../../config/lobbyConfig.js';
 import { Panel } from '../widgets/Panel.js';
 import { Button } from '../widgets/Button.js';
 import { resolveCta } from '../brand/ConnectionState.js';
+import { PracticeSetupMenu } from '../menus/PracticeSetupMenu.js';
+import { CharacterMenu } from '../menus/CharacterMenu.js';
+import { RankedBoardMenu } from '../menus/RankedBoardMenu.js';
+import { RATED_MODES, rateFor, LEAGUES } from '../../shared/ranked.js';
+import { CHARACTERS, STARTER_CHARACTER } from '../../shared/characters.js';
 import * as Motion from '../../core/Motion.js';
 
-/** `#38e1ff` → 0x38e1ff, kept local so this file needs no Phaser import. */
-function hexToInt(hex) {
-  return Number.parseInt(String(hex).replace('#', ''), 16) || 0xffffff;
-}
-
-/** Pack a css colour to an int. */
-function cssInt(hex) {
-  return hexToInt(hex);
-}
 
 export class ModeSelector {
   /**
@@ -74,6 +71,8 @@ export class ModeSelector {
 
     const innerX = x + 20;
     const innerW = w - 40;
+    this._innerX = innerX;
+    this._innerW = innerW;
 
     // --- Mode cards (stacked rows, arcade style) ---------------------------
     // A vertical stack reads better than a 3-across row on every tier, and it
@@ -96,6 +95,63 @@ export class ModeSelector {
       .setOrigin(0.5, 0)
       .setDepth(this.depth + 1)
       .setScrollFactor(0);
+
+    // --- S14.6: ranked is a queue VARIANT of ffa/tdm ------------------------
+    // Shown only for a RATED mode and only when queueing is possible. The two
+    // chips are the whole decision; STANDINGS opens the real server board.
+    // The league line reads the server's standing (profile / ranked_update) —
+    // an unplaced player is told so, never shown an invented rating.
+    const rankedY = cardY + MODE_ORDER.length * (cardH + cardGap) + 44;
+    const w1 = Math.round(innerW * 0.26);
+    const w2 = w1;
+    const w3 = innerW - w1 - w2 - 16;
+    this.casualBtn = new Button(scene, {
+      x: innerX + w1 / 2,
+      y: rankedY,
+      width: w1,
+      height: 34,
+      label: 'CASUAL',
+      skin: 'ghost',
+      fontSize: '12px',
+      depth: this.depth + 2,
+      toggle: true,
+      ariaLabel: 'Queue a casual match — rating never moves',
+      onClick: () => { this.net.setRanked(false); this.refresh(); },
+    });
+    this.casualBtn.setVisible(false);
+    this.rankedBtn = new Button(scene, {
+      x: innerX + w1 + 8 + w2 / 2,
+      y: rankedY,
+      width: w2,
+      height: 34,
+      label: 'RANKED',
+      skin: 'ghost',
+      fontSize: '12px',
+      depth: this.depth + 2,
+      toggle: true,
+      ariaLabel: 'Queue a rated match — placement and Elo apply',
+      onClick: () => { this.net.setRanked(true); this.refresh(); },
+    });
+    this.rankedBtn.setVisible(false);
+    this.boardBtn = new Button(scene, {
+      x: innerX + w1 + 8 + w2 + 8 + w3 / 2,
+      y: rankedY,
+      width: w3,
+      height: 34,
+      label: 'STANDINGS',
+      skin: 'ghost',
+      fontSize: '11px',
+      depth: this.depth + 2,
+      ariaLabel: 'Open the season leaderboard',
+      onClick: () => this.boardMenu?.show(),
+    });
+    this.boardBtn.setVisible(false);
+    this.leagueText = scene.add
+      .text(innerX + innerW / 2, rankedY + 24, '', { ...FONTS.tiny })
+      .setOrigin(0.5, 0)
+      .setDepth(this.depth + 1)
+      .setScrollFactor(0)
+      .setVisible(false);
 
     // --- Find Match CTA ---------------------------------------------------
     // Anchored to the bottom of the panel; large, high-contrast, easy to hit.
@@ -130,6 +186,68 @@ export class ModeSelector {
     });
     this.spectate.setVisible(false);
 
+    // --- Practice setup (bot_practice only) --------------------------------
+    // One ghost button whose label is the live summary; opens the shared
+    // setup overlay (same object Home uses, same net state underneath).
+    this.setupButton = new Button(scene, {
+      x: innerX + innerW / 2,
+      y: y + h - ctaH - 84,
+      width: Math.min(innerW, 340),
+      height: 34,
+      label: '',
+      skin: 'ghost',
+      fontSize: '12px',
+      minHeight: 34,
+      depth: this.depth + 2,
+      onClick: () => this.practiceMenu?.show(),
+    });
+    this.setupButton.setVisible(false);
+    this._setupBaseY = y + h - ctaH - 84;
+
+    this.practiceMenu = new PracticeSetupMenu(scene, {
+      net: this.net,
+      onClose: () => this.refresh(),
+      depth: 420,
+    });
+    this._practiceOff = this.net?.on?.('practice', () => this.refreshPracticeSummary) ?? null;
+
+    // --- S14.1: character + loadout selection -------------------------------
+    // Sits in the same CTA stack as the practice setup, so both visible at
+    // once on the practice card. Opens the shared selection overlay whose
+    // every entry is server-validated.
+    this.charButton = new Button(scene, {
+      x: innerX + innerW / 2,
+      y: y + h - ctaH - 124,
+      width: Math.min(innerW, 340),
+      height: 34,
+      label: 'CHARACTER',
+      skin: 'ghost',
+      fontSize: '12px',
+      minHeight: 34,
+      depth: this.depth + 2,
+      ariaLabel: 'Choose your character and loadout',
+      onClick: () => this.characterMenu?.show(),
+    });
+    this.charButton.setVisible(false);
+    this._charBaseY = y + h - ctaH - 124;
+
+    this.characterMenu = new CharacterMenu(scene, {
+      net: this.net,
+      onClose: () => this.refresh(),
+      depth: 420,
+    });
+    this.boardMenu = new RankedBoardMenu(scene, {
+      net: this.net,
+      depth: 421,
+    });
+    // Re-render whenever server truth we display changes (never per-frame).
+    this._s14Offs = [
+      this.net?.on?.('ranked-select', () => this.refresh()),
+      this.net?.on?.('ranked', () => this.refresh()),
+      this.net?.on?.('character', () => this.refresh()),
+      this.net?.on?.('profile', () => this.refresh()),
+    ].filter(Boolean);
+
     // --- Queue status line ------------------------------------------------
     this.statusText = scene.add
       .text(innerX + innerW / 2, y + h - ctaH - 8, '', FONTS.tiny)
@@ -152,7 +270,7 @@ export class ModeSelector {
    */
   _buildCard(modeId, x, y, w, h) {
     const mode = MATCH_MODES[modeId];
-    const accent = cssInt(mode.accent);
+    const accent = mode.accentInt;
 
     const card = new Button(this.scene, {
       x: x + w / 2,
@@ -227,9 +345,9 @@ export class ModeSelector {
       card.label.setColor(mode.accent);
       card.sublabel?.setColor(THEME.textPrimary).setAlpha(1);
     } else {
-      g.fillStyle(0x0f1830, 1);
+      g.fillStyle(SURFACES.panelCard, 1);
       g.fillRoundedRect(left, top, w, h, r);
-      g.lineStyle(2, 0x2b3d5e, card.zone.isOver ? 0.9 : 0.55);
+      g.lineStyle(BORDERS.thin, SURFACES.panelBorderSoft, card.zone.isOver ? 0.9 : 0.55);
       g.strokeRoundedRect(left, top, w, h, r);
       card.label.setColor(card.enabled ? THEME.textDim : THEME.textFaint);
       card.sublabel?.setColor(THEME.textFaint).setAlpha(card.enabled ? 0.85 : 0.5);
@@ -275,8 +393,75 @@ export class ModeSelector {
     // already searching.
     this.spectate.setVisible(Boolean(state.spectateOffer) && !queued && !busy && !state.room);
 
+    // Practice setup only for Bot Practice (same config Home edits).
+    const showSetup = selected === 'bot_practice' && !queued && !busy && !state.room;
+    this.setupButton.setVisible(showSetup);
+    if (showSetup) {
+      const dodgeSpectate = Boolean(state.spectateOffer);
+      this.setupButton.setPosition(this._innerX + this._innerW / 2, this._setupBaseY - (dodgeSpectate ? 40 : 0));
+      this.refreshPracticeSummary();
+    }
+
+    // --- S14.6: ranked row (rated modes only, only when queueing is possible)
+    const rated = RATED_MODES.includes(selected);
+    const showRankedRow = rated && !queued && !busy && !state.room;
+    this.casualBtn.setVisible(showRankedRow);
+    this.rankedBtn.setVisible(showRankedRow);
+    this.boardBtn.setVisible(showRankedRow);
+    this.leagueText.setVisible(showRankedRow);
+    if (showRankedRow) {
+      const isRanked = state.rankedSelected === true;
+      this.casualBtn.setSelected(!isRanked);
+      this.rankedBtn.setSelected(isRanked);
+      // Standing comes from the SERVER (profile row or the last ranked_update).
+      // Unplaced is stated as unplaced; a rating is never invented here.
+      const you = state.ranked?.you ?? null;
+      const pr = state.profile?.ranked ?? null;
+      if (you?.placed || pr?.placed) {
+        const rating = you?.rating ?? pr?.rating ?? 0;
+        const label = you?.league
+          ? LEAGUES.find((l) => l.id === you.league)?.label ?? rateFor(rating).label
+          : rateFor(rating).label;
+        this.leagueText
+          .setText(`YOUR STANDING  ·  ${String(label).toUpperCase()}  ·  ${rating}`)
+          .setColor(THEME.accent);
+      } else {
+        this.leagueText.setText('YOUR STANDING  ·  UNPLACED — 5 PLACEMENT MATCHES').setColor(THEME.textFaint);
+      }
+    }
+
+    // --- S14.1: character button — available whenever a match is not live.
+    const showChar = !queued && !busy && !state.room;
+    this.charButton.setVisible(showChar);
+    if (showChar) {
+      const dodgeSpectate = Boolean(state.spectateOffer) ? 40 : 0;
+      const aboveSetup = showSetup ? 44 : 0;
+      this.charButton.setPosition(
+        this._innerX + this._innerW / 2,
+        this._charBaseY - dodgeSpectate - aboveSetup,
+      );
+      const id = state.character?.character || state.profile?.character || STARTER_CHARACTER;
+      const name = CHARACTERS[id]?.name ?? CHARACTERS[STARTER_CHARACTER].name;
+      this.charButton.setLabel(`CHARACTER: ${name.toUpperCase()}`);
+    }
+
     this.statusText.setText(busy ? 'working…' : '');
     if (!queued) this.statusText.setColor(THEME.textFaint);
+  }
+
+  /**
+   * Practice setup summary on the setup button (shared config with Home).
+   * @returns {void}
+   */
+  refreshPracticeSummary() {
+    if (!this.setupButton) return;
+    const p = this.net?.state?.practice ?? {};
+    const name = p.preset === 'custom'
+      ? 'CUSTOM'
+      : String(p.preset ?? 'beginner').toUpperCase();
+    this.setupButton.setLabel(
+      `Setup: ${name} · ${p.botCount ?? 1} bot${(p.botCount ?? 1) === 1 ? '' : 's'}`,
+    );
   }
 
   /**
@@ -290,9 +475,11 @@ export class ModeSelector {
       return;
     }
     const mode = MATCH_MODES[queue.mode]?.name ?? queue.mode;
+    // S14.6: name the ACTUAL queue — a ranked search must never read casual.
+    const kind = queue.ranked ? ' · RANKED' : '';
     const position = queue.position ? `position ${queue.position}` : 'searching…';
     const others = queue.playersInQueue ? ` · ${queue.playersInQueue} in queue` : '';
-    this.statusText.setText(`${mode} — ${position}${others}`).setColor(THEME.accent);
+    this.statusText.setText(`${mode}${kind} — ${position}${others}`).setColor(THEME.accent);
   }
 
   // =========================================================================
@@ -335,11 +522,33 @@ export class ModeSelector {
 
   /** @returns {void} */
   destroy() {
+    try {
+      this._practiceOff?.();
+    } catch {
+      /* best-effort */
+    }
+    this._practiceOff = null;
     this.panel.destroy();
     Object.values(this.cards).forEach((c) => c.destroy());
     Object.values(this.cardMeta).forEach((m) => m.marker?.destroy());
     this.primary.destroy();
     this.spectate.destroy();
+    this.setupButton?.destroy();
+    this.practiceMenu?.destroy();
+    // S14.1/.6: ranked row, character entry + the two overlays + their
+    // subscriptions. Every net.on() returns an unsubscribe — collected and
+    // released here so scene restarts never stack duplicate refreshers.
+    this.casualBtn?.destroy();
+    this.rankedBtn?.destroy();
+    this.boardBtn?.destroy();
+    this.leagueText?.destroy();
+    this.charButton?.destroy();
+    this.characterMenu?.destroy();
+    this.boardMenu?.destroy();
+    for (const off of this._s14Offs ?? []) {
+      try { off?.(); } catch { /* best-effort */ }
+    }
+    this._s14Offs = [];
     this.descText.destroy();
     this.statusText.destroy();
   }

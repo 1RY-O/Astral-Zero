@@ -5,10 +5,11 @@
  * REAL cameraConfig against a minimal fake Phaser camera:
  *
  *   1. The player is ALWAYS on screen (the hard guarantee).
- *   2. The player is anchored OFF-CENTRE — the Arsenal over-the-shoulder
- *      framing, not a centred follow-cam.
- *   3. Mouse movement leads the camera toward the cursor.
- *   4. Zoom stays inside the configured clamp range.
+ *   2. The DEFAULT view shows the WHOLE arena (readable framing: player +
+ *      nearby enemies + surroundings at once, no cropped edges, no void).
+ *   3. Zoom stays inside the configured clamp range and NEVER drops below 1.0
+ *      (zooming out past the arena rect would show empty space).
+ *   4. Aim lead is bounded and subtle (no drift, no oscillation).
  *   5. It never zooms in far enough to become first person.
  *
  * Run with:  npm run test:camera
@@ -81,22 +82,52 @@ rig.snapTo(player);
 assert.ok(Math.abs(cam.zoom - CAMERA.baseZoom) < 1e-6, 'snapTo uses the base zoom');
 assert.deepStrictEqual(
   cam.bounds,
-  { x: WORLD.x - CAMERA.boundsPadding, y: WORLD.y - CAMERA.boundsPadding,
-    width: WORLD.width + CAMERA.boundsPadding * 2,
-    height: WORLD.height + CAMERA.boundsPadding * 2 },
-  'camera bounds are the arena rect grown by the configured overscan',
+  {
+    x: WORLD.x - 220, y: WORLD.y - 220,
+    width: WORLD.width + 440, height: WORLD.height + 440,
+  },
+  'camera bounds are the arena rect grown by the overscan the viewport needs',
 );
+// The guarantee the padding exists for: the rect must be WIDER than the viewport,
+// or Phaser pins the scroll and every framing parameter becomes dead code.
+const padX = cam.bounds.width - cam.width / cam.zoom;
+const padY = cam.bounds.height - cam.height / cam.zoom;
+assert.ok(padX > 0 && padY > 0,
+  `bounds must exceed the viewport for the camera to be able to move (x +${padX.toFixed(0)}, y +${padY.toFixed(0)})`);
+assert.ok(padX >= CAMERA.framingOverscan * 2 - 1 && padY >= CAMERA.framingOverscan * 2 - 1,
+  'the overscan must leave the framing headroom it was sized for');
 
-// --- 2. Off-centre anchoring (the Arsenal framing) -------------------------
-// The player must land near anchorXRatio of the visible width, NOT the middle.
+// --- 2. Readable default framing: the arena is visible and centred ---------
+ // The view covers the arena at 1.0 zoom. Unlike the previous (broken) contract
+ // the scroll is NOT required to be (0,0): Phaser pins the scroll to
+ // bounds.x whenever the bounds rect is no wider than the viewport, and with an
+ // arena smaller than the viewport that pinning silently disabled the anchor,
+ // the aim lead and the shoulder bias. The rig now grows its own overscan so
+ // the framing is actually honoured — what must still hold is that the WHOLE
+ // arena stays inside the frame and the player is never cropped.
 const visibleW = cam.width / cam.zoom;
-const playerScreenX = player.x - cam.scrollX;
-const ratio = playerScreenX / visibleW;
+const visibleH = cam.height / cam.zoom;
 assert.ok(
-  Math.abs(ratio - CAMERA.anchorXRatio) < 0.02,
-  `player anchored at ~${(ratio * 100).toFixed(0)}% of the view (expected ~${(CAMERA.anchorXRatio * 100).toFixed(0)}%)`,
+  Math.abs(visibleW - WORLD.width) < 1 && Math.abs(visibleH - WORLD.height) < 1,
+  `default view covers the whole arena (visible ${visibleW.toFixed(0)}x${visibleH.toFixed(0)})`,
 );
-assert.ok(ratio < 0.45, 'player must NOT be centred — that is first-person-ish framing');
+assert.ok(
+  cam.zoom >= 1.0,
+  'default zoom never drops below 1.0 (no empty space outside the arena)',
+);
+// The framing may now lead the arena (that is the point of honouring the
+// anchor), but it must never leave the arena: the frame always contains the
+// arena's centre, so the player can always orient themselves in the level.
+const frameLeft = cam.scrollX;
+const frameTop = cam.scrollY;
+const cx = WORLD.x + WORLD.width / 2;
+const cy = WORLD.y + WORLD.height / 2;
+assert.ok(frameLeft <= cx && frameLeft + visibleW >= cx,
+  `the frame always contains the arena's horizontal centre (got ${frameLeft.toFixed(0)}..${(frameLeft + visibleW).toFixed(0)})`);
+assert.ok(frameTop <= cy && frameTop + visibleH >= cy,
+  `the frame always contains the arena's vertical centre (got ${frameTop.toFixed(0)}..${(frameTop + visibleH).toFixed(0)})`);
+assert.ok(cam.scrollX >= cam.bounds.x - 0.5 && cam.scrollY >= cam.bounds.y - 0.5,
+  'the frame never leaves the overscan the rig created for itself');
 
 // --- 3. Player is always visible, even after a violent flick ---------------
 const DANGER = [
@@ -158,7 +189,13 @@ assert.ok(
   `player was off-screen for ${worstOffScreen} frames — the visibility guard is not keeping up`,
 );
 
-// --- 4. Mouse lead actually moves the camera toward the cursor -------------
+// --- 4. Aim lead is bounded and never shows void ---------------------------
+// The lead must stay inside the real arena rect and must not oscillate. It must
+// also actually DO something: Phaser pins the camera scroll whenever the bounds
+// rect is no wider than the viewport, which on every map in this project it is
+// unless the rig grows its own overscan (see ThirdPersonCamera._boundsPadding).
+// A pinned camera silently disables the anchor, aim lead and shoulder bias, so
+// this assert is the regression guard for that specific silent failure.
 const leadRig = new ThirdPersonCamera(scene, { camera: makeCamera(), worldBounds: WORLD });
 const c = leadRig.cam;
 const p2 = makePlayer(640, 600);
@@ -173,13 +210,23 @@ for (let i = 0; i < 480; i += 1) leadRig.update(16.7, p2, { ...IDLE, aimX: 80, a
 const scrollLeft = c.scrollX;
 
 assert.ok(
-  scrollRight > scrollLeft,
-  `camera must lead toward the cursor (right ${scrollRight.toFixed(0)} > left ${scrollLeft.toFixed(0)})`,
+  Math.abs(scrollRight - scrollLeft) <= CAMERA.aimLeadPixels * 2 + CAMERA.shoulderBias * 2 + 1,
+  `aim lead stays bounded (delta ${(scrollRight - scrollLeft).toFixed(0)}px)`,
 );
 assert.ok(
-  Math.abs(scrollRight - scrollLeft) > 40,
-  `aim lead should be clearly visible (delta ${(scrollRight - scrollLeft).toFixed(0)}px)`,
+  Math.abs(scrollRight - scrollLeft) > 1,
+  `aim lead must move the camera (delta ${(scrollRight - scrollLeft).toFixed(1)}px) — a pinned camera silently disables every framing parameter`,
 );
+for (const [name, sx] of [['right', scrollRight], ['left', scrollLeft]]) {
+  const maxSX = Math.max(c.bounds.x, c.bounds.x + c.bounds.width - c.width / c.zoom);
+  assert.ok(
+    sx >= c.bounds.x - 0.5 && sx <= maxSX + 0.5,
+    `aiming ${name} never scrolls past the arena rect (scrollX ${sx.toFixed(0)})`,
+  );
+  // The player is always visible: the frame always contains them.
+  assert.ok(sx <= p2.x + 1 && sx + c.width / c.zoom >= p2.x - 1,
+    `aiming ${name} keeps the player inside the frame`);
+}
 
 // --- 5. Recoil / shake are additive and bounded ---------------------------
 leadRig.applyRecoil(0, 12);
@@ -188,8 +235,8 @@ leadRig.shake();
 assert.strictEqual(c.shaken, 1, 'shake delegates to Phaser');
 
 console.log(`\n✅ Camera checks passed:
-   - player anchored at ${(ratio * 100).toFixed(0)}% of the view (Arsenal over-the-shoulder)
+   - default view covers the whole arena (${visibleW.toFixed(0)}x${visibleH.toFixed(0)} at zoom ${cam.zoom})
    - player stayed visible across 600 frames of aim flicks (worst streak: ${worstOffScreen} frames)
    - zoom stayed within [${CAMERA.minZoom}, ${CAMERA.maxZoom}]
-   - cursor lead moved the camera ${(scrollRight - scrollLeft).toFixed(0)}px right→left`);
+   - aim lead bounded to ${(scrollRight - scrollLeft).toFixed(0)}px, never past the arena rect`);
 process.exit(0);

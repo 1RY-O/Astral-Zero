@@ -20,12 +20,16 @@
  */
 
 import config from '../server-config.js';
+import { RATED_MODES } from '../shared/ranked.js';
 import { makeBots } from '../bots/botFactory.js';
-import { recordMatchFinish } from '../players/playerStore.js';
+import { recordMatchFinish, applyRankedMatch } from '../players/playerStore.js';
 import { liveRosterRow } from '../game/entities.js';
+import { shiftsWire } from '../game/shifts.js';
+import { mimicsWire } from '../game/mimics.js';
+import { controlWire } from '../game/control.js';
 import { clearInput } from '../game/inputs.js';
 import { buildMatchResult } from '../game/scoring.js';
-import { resolveMap, mapToWire } from '../game/maps.js';
+import { resolveMap, mapToWire, safeSpawnTable } from '../game/maps.js';
 
 const rooms = new Map(); // roomId → room
 let roomSeq = 0;
@@ -34,9 +38,12 @@ let roomSeq = 0;
  * Spawn from the MAP's spawn table (floor spread + platform tops) with a
  * small jitter so parties don't stack. Phase 5 replaces the old mid-air
  * scatter — everyone materialises ON a surface, ready to move instantly.
+ * Hazard volumes are excluded (see maps.safeSpawnTable): nobody should boot
+ * standing in acid with only 1.5 s of spawn protection to save them.
  */
 function spawnForIndex(map, index) {
-  const pts = map.spawns && map.spawns.length ? map.spawns : [{ x: 640, y: 650 }];
+  const table = safeSpawnTable(map);
+  const pts = table.length ? table : [{ x: 640, y: 650 }];
   const p = pts[index % pts.length];
   return {
     x: Math.round(p.x + (Math.random() - 0.5) * 40),
@@ -49,11 +56,30 @@ function spawnForIndex(map, index) {
  * Does NOT emit — the caller (matchmaking) fans out `room_joined`,
  * `match_found`, `match_state` via `io` (needs sockets, not just state).
  *
- * @param {object} opts { mode, mapId?, humans: [{ id, socketId, name }], partyCode? }
+ * @param {object} opts { mode, mapId?, humans: [{ id, socketId, name }], partyCode?, botCount?, difficulty?, graceMs?, passive? }
+ *   - `botCount` (optional): an ALREADY-VALIDATED bot count. When omitted the
+ *     mode's auto-fill target is used. Matchmaking is the only caller that
+ *     passes it, and it clamps it there — a room never trusts a raw number.
+ *   - `difficulty` (optional): an ALREADY-VALIDATED difficulty tier pinned onto
+ *     every bot in the room (see personalities.normaliseDifficulty).
+ *   - `graceMs` (optional): ALREADY-VALIDATED pacified window in ms. While
+ *     `Date.now() < room.graceUntil`, bots move and aim but never fire or
+ *     melee (beginner breathing room; enforced server-side in botBrain).
+ *   - `passive` (optional): ALREADY-VALIDATED flag. When true the bots NEVER
+ *     attack for the life of the room (Controls Practice targets).
  * @returns {object} room (internal ref)
  */
 export function createRoom(opts = {}) {
   const { mode = 'ffa', mapId = 'junkyard', humans = [], partyCode = null } = opts;
+  // S14.6 ranked: a ROOM property, never a client claim. `ranked: true` can
+  // only arrive from the ranked SOLO queue (matchmakingManager derives it from
+  // the queue key), and only when the mode is on the rated allow-list below —
+  // party starts, practice and every other path leave it absent, so a private
+  // scrim can never be rated. Placement is deliberately NOT checked here:
+  // unplaced players play their placement series IN ranked rooms (see
+  // applyRankedResult), which is the only path that can advance placement —
+  // their first five matches therefore cannot be dodged out of the ladder.
+  const ranked = opts.ranked === true && isRatedMode(mode);
   roomSeq += 1;
   const id = `room_${Date.now().toString(36)}_${roomSeq}`;
   // Phase 5: mapId stays EXACTLY as the client sent it ('junkyard' et al —
@@ -69,18 +95,24 @@ export function createRoom(opts = {}) {
       name: h.name,
       // tdm: alternate red/blue in join order (party of friends may split —
       // Phase 3 will add team-aware party placement; documented in .md).
-      team: mode === 'tdm' ? (i % 2 === 0 ? 'red' : 'blue') : null,
+      // S14.5: control_point is a team mode too, so it gets the same split.
+      team: (mode === 'tdm' || mode === 'control_point') ? (i % 2 === 0 ? 'red' : 'blue') : null,
       x,
       y,
       hp: 100,
       maxHp: 100,
       isBot: false,
+      // S14: carry the player's validated selection into the sim. initSim()
+      // applies it server-side; an unknown id falls back to the starter there.
+      character: h.character,
+      loadoutVariant: h.loadoutVariant,
     };
   });
 
   const bots = makeBots(
-    // botsNeeded lives in botFactory; inline equivalent to avoid import cycle:
-    botCountFor(mode, humans.length),
+    // Prefer an explicitly validated bot count; fall back to the auto-fill
+    // target. `botCount` lives in botFactory; inline equivalent avoids the cycle.
+    Number.isFinite(opts.botCount) ? Math.max(0, Math.floor(opts.botCount)) : botCountFor(mode, humans.length),
     mode,
     mapId,
   );
@@ -93,6 +125,15 @@ export function createRoom(opts = {}) {
     phase: 'countdown',
     players, // humans only (authoritative)
     bots, // bots only
+    // Server-validated difficulty pinned onto every bot (null = per-mode mix).
+    difficulty: opts.difficulty ?? null,
+    // Practice pacing (bot_practice only; inert elsewhere). graceUntil is
+    // stamped at boot so the countdown does not eat the learning window:
+    // grace starts when the room goes live (boot + countdownMs).
+    graceMs: Number.isFinite(Number(opts.graceMs)) ? Math.min(30000, Math.max(0, Math.round(Number(opts.graceMs)))) : 0,
+    passive: opts.passive === true,
+    // Server-decided ranked flag. Absence of placement is handled at queue time.
+    ranked,
     spectators: [], // Phase 5: [{ socketId, name }] observers (no hitbox)
     partyCode, // which party filled this room (if any)
     humanIds: humans.map((h) => h.socketId || h.id),
@@ -102,15 +143,29 @@ export function createRoom(opts = {}) {
     autoEndTimer: null,
     playTimer: null,
   };
+  // The grace window starts when the room goes LIVE (boot + countdown), so the
+  // loading countdown never eats the player's learning time.
+  room.graceUntil = room.createdAt + (room.countdownMs || 0) + (room.graceMs || 0);
   rooms.set(id, room);
   return room;
+}
+
+/**
+ * Which modes carry a rating. Kept as an explicit allow-list: a new mode must
+ * be rated on purpose, never by inheriting ranked because it happened to be
+ * added next to tdm.
+ * @param {string} mode
+ * @returns {boolean}
+ */
+export function isRatedMode(mode) {
+  return RATED_MODES.includes(mode);
 }
 
 /** Local copy of bot-fill counts (mirrors botFactory.botsNeeded). */
 function botCountFor(mode, humanCount) {
   const tuning = config.gameModes?.[mode] || {};
   if (mode === 'bot_practice') return Math.max(0, (tuning.targetTotal || 6) - humanCount);
-  if (mode === 'tdm') return Math.max(0, 8 - humanCount);
+  if (mode === 'tdm' || mode === 'control_point') return Math.max(0, 8 - humanCount);
   return Math.max(0, Math.min(tuning.targetTotal || 6, tuning.maxPlayers || 10) - humanCount);
 }
 
@@ -148,6 +203,21 @@ export function toPublic(room) {
     botCount: bots.length,
     countdownMs: room.countdownMs,
     createdAt: room.createdAt,
+    // Practice pacing (bot_practice only; 0/false elsewhere). The client
+    // renders a grace countdown from graceUntil; the SERVER enforces it in
+    // botBrain — a tampered client clock changes nothing authoritative.
+    graceMs: room.graceMs || 0,
+    graceUntil: room.graceUntil || 0,
+    passive: room.passive === true,
+    // S14.6: public so the client can label the match; never used to decide one.
+    ranked: room.ranked === true,
+    // S14.3 orbital shifts: the client renders the SAME geometry the sim
+    // collides against, so the aiming ray and floor never disagree.
+    shifts: shiftsWire(room),
+    // S14.4: only live mimics; the client draws them as tokens until they arm.
+    mimics: mimicsWire(room),
+    // S14.5: the whole objective is public state — owner, bar, team totals.
+    control: controlWire(room),
   };
 }
 
@@ -294,8 +364,14 @@ export function endMatch(roomId, reason = 'finished') {
   const winInfo = room.sim?.winInfo || null;
   const result = buildMatchResult(room, reason, winInfo, humans);
   recordMatchFinish(humans, room.mode, result.xpByName || {});
+  // S14.6: ratings are folded in BEFORE destroy, while the sim still exists.
+  // `null` for a casual room — a scrap or practice result never moves a ladder.
+  const rankedByName = room.ranked ? applyRankedMatch(room, result) : null;
   destroyRoom(roomId);
-  return { ok: true, result, humans, partyCode: room.partyCode, mode: room.mode };
+  return {
+    ok: true, result, humans, partyCode: room.partyCode, mode: room.mode,
+    ranked: room.ranked === true, rankedByName: rankedByName ? Object.fromEntries(rankedByName) : null,
+  };
 }
 
 /** Destroy without results (internal cleanup). */

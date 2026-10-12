@@ -38,9 +38,19 @@
 
 import config from '../server-config.js';
 import { getProgress } from '../players/playerStore.js';
+import { checkControlWin } from './control.js';
 
 function tuningFor(mode) {
   return config.gameModes?.[mode] || {};
+}
+
+/**
+ * S14.5: modes whose score is a TEAM total. `control_point` inherits tdm's
+ * win/overtime/scoreboard machinery instead of forking a second copy of it —
+ * one predicate, so a future team mode cannot be half-wired.
+ */
+export function isTeamMode(mode) {
+  return mode === 'tdm' || mode === 'control_point';
 }
 
 /** Stamp match clock + limits onto a fresh sim (called when play begins). */
@@ -60,7 +70,7 @@ export function initMatchClock(room, now = Date.now()) {
 
 /** Credit a team point (tdm only — called for credited kills). */
 export function recordTeamKill(room, killerTeam) {
-  if (room.mode !== 'tdm' || !room.sim?.teamScores) return;
+  if (!isTeamMode(room.mode) || !room.sim?.teamScores) return;
   if (killerTeam === 'red' || killerTeam === 'blue') {
     room.sim.teamScores[killerTeam] += 1;
   }
@@ -117,9 +127,19 @@ export function checkWin(room, now = Date.now()) {
     return null;
   }
 
-  if (room.mode === 'tdm') {
-    const { red, blue } = room.sim.teamScores;
-    const limit = room.sim.scoreLimit;
+  if (isTeamMode(room.mode)) {
+    // S14.5: control_point wins by holding the point, not by kills — so its
+    // score total comes from the objective, and it keeps tdm's overtime and
+    // tie handling unchanged.
+    const cpWin = room.mode === 'control_point' ? checkControlWin(room) : null;
+    const red = room.mode === 'control_point' ? (cpWin?.scores.red ?? 0) : room.sim.teamScores.red;
+    const blue = room.mode === 'control_point' ? (cpWin?.scores.blue ?? 0) : room.sim.teamScores.blue;
+    const limit = room.mode === 'control_point'
+      ? (room.controlPoint?.cfg.scoreLimit || 0)
+      : room.sim.scoreLimit;
+    if (cpWin) {
+      return finish(room, { reason: 'objective_limit', winner: { team: cpWin.team }, teams: { red, blue } });
+    }
     if (limit && (red >= limit || blue >= limit)) {
       const winnerTeam = red === blue ? null : red > blue ? 'red' : 'blue';
       return finish(room, { reason: 'score_limit', winner: winnerTeam ? { team: winnerTeam } : null, teams: { red, blue } });
@@ -289,7 +309,7 @@ export function buildMatchResult(room, reason, winInfo, humanNames) {
   const now = Date.now();
   const prog = progressionFor(room, reason, winInfo, now);
   const scores = scoreboard(room).map((s) => ({ ...s, ...(prog.rows.get(s.id) || { xp: 0, level: 1, medals: [], accuracy: 0, bestStreak: 0 }) }));
-  const teams = room.mode === 'tdm' && room.sim?.teamScores ? { ...room.sim.teamScores } : null;
+  const teams = isTeamMode(room.mode) && room.sim?.teamScores ? { ...room.sim.teamScores } : null;
   const winner = winInfo?.winner || null;
   return {
     roomId: room.id,

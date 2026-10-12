@@ -15,12 +15,19 @@
  */
 
 import { HEALTH } from '../../config/netConfig.js';
+import { HP_RAMP, PALETTE, SURFACES, BORDERS } from '../../config/uiTheme.js';
 
-/** Fill colour by health ratio: green → amber → red. */
+/**
+ * Fill colour by health ratio: green → amber → red.
+ *
+ * Reads the shared ramp so the nametag bar, the HUD bar and the local player's
+ * overlay all call the same threshold the same colour. The thresholds themselves
+ * live in HP_RAMP, not here, so "what counts as low health" is one decision.
+ */
 function fillColour(ratio) {
-  if (ratio > 0.6) return 0x4ade80;
-  if (ratio > 0.3) return 0xffd166;
-  return 0xff6b8b;
+  if (ratio > HP_RAMP.fullAbove) return HP_RAMP.full;
+  if (ratio > HP_RAMP.criticalBelow) return HP_RAMP.hurt;
+  return HP_RAMP.critical;
 }
 
 export class HealthBar {
@@ -39,7 +46,7 @@ export class HealthBar {
     // Track sits behind the fill. Both are anchored at the bar's top-left so
     // the fill shrinks from the RIGHT edge, which is how HP is read everywhere.
     this.track = scene.add
-      .rectangle(0, 0, HEALTH.barWidth, HEALTH.barHeight, 0x0a1020, 0.8)
+      .rectangle(0, 0, HEALTH.barWidth, HEALTH.barHeight, SURFACES.trackBg, 0.8)
       .setOrigin(0, 0)
       .setDepth(depth);
 
@@ -51,7 +58,7 @@ export class HealthBar {
     this.border = scene.add
       .rectangle(0, 0, HEALTH.barWidth, HEALTH.barHeight)
       .setOrigin(0, 0)
-      .setStrokeStyle(1, 0xffffff, 0.28)
+      .setStrokeStyle(BORDERS.hairline, PALETTE.white, 0.28)
       .setDepth(depth + 2);
 
     this._visible = true;

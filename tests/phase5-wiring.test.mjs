@@ -74,6 +74,15 @@ section('Map geometry comes from the server, not a client guess');
   // Collision bounds must follow the server's own bounds.
   ok(scene.includes('physics.world.setBounds('), 'physics bounds are set from the server map');
   ok(scene.includes('this.mapDef.bounds'), 'bounds are read from the authoritative payload');
+
+  // CAMERA bounds must be set too. The physics world used to be the only thing
+  // bounded, so the rig had nothing to clamp against and the framing could drift
+  // off the arena entirely — with no guarantee the player was still on screen.
+  ok(scene.includes('this.cameraRig.setWorldBounds('), 'the camera rig is bounded by the server map');
+  ok(
+    /this\.cameraRig\.setWorldBounds\(\{\s*x: b\.minX[\s\S]{0,120}width: b\.maxX - b\.minX/.test(scene),
+    'the camera bounds come from the authoritative map rect, not a local guess',
+  );
 }
 
 // ===========================================================================

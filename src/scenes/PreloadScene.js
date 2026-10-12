@@ -30,7 +30,8 @@ export class PreloadScene extends Phaser.Scene {
 
   /** @returns {void} */
   create() {
-    // Always hand off to the lobby; Preload exists to host the asset list.
-    this.scene.start(SCENES.LOBBY);
+    // No auto-start: the startup handoff in `src/main.js` owns the first
+    // scene transition (after the managed loading dwell). Preload hosts the
+    // future asset manifest; starting anything here would bypass that flow.
   }
 }

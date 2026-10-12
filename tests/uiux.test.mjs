@@ -86,6 +86,33 @@ function makeScene(extra = {}) {
   return scene;
 }
 
+/**
+ * A scene whose `rectangle`/`text` objects support the extra Phaser methods the
+ * Slider widget calls (setSize on the fill, setX on the handle). Kept separate
+ * from makeScene so the shared stub is not widened for every other test.
+ */
+function sliderScene(extra = {}) {
+  const HANDLERS = Symbol('handlers');
+  class SliderObj extends Obj {
+    setSize(w, h) { this.w = w; this.h = h; return this; }
+    setX(x) { this.x = x; return this; }
+    setY(y) { this.y = y; return this; }
+    // The shared Obj stub stores handlers on `this.h`, which collides with a
+    // rectangle's numeric height `h`. Use a Symbol-keyed store instead.
+    on(ev, fn) { (this[HANDLERS] ||= {})[ev] = fn; return this; }
+    off(ev) { if (this[HANDLERS]) delete this[HANDLERS][ev]; return this; }
+  }
+  const base = makeScene({
+    input: { on() {}, off() {}, activePointer: { x: 0, y: 0 } },
+    add: {
+      text: (x, y, s, st) => new SliderObj({ x, y, style: st, text: s }),
+      rectangle: (x, y, w, h, c) => new SliderObj({ x, y, w, h, c }),
+    },
+    ...extra,
+  });
+  return base;
+}
+
 globalThis.document = {
   // `makeEl` is defined below; hoisted function declaration, so it is available.
   createElement: (tag) => makeEl(tag),
@@ -100,10 +127,12 @@ const { CONNECTION_STATES, CTA_STATES, THEME, RADII, FONTS } = await import('../
 const { resolveConnection, resolveCta } = await import('../src/ui/brand/ConnectionState.js');
 const { LAYOUTS, tierFor, currentLayout, isTouchPrimary, BREAKPOINTS, DESIGN } = await import('../src/config/viewportConfig.js');
 const Motion = await import('../src/core/Motion.js');
-const { ROUTES } = await import('../src/ui/lobby/NavRail.js');
+const { ROUTES, NavRail } = await import('../src/ui/lobby/NavRail.js');
 const { CUES } = await import('../src/ui/fx/Feedback.js');
 const { BOOT_STEPS, BootScreen } = await import('../src/ui/boot/BootScreen.js');
 const { Button } = await import('../src/ui/widgets/Button.js');
+const { Slider } = await import('../src/ui/widgets/Slider.js');
+const { Logo } = await import('../src/ui/brand/Logo.js');
 
 
 /** Minimal DOM element stub — enough for BootScreen to build and mutate. */
@@ -489,6 +518,70 @@ ok('the boot screen marks itself done at READY', () => {
   assert.strictEqual(b.progress, 100);
   assert.strictEqual(b.done, true);
   b.destroy();
+});
+
+// =========================================================================
+// 8. REGRESSION — lobby bug fixes (icons / logo / settings leak)
+// =========================================================================
+console.log('\n--- lobby bug-fix regressions ---');
+
+ok('nav rail draws the GLYPH as the icon, not just the word', () => {
+  // Bug A: the glyph field existed but was never rendered, so the rail showed
+  // only text words (and, with a missing asset, placeholder boxes). The rail
+  // must put the glyph on the visible label and keep the word as a caption.
+  const rail = new NavRail(makeScene(), {
+    x: 0, y: 0, extent: 600, itemSize: 176, orientation: 'vertical',
+    handlers: { home() {}, play() {}, friends() {}, settings() {} },
+  });
+  rail.items.forEach((btn, i) => {
+    assert.strictEqual(btn.label.text, ROUTES[i].glyph, `item ${i} shows the glyph`);
+    assert.strictEqual(btn.sublabel.text, ROUTES[i].label, `item ${i} keeps the word as caption`);
+    // The icon must actually be sized like an icon, not 11px body text.
+    const px = Number.parseInt(String(btn.label.style.fontSize), 10);
+    assert.ok(px >= 20, `glyph is icon-sized (got ${px}px)`);
+  });
+  rail.destroy();
+});
+
+ok('a closed Slider is invisible AND non-interactive (settings cannot leak)', () => {
+  // Bug C: SettingsMenu adds sliders straight to the scene, so a closed menu
+  // used to leave them visible over Create Party. A hidden slider must drop its
+  // hit-testing too, so it cannot intercept a click meant for a panel behind it.
+  const s = sliderScene();
+  const slider = new Slider(s, { x: 100, y: 100, label: 'Master volume', value: 0.5 });
+  slider.setVisible(false);
+  assert.strictEqual(slider.visible, false, 'slider reports hidden');
+  for (const part of [slider.labelText, slider.valueText, slider.track, slider.fill, slider.handle, slider.hit]) {
+    assert.strictEqual(part.visible, false, 'every slider part is hidden');
+  }
+  assert.strictEqual(slider.hit.interactive, false, 'hidden slider is not interactive');
+  slider.destroy();
+});
+
+ok('Slider.destroy detaches its scene-level drag listeners (no leak)', () => {
+  // Bug C (listener half): the drag listens on scene.input so it survives the
+  // pointer leaving the track — but those MUST be removed on destroy or every
+  // settings open/close leaks two listeners per slider.
+  const removed = [];
+  const s = sliderScene({ input: { on() {}, off: (ev) => removed.push(ev), activePointer: { x: 0, y: 0 } } });
+  const slider = new Slider(s, { x: 100, y: 100, label: 'v', value: 0.5 });
+  slider.destroy();
+  assert.ok(removed.includes('pointermove'), 'pointermove listener removed');
+  assert.ok(removed.includes('pointerup'), 'pointerup listener removed');
+});
+
+ok('Logo wordmark uses a real pixel size (never NaNpx)', () => {
+  // Bug B: fontSize was computed from FONTS.logo.fontSize, the STRING '38px',
+  // so `'38px' * n` was NaN → 'NaNpx' → Phaser fell back to a huge default and
+  // the oversized "ASTRAL ZERO" showed behind the lobby.
+  const logo = new Logo(makeScene(), { x: 100, y: 50, size: 48, showWordmark: true });
+  for (const part of [logo.title, logo.subtitle]) {
+    const fs = String(part.style.fontSize);
+    assert.ok(!fs.includes('NaN'), `no NaN font size (got ${fs})`);
+    const px = Number.parseInt(fs, 10);
+    assert.ok(Number.isFinite(px) && px > 0 && px <= 40, `wordmark is a sane size (got ${fs})`);
+  }
+  logo.destroy();
 });
 
 // =========================================================================

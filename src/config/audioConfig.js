@@ -107,6 +107,17 @@ export const AUDIO = Object.freeze({
       type: 'sweep', gain: 0.34, durationMs: 340,
       startHz: 300, endHz: 900, wave: 'sine',
     }),
+    mimicReveal: Object.freeze({
+      // S14.4. A falling tritone-then-sweep: unmistakably "that was not scrap".
+      // Two detuned voices so it reads as a threat rather than a UI blip.
+      type: 'sweep', gain: 0.42, durationMs: 480,
+      startHz: 760, endHz: 150, wave: 'sawtooth',
+    }),
+    mimicBite: Object.freeze({
+      // S14.4 contact hit. Short and dry — you were touched, not killed.
+      type: 'blip', gain: 0.4, durationMs: 150,
+      startHz: 520, endHz: 180, wave: 'square',
+    }),
   }),
 });
 

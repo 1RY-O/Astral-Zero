@@ -117,6 +117,14 @@ export function toWire(e, now = Date.now()) {
     maxHp: e.maxHp,
     alive: e.alive,
     seq: e.lastInputSeq,
+    /**
+     * Spawn protection is live on this entity. Additive field, booleans are
+     * ignored by older readers. Exposed because the client's own hit
+     * PREDICTION must obey the same invulnerability the resolver enforces —
+     * otherwise the local player sees a phantom hitmarker and a damage number
+     * on a shot the server will throw away.
+     */
+    protected: e.protectedUntil > now,
     score: e.score,
     kills: e.kills,
     deaths: e.deaths,

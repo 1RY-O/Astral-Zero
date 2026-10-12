@@ -9,10 +9,12 @@
  *     InputManager intent shape plus combat buttons.
  *  2. `player_move` (LEGACY bridge): the Phase 1/2 position broadcast.
  *     Out of a room it keeps its old global-relay behavior; IN a room the
- *     claimed position is IGNORED and only a velocity hint is extracted
- *     (moveX from `moveX ?? facing ?? sign(vx)`), so 1.1.0-phase2 Phaser
- *     builds keep steering instead of freezing the day the server goes
- *     authoritative.
+ *     claimed position is IGNORED and only intent is extracted — and that
+ *     means the FULL intent: moveX, the derived jump edge from `jumpHeld`,
+ *     and the world-space aim point the client sends alongside its position.
+ *     (Earlier versions of this bridge kept only moveX, which left the
+ *     authoritative sim blind to where every human was looking and unable to
+ *     jump them at all — see storeLegacyMove for the details.)
  *
  * VALIDATION (anti-cheat-lite, all cheap):
  *  - moveX clamped to [-1, 1]; NaN → 0. jump/fire/melee coerced to bool.
@@ -86,14 +88,24 @@ export function storeInput(socketId, raw = {}) {
     return { ok: false, dropped: 'INPUT_JUNK' };
   }
   const intent = cleanIntent(raw);
-  // Stale/duplicate guard: only forward-moving seq updates state — EXCEPT a
+  // Sticky/duplicate guard: only forward-moving seq updates state — EXCEPT a
   // clearly restarted counter (new Phaser build mid-session sends seq=1 while
   // we remember seq=5000): accept once and re-base instead of wedging forever.
   if (prev && intent.seq !== 0 && intent.seq <= prev.lastSeq && prev.lastSeq - intent.seq <= 1000) {
     return { ok: false, dropped: 'STALE_SEQ' };
   }
+  // Preserve edges that have not been consumed yet. A client ticks at 60 Hz
+  // against a 20 Hz sim, so up to three payloads land per tick and each one
+  // replaces the stored intent; without ORing the pending edge in, the first
+  // packet's jump/fire/melee pulse is erased by the next packet before the tick
+  // loop ever reads it.
   inputs.set(socketId, {
-    intent,
+    intent: {
+      ...intent,
+      jump: intent.jump || Boolean(prev?.intent.jump),
+      fire: intent.fire || Boolean(prev?.intent.fire),
+      melee: intent.melee || Boolean(prev?.intent.melee),
+    },
     lastSeq: intent.seq !== 0 ? intent.seq : (prev?.lastSeq || 0),
     lastAt: now,
     stale: false,
@@ -120,16 +132,45 @@ export function storeLegacyMove(socketId, raw = {}) {
   else if (Math.abs(vx) > 20) moveX = Math.sign(vx);
 
   const prev = inputs.get(socketId);
+  const prevAim = prev?.intent;
   const seq = Number.isInteger(raw.seq) ? raw.seq : (prev?.lastSeq || 0) + 1;
   if (prev && seq <= prev.lastSeq) return { ok: false, dropped: 'STALE_SEQ' };
+  // Aim IS carried on the legacy channel: every 1.x client already sends the
+  // canonical world-space aim point beside its move, so honour it instead of
+  // silently pinning every human's stored aim at the (640, 300) default. Without
+  // this the authoritative sim never learned which way a player was looking —
+  // their facing, melee arc, knockback direction and the bot targeting that
+  // resolves against them were all derived from a constant.
+  // A packet that omits aim keeps the LAST aim (not the default), so turret
+  // characters never snap back to screen centre between frames; only a
+  // non-finite/absent aim falls through to the default.
+  const hasAim = Number.isFinite(Number(raw.aimX)) && Number.isFinite(Number(raw.aimY));
+  const aim = hasAim ? clampToArena(raw.aimX, raw.aimY) : null;
+  const aimX = aim ? aim.x : (prevAim?.aimX ?? 640);
+  const aimY = aim ? aim.y : (prevAim?.aimY ?? 300);
+
+  // Jump: derive the EDGE here rather than trusting a client edge flag. The
+  // client's `jumpPressed` is a one-frame pulse sent on a 60 Hz cadence, against
+  // a 20 Hz server — a pulse can land between two ticks and be dropped, and
+  // honouring a held flag directly would re-arm every packet and reproduce the
+  // OS-auto-repeat bunny-hop the client already fixed. Tracking held state per
+  // socket reproduces the client's own repeat-proof rule exactly, and
+  // `jumpHeld` still reaches the sim so variable jump height works.
+  const jumpHeld = Boolean(raw.jumpHeld ?? raw.jumpPressed ?? false);
+  const prevJumpHeld = Boolean(prevAim?.jumpHeld ?? false);
+  const jumpEdge = jumpHeld && !prevJumpHeld;
+
   const now = Date.now();
   inputs.set(socketId, {
     intent: {
       moveX,
-      jump: false,
-      jumpHeld: false,
-      aimX: prev?.intent.aimX ?? 640,
-      aimY: prev?.intent.aimY ?? 300,
+      // One-shot edges are STICKY until the tick loop consumes them. The client
+      // sends ~3 packets per 20 Hz tick; without stickiness an edge carried by
+      // the first packet is overwritten by the second and the jump is lost.
+      jump: jumpEdge || Boolean(prevAim?.jump),
+      jumpHeld,
+      aimX,
+      aimY,
       fire: false,
       melee: false,
       weaponSlot: null,
@@ -141,7 +182,7 @@ export function storeLegacyMove(socketId, raw = {}) {
     stale: false,
     latencyMs: estimateLatency(Number(raw.timestamp), now),
   });
-  return { ok: true, seq, bridged: true };
+  return { ok: true, seq, bridged: true, jumped: jumpEdge };
 }
 
 /**

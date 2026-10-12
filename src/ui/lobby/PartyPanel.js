@@ -18,6 +18,7 @@
  */
 
 import { THEME, FONTS } from '../../config/uiTheme.js';
+import { SURFACES, PALETTE } from '../../config/uiTheme.js';
 import { PARTY } from '../../config/lobbyConfig.js';
 import { Panel } from '../widgets/Panel.js';
 import { Button } from '../widgets/Button.js';
@@ -35,6 +36,8 @@ export class PartyPanel {
    * @param {number} opts.height
    * @param {import('../../net/NetworkManager.js').NetworkManager} opts.net
    * @param {number} [opts.depth]
+   * @param {number} [opts.accent] - Panel accent override (packed int).
+   * @param {string} [opts.subtitle] - Small line under the title.
    */
   constructor(scene, opts) {
     this.scene = scene;
@@ -49,7 +52,8 @@ export class PartyPanel {
     this.panel = new Panel(scene, {
       x, y, width: w, height: h,
       title: 'PARTY',
-      accent: THEME.accentDeep,
+      subtitle: opts.subtitle,
+      accent: opts.accent ?? THEME.accentDeep,
       emphasised: true,
       depth: this.depth,
     });
@@ -236,7 +240,7 @@ export class PartyPanel {
       // Leader rows get a cyan stripe + brighter border; others stay neutral.
       const g = entry.bg;
       g.clear();
-      g.fillStyle(member.isLeader ? 0x10263d : 0x0b1424, 0.95);
+      g.fillStyle(member.isLeader ? SURFACES.panelRowLeader : SURFACES.panelRow, 0.95);
       g.fillRoundedRect(0, 0, w, rowH, 8);
       g.lineStyle(
         1,
@@ -264,13 +268,13 @@ export class PartyPanel {
     const depth = this.depth + 2;
 
     const bg = scene.add.graphics();
-    bg.fillStyle(0x0b1424, 0.95);
+    bg.fillStyle(SURFACES.panelRow, 0.95);
     bg.fillRoundedRect(0, 0, w, rowH, 8);
     bg.lineStyle(1, THEME.panelBorder, 0.6);
     bg.strokeRoundedRect(0, 0, w, rowH, 8);
 
     const crown = scene.add
-      .rectangle(3, rowH / 2, 4, rowH - 18, 0x38e1ff)
+      .rectangle(3, rowH / 2, 4, rowH - 18, PALETTE.cyanEdge)
       .setOrigin(0, 0.5)
       .setVisible(false);
 

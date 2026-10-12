@@ -16,7 +16,7 @@
  *  4. Enter fires `onSubmit`; Escape fires `onCancel`; blur ends the session.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, SURFACES } from '../../config/uiTheme.js';
 
 /**
  * Manager for the single hidden `<input>` shared by all TextFields in a scene.
@@ -251,7 +251,7 @@ export class TextField {
   redraw() {
     const g = this.bg;
     g.clear();
-    g.fillStyle(this.focused ? THEME.inputBg : 0x0a1223, this.focused ? 1 : 0.8);
+    g.fillStyle(this.focused ? SURFACES.inputBg : SURFACES.inputBorder, this.focused ? 1 : 0.8);
     g.fillRoundedRect(this.x, this.y, this.width, this.height, 8);
     g.lineStyle(
       this.focused ? 2 : 1,

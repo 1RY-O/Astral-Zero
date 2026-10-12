@@ -23,7 +23,7 @@
  *    (e.g. a members list growing) cannot leak display-list entries.
  */
 
-import { THEME, FONTS, RADII, MOTION } from '../../config/uiTheme.js';
+import { THEME, FONTS, RADII, MOTION, PALETTE, SHADOWS } from '../../config/uiTheme.js';
 import * as Motion from '../../core/Motion.js';
 
 export class Panel {
@@ -88,7 +88,7 @@ export class Panel {
 
     // Inner top highlight: a 1px lighter line just inside the top edge reads
     // as a light source above the card. Pure depth cue, costs one call.
-    g.fillStyle(0xffffff, 0.05);
+    g.fillStyle(PALETTE.white, SHADOWS.panelInner);
     g.fillRoundedRect(this.x + 3, this.y + 3, this.width - 6, 2, 1);
 
     // Glow pass (wide, faint) + core pass (crisp). Two strokes = depth.

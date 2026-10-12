@@ -36,8 +36,8 @@ Sent once immediately after Socket.io handshake. Use it to verify contract compa
 {
   "socketId": "abc123",
   "game": "Astral Zero",
-  "serverVersion": "0.1.0-phase1",
-  "socketEventsVersion": "1.0.0-phase1",
+  "serverVersion": "0.5.0-phase5",
+  "socketEventsVersion": "1.5.0-s14",
   "message": "Welcome to Astral Zero! See websocket_events.md for the contract."
 }
 ```
@@ -99,7 +99,9 @@ Emitted by server when a socket disconnects. Clients should remove that avatar.
 
 **LOBBY (not in a room):** legacy Phase 1/2 global relay, unchanged. Send at 20–30 Hz (throttle in Phaser!).
 
-**IN A ROOM (Phase 3 authoritative):** the claimed `x`/`y` is IGNORED — the server owns positions. Only a velocity hint is extracted (`moveX`, else `facing`, else `sign(vx)`) and it steers the sim entity. Peers learn positions from `entity_snapshot` (§13), never from this echo. Prefer the `player_input` event (§13) for new code; this bridge exists so 1.1.0-phase2 builds keep steering on day one.
+**IN A ROOM (Phase 3 authoritative):** the claimed `x`/`y` is IGNORED — the server owns positions. The FULL INTENT is extracted from this packet: `moveX`, `aimX`/`aimY` (the canonical world-space aim point the client already computes every frame), the jump HELD state, and `melee`. Peers learn positions from `entity_snapshot` §13, never from this echo. Prefer `player_input` (§13) for new code; this bridge exists so existing 1.x builds keep steering on day one.
+
+> **Aim + jump are read from this packet.** Earlier revisions of the bridge kept only `moveX` and dropped the rest, which meant the authoritative simulation never learned which way a human was looking and never jumped them at all — their facing, melee arc, knockback direction and the bot AI resolving against them were all derived from a hard-coded constant. A jump edge is derived SERVER-SIDE from the held state (one edge per press, immune to OS key auto-repeat) and is held until the tick consumes it, because the client sends more packets than the server has ticks.
 
 **Client → Server:**
 
@@ -506,6 +508,22 @@ Readiness (tuning: `src/server-config.js → gameModes`):
 { "mode": "ffa | tdm | bot_practice", "mapId": "junkyard" }
 ```
 
+> **Bot Practice tuning (optional, `bot_practice` only):** the client MAY add
+> `botCount` (integer), `difficulty` (`beginner | normal | advanced | elite`),
+> `graceMs` (pacified window in ms, clamped to `[0, 30000]`) and `passive`
+> (`true` = Controls Practice targets that never attack). All four are
+> **validated + clamped server-side** before the room is built — an
+> out-of-range `botCount` clamps to `[0, maxPlayers]`, an unknown `difficulty`
+> falls back to the mode's default mix, garbage `graceMs` becomes `0`, and
+> `passive` is strictly boolean. Every other mode ignores them. Sending
+> them is safe against older servers (extra keys are inert), so this is an
+> **additive, non-breaking** change to the contract.
+>
+> `room_joined.room` carries the effective `graceMs`, `graceUntil` (server ms
+> timestamp when bots go live) and `passive` so clients can render a grace
+> countdown. Enforcement is server-side (`botBrain` strips bot fire + melee
+> while pacified) — a tampered client clock changes nothing authoritative.
+
 Ack (parked — wait for `queue_update` / `match_found`):
 
 ```json
@@ -517,6 +535,13 @@ Ack (instant room — solo bot-practice or threshold met):
 ```json
 { "ok": true, "mode": "bot_practice", "requestedMode": "ffa", "firstMatchProtection": true, "position": 0, "roomId": "room_mg7_ab12", "instant": true }
 ```
+
+**Bot Practice NEVER enters the public queue.** When the effective mode is
+`bot_practice`, the server skips the queue entirely and boots a dedicated
+AI-only room for the requester in the same tick — no waiting, no grouping with
+strangers, and every public queue length stays at 0. A duplicate `queue_join`
+while already seated is rejected with `ALREADY_IN_MATCH` (server-authoritative,
+so a doubled click or replay can never fork a second room).
 
 `room_joined` + `match_found` + `match_state{ phase: countdown }` follow on instant success (see §10). Errors: `NOT_JOINED` · `BAD_MODE` · `ALREADY_IN_MATCH`.
 
@@ -679,7 +704,7 @@ Ack: `{ "ok": true, "seq": 1543 }` or `{ "ok": false, "error": "NOT_JOINED" | "S
   "serverTime": 1728000000000,
   "phase": "playing",
   "entities": [
-    { "id": "<socketId>", "socketId": "<socketId>", "botId": null, "name": "MopLord42", "team": null, "isBot": false, "x": 320.5, "y": 480.0, "vx": 120.0, "vy": -260.5, "facing": 1, "hp": 100, "maxHp": 100, "alive": true, "seq": 1543, "score": 3, "kills": 3, "deaths": 1, "time": 1728000000000 }
+    { "id": "<socketId>", "socketId": "<socketId>", "botId": null, "name": "MopLord42", "team": null, "isBot": false, "x": 320.5, "y": 480.0, "vx": 120.0, "vy": -260.5, "facing": 1, "hp": 100, "maxHp": 100, "alive": true, "protected": false, "seq": 1543, "score": 3, "kills": 3, "deaths": 1, "time": 1728000000000 }
   ]
 }
 ```
@@ -688,7 +713,20 @@ Interpolation contract (matches the client's `SnapshotBuffer`):
 - `time` === `serverTime` for every entity in the batch (clean bracketing, no shear).
 - `tick` is monotonic per room — drop batches with `tick` < last seen (reorder guard).
 - Dead entities STAY listed with `alive: false` (render the corpse until `entity_respawn`; no pop-out).
-- Sending `entity_snapshot` is server-only; client sends get `SERVER_ONLY_EVENT`.
+> **Coordinate model (fix once, everywhere):**
+> `x`/`y` are **FEET-SPACE** — `y` is where the feet are, so `groundY` is the surface they
+> stand on. The Phaser client renders a CENTRE-origin sprite whose physics body hangs below
+> that centre, so the sprite centre is `feetOffsetPx` (25 for the shipped body box) ABOVE
+> the reported y. Convert at exactly one boundary — `src/shared/coords.js`. Reconciling the
+> raw server y onto a sprite centre produces a constant, never-decaying 25 px vertical error,
+> and draws every remote player 25 px too low.
+>
+> **`protected` (additive):** `true` while this entity is inside its spawn-protection window.
+> Clients must render it (a shielded, briefly-flashing player) and, crucially, their local
+> hit PREDICTION must refuse a protected target — otherwise the local player sees a
+> hitmarker and a damage number for a round the server will throw away.
+>
+> - Sending `entity_snapshot` is server-only; client sends get `SERVER_ONLY_EVENT`.
 
 Migration: render remotes from `entities` (one loop for humans + bots); reconcile the local player against its entry (tolerance ~2.5 px, snap beyond); keep `remote = now - 100ms` interpolation.
 
@@ -895,7 +933,7 @@ const socket = import.meta.env?.DEV ? io('http://localhost:3000') : io();
 
 // 1. Wait for welcome, check contract
 socket.on('connected', ({ socketEventsVersion }) => {
-  if (socketEventsVersion !== '1.4.0-phase5') {
+  if (socketEventsVersion !== '1.5.0-s14') {
     console.warn('Backend contract changed — update Phaser netcode!');
   }
   // 2. Join arena
@@ -968,10 +1006,138 @@ socket.on('match_end', ({ scores, mvp, telemetry }) => showResults(scores, mvp, 
 
 ---
 
-## 27. Change log
+## 28. Season 14: characters, ranked, orbital shifts, mimics, control point
+
+**All ADDITIVE — no event renamed, removed or re-shaped.** A 1.x client that never
+sends `character_set` and ignores every event below keeps working byte-for-byte.
+
+New mode: **`control_point`** (`GAME_MODES.CONTROL`, validated by `queue_join`).
+New events: `character_set`, `character_update`, `ranked_board`, `ranked_update`,
+`orbital_shift`, `mimic_event`, `objective_event`.
+
+### `character_set` · `C → S` (acked)
+
+The ONLY way a character or loadout variant changes. Validated server-side against
+the shared roster (`src/shared/characters.js`) and the player's persisted unlocks.
+
+```json
+{ "character": "mop-squire", "variant": "sweeper" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `character` | string | Required. Must exist **and** be unlocked. |
+| `variant` | string? | Optional; validated against THAT character's approved list (an old character's variant never carries across). |
+
+Ack: `{ "ok": true, "character": "mop-squire", "variant": "sweeper" }`.
+Errors: `RATE_LIMITED` · `NOT_JOINED` · `LOCKED` (not yet unlocked) ·
+`BAD_CHARACTER` (unknown id) · `BAD_VARIANT` (unknown variant). Every error also
+arrives on `error_event`, so a client without ack support still learns the
+selection was **refused and nothing changed** — there is no silent local swap.
+
+### `character_update` · `S → C`
+
+```json
+{ "character": "mop-squire", "variant": "sweeper", "profile": { "character": "…", "unlockedCharacters": ["…"], "loadouts": {}, "mastery": {}, "totalXp": 0, "level": 1, "ranked": { "placed": false, "rating": 1200, "wins": 0, "losses": 0, "peak": 0 } }, "timestamp": 1728000000000 }
+```
+
+Emitted on acceptance (and once at join, carrying the active character) so the
+selection screen renders the **server's** truth, never a local guess.
+
+### `ranked_board` · `C → S` (acked)
+
+Read-only request for standings. Ack `{ "ok": true }`; the data arrives on
+`ranked_update`. Errors: `RATE_LIMITED`.
+
+### `ranked_update` · `S → C`
+
+```json
+{ "seasonId": "2026-10", "you": { "placed": true, "rating": 1342, "league": "orbital", "delta": 14, "won": true, "drew": false, "wins": 7, "losses": 3 }, "leaderboard": [ { "name": "MopLord42", "rating": 1342, "wins": 7, "losses": 3, "league": "orbital" } ], "timestamp": 1728000000000 }
+```
+
+| Field | Notes |
+|---|---|
+| `you` | Own standing, or `null` when not joined. `placed: false` = **unplaced** (on no board) — never a fabricated starting rating. |
+| `you.delta` | Change from the just-finished match. `0` while unplaced, and `0` with `drew: true` on a draw. |
+| `leaderboard` | Up to 25 **PLACED** players for `seasonId`, `[]` for an empty season. Bots never appear. |
+
+**Ratings are written once per eligible ranked match, server-side, from
+`match_end`** — the client is never asked whether it won. Only modes on the
+`RATED_MODES` allow-list (`ffa`, `tdm`) can be rated; `ranked: true` is a room
+property derived from the queue key, so a party scrim, practice or scrap match can
+never move a ladder. A **draw, manual end or safety timeout produces no rating
+change** (`drew: true`, `delta: 0`) rather than inventing an outcome. Each player
+gets their own addressed copy — a rating update is never broadcast.
+
+### `orbital_shift` · `S → C`
+
+```json
+{ "roomId": "room_mg7_ab12", "type": "warning", "cycle": 1, "platforms": [ { "index": 2, "to": { "x": 640, "y": 300 } } ], "warningMs": 3000, "shiftAt": 1728000003000, "timestamp": 1728000000000 }
+```
+
+| `type` | Meaning | Payload |
+|---|---|---|
+| `warning` | TELEGRAPH — announced `warningMs` before anything moves, naming which platforms will move | `cycle, platforms[index,to], warningMs, shiftAt` |
+| `shift` | COMMIT — geometry has already moved; sync visuals | `cycle, seq, platforms[] (ALL, in order), geometry` |
+| `settled` | cycle complete | `cycle, seq` |
+
+Only `shift` is authoritative for rendering: the server's collision geometry has
+already changed when it fires, so `WorldRenderer.applyPlatformShift` is a visual
+sync, never a decision. Targets never overlap a live body and always land in-bounds,
+so nobody is crushed or teleported into geometry. Opt-in per mode
+(`gameModes.*.shifts`) — a mode without it never gets a moving floor.
+
+### `mimic_event` · `S → C`
+
+```json
+{ "roomId": "room_mg7_ab12", "kind": "arm", "id": "mimic_7", "byId": "<socketId>", "byName": "MopLord42", "x": 640, "y": 300, "killed": false, "timestamp": 1728000000000 }
+```
+
+| Kind | Meaning |
+|---|---|
+| `spawn` | a dormant mimic seeded into the spawn ring |
+| `arm` / `lunge` | a carrier tripped it — **this is the readable beat** |
+| `bite` | contact damage landed (`byId` = victim, `killed` = lethal) |
+| `hit` / `kill` | a shot connected; `kill` drops a real, high-value token |
+
+Live mimic positions ride `entity_snapshot.mimics[]` (`id, x, y, state`) — one
+authoritative frame carries both, so a decoy is never drawn where the server is not
+simulating it. Dormant mimics are drawn identically to scrap tokens and are **not**
+shootable (letting it arm is the only way to kill it). Mimics never arm under the
+mode's `minPlayers` threshold or inside spawn protection, and a mimic's kill credits
+no opponent — it is a death to the room, not a kill.
+
+### `objective_event` · `S → C`
+
+```json
+{ "roomId": "room_mg7_ab12", "kind": "capture", "team": "red", "from": "neutral", "owner": "red", "progress": 100, "contender": "red", "scores": { "red": 150, "blue": 40 }, "timestamp": 1728000000000 }
+```
+
+| Kind | Meaning |
+|---|---|
+| `capture` | `team` took it from `from` (taking a `neutral` point locks nobody out) |
+| `decay` | an unattended owned point bled back to neutral |
+| `unlock` | `team`'s contest lockout expired |
+
+**`control_point` mode:** 4v4 around one contested point. Both teams present →
+**contested: the bar freezes and nothing scores** (a numbers check is not a
+contest). Capture ~2.5 s uncontested; a team that loses the point is locked out
+`contestLockMs` (4 s) so it must be cleared first; an owned-but-unattended point
+decays at 10 %/s. Win = first to `scoreLimit` (150), else higher score at 300 s.
+
+Full objective state rides **every** `entity_snapshot` in `control`
+(`x, y, radius, owner, progress, contender, scores{red,blue}, scoreLimit,
+locked{red,blue}, state`) — the HUD line and the world bar read the SAME field, so
+they cannot disagree and the client never decides an owner.
+
+---
+
+## 29. Change log
 
 | Version | Date | Change |
 |---|---|---|
+| `1.5.0-s14` | 2026-10-12 | ADDITIVE (no wire breaks). **Characters + loadouts (§28):** `character_set` / `character_update` — the only path that may change a character, validated against the shared roster and persisted unlocks, so a locked or unknown selection is refused rather than silently swapped. Stats/weapon/skill/ability are applied by the simulation. **Ranked (§28):** `ranked_board` / `ranked_update`, ratings written once per eligible ranked match from server-scored `match_end`, placement-first (unplaced players are on no board), Elo clamped, draws move nothing, unrated modes (`bot_practice`, `scrap_collector`, parties) can never touch a ladder, updates addressed per player. **Orbital shifts (§28):** `orbital_shift` telegraph → commit → settled, deterministic targets that never land on a body. **Scrap mimics (§28):** `mimic_event` + `entity_snapshot.mimics[]`; dormant mimics are indistinguishable from tokens and unshootable. **Control Point mode (§28):** `objective_event` + `entity_snapshot.control`; contested freezes, capture decay + contest lockout. New: mode `control_point`; events `character_set`, `character_update`, `ranked_board`, `ranked_update`, `orbital_shift`, `mimic_event`, `objective_event`. |
+| `1.4.0-phase6` | 2026-10-11 | ADDITIVE (no wire breaks). **Coordinate model made explicit:** snapshots are feet-space, converted at one boundary (`src/shared/coords.js`), closing a permanent 25 px vertical reconciliation error. **Movement tuning is now SHARED** by client and server via `src/shared/tuning.js` (the halves used to simulate different physics), so prediction and authority agree. **`player_move` carries aim + jump:** the server now learns where each human looks and can jump them (it previously jumped no human at all). New `entity_snapshot.entities[].protected` (additive) so client hit-prediction honours spawn protection. Camera framing: rig is actually bounded and its anchor/aim-lead now take effect. Also: name sanitisation at the `player_join` boundary, per-socket rate limits on every state-creating event, `match_end` restricted to seated participants, arena hull rendering. New events: none. |
 | `1.4.0-phase5` | 2026-10-05 | ADDITIVE (no wire breaks): 3 authoritative maps (§23, manifest `map`), `scrap_collector` mode (§24: `tokens` + `carried` in snapshots, `scrap_event`, banked win), spectator booths (§25: `room_joined.spectators`, `SPECTATING` guards, `canSpectate` hint), progression in `match_end` (xp/level/medals/mvp/telemetry), hardening (83 Hz cap, `BAD_ORIGIN`, limbo purge). New: mode `scrap_collector`, event `scrap_event`. |
 | `1.3.0-phase4` | 2026-10-05 | ADDITIVE (no wire breaks): lag compensation (rewind grace-band hits, §18), bots v2 (personalities/reaction/cohesion/cover, §19), heat bloom, `streak_event` medals, reconnect grace (`player_join` ack += `rejoined/roomId`), `room_join` late join, tdm overtime (`score_update.overtime`, `match_end` += `overtime` reason), `INPUT_JUNK` + seq-resync hardening (§20). New events: `streak_event`, `room_join`. |
 | `1.2.0-phase3` | 2026-10-05 | AUTHORITATIVE SIM (in-room semantics change; lobby paths byte-compatible): 20 Hz fixed tick (`src/game/loop.js`), `player_input` intent channel, `entity_snapshot` every tick, bot AI (chase/strafe/flee, team-aware, per-mode temperament), server projectiles + melee arcs, death/respawn (`entity_death/respawn`), `score_update`, real `match_end` scores + winners (§13–§15). `player_move` position ignored in rooms (velocity-hint bridge). `player_health_update` client sends now rejected (`NOT_AUTHORITATIVE`). New events: `player_input`, `entity_snapshot`, `entity_death`, `entity_respawn`, `score_update`. |

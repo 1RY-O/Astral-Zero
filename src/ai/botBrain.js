@@ -107,8 +107,32 @@ export function pickTarget(bot, entities, mode) {
 }
 
 /**
+ * True when the room's bots must hold fire: Controls Practice (`passive`) or
+ * inside the beginner grace window (`now < graceUntil`). Movement, aiming and
+ * targeting continue — only ATTACKS (fire + melee) are stripped — so pacified
+ * bots still read as alive on camera while being unable to hurt the player.
+ *
+ * Server-authoritative: evaluated per tick from room state the client cannot
+ * write, so no client clock or payload can shorten, extend or bypass it.
+ *
+ * @param {object} room internal room (room.passive / room.graceUntil)
+ * @param {number} now server ms
+ * @returns {boolean}
+ */
+export function botPacified(room, now = Date.now()) {
+  if (!room) return false;
+  if (room.passive === true) return true;
+  return Number.isFinite(Number(room.graceUntil)) && now < Number(room.graceUntil);
+}
+
+/**
  * Think one tick. Pure-ish: reads room state, writes NOTHING except the
  * returned intent (memory mutation on bot.ai is the only side effect).
+ *
+ * Practice pacing: when `botPacified(room, now)` holds (Controls Practice or
+ * inside the grace window), attacks are stripped AFTER the normal brain runs,
+ * so movement/aim/targeting stay lively while fire + melee are forced off.
+ * One choke point means no fire site can bypass the gate.
  *
  * Phase 4 upgrades (all inside this one function, same intent contract):
  *  - personalities: reaction gating (new targets tracked before firing),
@@ -128,6 +152,18 @@ export function pickTarget(bot, entities, mode) {
  * @returns {object} intent { moveX, jump, jumpHeld, aimX, aimY, fire, melee }
  */
 export function think(bot, room, mode, now = Date.now()) {
+  const intent = thinkImpl(bot, room, mode, now);
+  // Practice pacing gate (single choke point): pacified bots keep their
+  // movement/aim/targeting but cannot attack. Covers every return above.
+  if (botPacified(room, now)) {
+    intent.fire = false;
+    intent.melee = false;
+  }
+  return intent;
+}
+
+/** Un-gated brain (see think for the pacification wrapper). */
+function thinkImpl(bot, room, mode, now = Date.now()) {
   const mem = ensureMemory(bot);
   const p = bot.personality || profileFor('normal');
   const entities = room.sim?.entities;

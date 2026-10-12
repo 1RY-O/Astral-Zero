@@ -15,7 +15,12 @@
  *   4. CONNECTING TO ORBIT    — the socket reports ANY status change. The bar
  *                               genuinely stops here if the relay is slow.
  *   5. READY                  — the socket is online (or the contract check
- *                               has completed), so the lobby is interactive.
+ *                               has completed), so the entry scene is interactive.
+ *
+ * The DOM loading screen additionally holds for exactly 4 s (BOOT_DWELL_MS)
+ * before handing off to Home, so every launch reads as a deliberate startup
+ * rather than a flash. Milestones still drive the bar honestly within that
+ * window; the dwell only gates the transition, never the progress.
  *
  * NOTHING IS FAKED. There is no artificial minimum duration and no timer that
  * creeps the bar forward: every increment is triggered by a real event. If the
@@ -35,7 +40,8 @@ import { BootScene } from './scenes/BootScene.js';
 import { PreloadScene } from './scenes/PreloadScene.js';
 import { LobbyScene } from './scenes/LobbyScene.js';
 import { ArenaScene } from './scenes/ArenaScene.js';
-import { BootScreen } from './ui/boot/BootScreen.js';
+import { HomeScene } from './scenes/HomeScene.js';
+import { BootScreen, BOOT_DWELL_MS } from './ui/boot/BootScreen.js';
 import { net } from './net/NetworkManager.js';
 import * as Motion from './core/Motion.js';
 
@@ -56,10 +62,11 @@ boot.advance('scan');
 const game = new Phaser.Game({
   ...GAME_CONFIG,
 
-  // Scene order matters: Boot generates textures, Preload hosts the (future)
-  // asset manifest, Lobby is the player-facing entry point, and Arena only
-  // ever starts from the lobby when the server says a match is ready.
-  scene: [BootScene, PreloadScene, LobbyScene, ArenaScene],
+  // Scene order matters: Boot generates textures and holds while the DOM
+  // loading screen runs its dwell; Home is the player-facing entry point;
+  // Lobby owns party/mode/friends; Arena only ever starts on server-confirmed
+  // room membership (never optimistically from a button).
+  scene: [BootScene, PreloadScene, HomeScene, LobbyScene, ArenaScene],
   callbacks: {
     // 2. The engine is up and BootScene is generating textures.
     preBoot: (g) => boot.advance('calibrate'),
@@ -89,19 +96,102 @@ net.on('notice', (notice) => {
   }
 });
 
-// Safety net: if something throws before the lobby takes over, the player sees
-// a real message rather than a permanently frozen loading bar.
+// Safety net: if something throws before the handoff takes over, the player sees
+// a real message rather than a permanently frozen loading bar. The fail()
+// path renders an honest message plus a working RETRY (and cancels the 4 s
+// dwell), so a boot failure never leaves the player staring at a bar.
 setTimeout(() => {
-  if (!boot.done && !game.scene.isActive('LobbyScene')) {
-    // Do NOT auto-finish — that would be faking success. Just make sure the
-    // screen is in a state the player can read and act on.
-    boot.advance('connect');
+  if (!boot.done && !handoffDone) {
+    const active = game.scene.getScenes(true).map((s) => s.scene.key);
+    if (!active.includes('HomeScene') && !active.includes('LobbyScene') && !active.includes('ArenaScene')) {
+      boot.fail(
+        'The orbital relay did not come online in time. Check that the server is',
+        () => window.location.reload(),
+      );
+    }
   }
-}, 8000);
+}, Math.max(6000, BOOT_DWELL_MS + 2000));
 
+// -------------------------------------------------------------------------
+// Navigation (hash-routed app shell).
+// -------------------------------------------------------------------------
+import { currentRoute, navigate, sceneKey } from './core/Router.js';
+
+/** Route scene key → real scene class. Owned here (not in Router) to avoid cycles. */
+const SCENE_CLASSES = Object.freeze({
+  HomeScene,
+  LobbyScene,
+  ArenaScene,
+});
+
+/** True once the loading dwell has handed off to the first scene. */
+let handoffDone = false;
+
+/**
+ * Show a route's scene, keeping Phaser scenes exclusive. Uses the Phaser
+ * scene manager directly — there is exactly one routing system.
+ * @param {string} id - The route id from `Router.js`.
+ * @returns {void}
+ */
+function showScene(id) {
+  const key = sceneKey(id);
+  if (game.scene.isActive(key)) return;
+  const SceneClass = SCENE_CLASSES[key] ?? HomeScene;
+  // Scenes from the config list are pre-registered; only add if missing
+  // (defensive for tests that construct a bare manager).
+  try {
+    if (!game.scene.getScene(key)) game.scene.add(key, SceneClass);
+  } catch {
+    /* already registered — fall through to start */
+  }
+  // Keep scenes exclusive: stop whatever is active so Lobby/Home/Arena can
+  // never stack and double-subscribe the network.
+  for (const s of game.scene.getScenes(true)) {
+    if (s.scene.key !== key) {
+      try {
+        game.scene.stop(s.scene.key);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  game.scene.start(key);
+}
+
+/**
+ * First transition, fired exactly once when the 4 s loading dwell completes.
+ * Defaults to Home (the intended entry point); respects an existing hash.
+ * @returns {void}
+ */
+function handoff() {
+  if (handoffDone) return;
+  handoffDone = true;
+  if (boot.failed) return; // fail() already claimed the screen with a retry
+  boot.settle();
+  showScene(currentRoute());
+}
+
+// The loading screen runs exactly BOOT_DWELL_MS, then hands off.
+boot.startDwell(handoff, BOOT_DWELL_MS);
+// Rotating tips drawn from implemented mechanics. Inert (one frozen line) when
+// the player prefers reduced motion.
+boot.startTips();
+
+window.addEventListener('hashchange', () => {
+  // Ignore hash churn during the loading dwell — the handoff owns the first
+  // transition and must not be double-fired by an early hash write.
+  if (!handoffDone) return;
+  showScene(currentRoute());
+});
+
+// Controlled debug/test seam: the game instance, boot screen and network
+// facade for console + automated probes. Game/net state holds no secrets
+// (player name, connection, room roster) — no tokens or keys are exposed.
 if (typeof window !== 'undefined') {
   window.game = game;
   window.__azBoot = boot;
+  window.__azNet = net;
+  window.__azDwellMs = BOOT_DWELL_MS;
 }
 
 export default game;

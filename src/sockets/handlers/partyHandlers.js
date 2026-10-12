@@ -117,7 +117,12 @@ export function registerPartyHandlers(io, socket) {
       if (typeof ack === 'function') ack({ ok: false, error: 'NOT_LEADER' });
       return;
     }
-    const res = startPartyMatch(party, payload.mode || 'ffa', payload.mapId || 'junkyard');
+    const res = startPartyMatch(party, payload.mode || 'ffa', payload.mapId || 'junkyard', {
+      botCount: payload.botCount,
+      difficulty: payload.difficulty,
+      graceMs: payload.graceMs,
+      passive: payload.passive,
+    });
     if (!res.ok) {
       if (typeof ack === 'function') ack({ ok: false, error: res.error });
       return;

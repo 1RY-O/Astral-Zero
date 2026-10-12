@@ -25,15 +25,21 @@
 import config from '../server-config.js';
 import { GAME_MODES } from '../sockets/events.js';
 import { hasFinishedRealMatch, setQueueMode, setRoomId } from '../players/playerStore.js';
+import { seasonId as currentSeason } from '../shared/ranked.js';
+import { persistence } from '../players/persistence.js';
+import { clearInput } from '../game/inputs.js';
+import { normaliseDifficulty } from '../ai/personalities.js';
 import {
   createRoom,
   toPublic as roomToPublic,
   getRoom,
   getRoomForSocket,
+  getAnyRoom,
   removeHuman,
   endMatch,
   schedulePlaying,
   scheduleAutoEnd,
+  isRatedMode,
 } from '../rooms/roomManager.js';
 import { setPartyRoom, _getRawParty } from '../parties/partyManager.js';
 import { ensureLoop, initSim } from '../game/loop.js';
@@ -50,15 +56,79 @@ export function initMatchmaking(io, events) {
   ensureLoop(io, events, { onMatchEnd: (roomId, reason) => performMatchEnd(roomId, reason) });
 }
 
-// queues: mode → [{ socketId, name, mapId, enqueuedAt }]
+// queues: queueKey → [{ socketId, name, mapId, enqueuedAt }]
 // Phase 5: scrap_collector queues like ffa (instant ≥2, 5 s fallback).
-const queues = { ffa: [], tdm: [], bot_practice: [], scrap_collector: [] };
-const queueTimers = new Map(); // mode → timeout
+// S14.6: a queueKey is a plain mode ('ffa') or its RATED variant ('ffa#ranked').
+// Ranked and casual waiters live in DIFFERENT buffers — the key itself is the
+// separation, so a rated room can only ever form from ranked players and a
+// casual room from casual players. Unknown keys are created on first use, so
+// a new rated mode never needs a literal here.
+const queues = { ffa: [], tdm: [], control_point: [], bot_practice: [], scrap_collector: [] };
+const queueTimers = new Map(); // queueKey → timeout
+
+const RANKED_MARK = '#ranked';
+/** Queue key for a mode + ranked flag. */
+const queueKey = (mode, ranked) => (ranked ? `${mode}${RANKED_MARK}` : mode);
+/** Base mode of a queue key ('ffa#ranked' → 'ffa'). */
+const keyMode = (key) => (key.endsWith(RANKED_MARK) ? key.slice(0, -RANKED_MARK.length) : key);
+/** Was this queue key created as a RATED queue? */
+const keyRanked = (key) => key.endsWith(RANKED_MARK);
+/** Get (or lazily create) the buffer for a queue key. */
+function ensureQueue(key) {
+  if (!Array.isArray(queues[key])) queues[key] = [];
+  return queues[key];
+}
 
 const VALID_MODES = () => Object.values(GAME_MODES);
 
 function tuningFor(mode) {
   return config.gameModes?.[mode] || { maxPlayers: 10, minToStartNow: 2, soloWaitMs: 5000 };
+}
+
+/**
+ * Validate the optional Bot Practice tuning a client may request. Every value
+ * is clamped/normalised HERE (server-authoritative) so a tampered or
+ * out-of-range payload can never spawn an undefined bot count, difficulty,
+ * grace window or passive flag.
+ *
+ *  - botCount: integer in [0, maxPlayers]. Anything non-numeric, negative,
+ *    fractional or over the cap is clamped (not rejected) so a slightly-off
+ *    client still gets a sane room rather than an error.
+ *  - difficulty: one of the four tiers, else null (room falls back to its
+ *    per-mode mix — which for practice is gentle by construction).
+ *  - graceMs: pacified window after room boot in which bots move and aim but
+ *    never fire or melee (beginner breathing room). Clamped to [0, 30000].
+ *  - passive: when true the bots NEVER attack (Controls Practice targets).
+ *    Strict boolean coercion — any truthy non-boolean still becomes true, so
+ *    there is no stringly-typed bypass.
+ *
+ * @param {string} mode
+ * @param {object} raw { botCount?, difficulty?, graceMs?, passive? }
+ * @returns {{ botCount: number|null, difficulty: string|null, graceMs: number, passive: boolean }}
+ */
+export function validateBotPracticeTuning(mode, raw = {}) {
+  // Only Bot Practice exposes configurable bots; other modes keep their fill.
+  if (mode !== GAME_MODES.BOT_PRACTICE) {
+    return { botCount: null, difficulty: null, graceMs: 0, passive: false };
+  }
+
+  const cap = Math.max(0, tuningFor(mode).maxPlayers || 4);
+  let botCount = null;
+  const requested = Number(raw.botCount);
+  if (Number.isFinite(requested)) {
+    botCount = Math.min(cap, Math.max(0, Math.floor(requested)));
+  }
+
+  const difficulty = normaliseDifficulty(raw.difficulty);
+
+  // Grace window: finite ms clamped to [0, 30 s]; garbage → 0 (no grace).
+  let graceMs = 0;
+  const requestedGrace = Number(raw.graceMs);
+  if (Number.isFinite(requestedGrace)) {
+    graceMs = Math.min(30000, Math.max(0, Math.round(requestedGrace)));
+  }
+
+  return { botCount, difficulty, graceMs, passive: raw.passive === true };
 }
 
 /**
@@ -98,14 +168,19 @@ export function removeFromAllQueues(socketId) {
   return removed;
 }
 
-/** Push fresh positions to everyone waiting in a mode. */
-function broadcastQueuePositions(mode) {
+/** Push fresh positions to everyone waiting in one queue (key, not mode). */
+function broadcastQueuePositions(key) {
   if (!ioRef || !EV) return;
-  queues[mode].forEach((entry, i) => {
+  const mode = keyMode(key);
+  const ranked = keyRanked(key);
+  ensureQueue(key).forEach((entry, i) => {
     ioRef.to(entry.socketId).emit(EV.QUEUE_UPDATE, {
       mode,
+      // S14.6 additive: WHICH queue the position came from. The client shows
+      // it so a ranked search can never read as a casual one.
+      ranked,
       position: i + 1,
-      playersInQueue: queues[mode].length,
+      playersInQueue: queues[key].length,
       timestamp: Date.now(),
     });
   });
@@ -118,11 +193,34 @@ function broadcastQueuePositions(mode) {
  * @param {object} player { id, socketId, name }
  * @param {string} requestedMode
  * @param {string} mapId
+ * @param {object} [botTuning] - Optional Bot Practice tuning
+ *   { botCount?, difficulty?, graceMs?, passive? }.
+ *   Validated + clamped server-side; ignored for every non-practice mode.
+ * @param {boolean} [rankedRequested] - S14.6: request the RATED queue.
+ *   Strictly `=== true` — a truthy string can never make a queue rated. The
+ *   server still decides: unrated modes reject the request outright, and the
+ *   room only exists as rated when this survives down to createRoom.
  */
-export function joinQueue(player, requestedMode = 'ffa', mapId = 'junkyard') {
+export function joinQueue(player, requestedMode = 'ffa', mapId = 'junkyard', botTuning = {}, rankedRequested = false) {
   if (!player?.socketId) return { ok: false, error: 'NOT_JOINED' };
+  // Defense-in-depth: never seat a player who is already in a match/spectator
+  // room. The socket handler already rejects this with ALREADY_IN_MATCH, but
+  // joinQueue is also the authoritative path for Bot Practice's instant room —
+  // guarding here too means a duplicate/replayed request can never strand the
+  // player in a second, orphaned room. (getAnyRoom covers players + spectators.)
+  if (getAnyRoom(player.socketId)) {
+    return { ok: false, error: 'ALREADY_IN_MATCH' };
+  }
   const requested = VALID_MODES().includes(requestedMode) ? requestedMode : null;
   if (!requested) return { ok: false, error: 'BAD_MODE' };
+
+  // S14.6: asking to go RATED on a mode that carries no rating is an honest
+  // NO, not a silent casual queue — the lobby must be able to show the
+  // rejection instead of pretending a ladder game happened. (First-match
+  // protection may still move a VALID ranked request down to practice.)
+  if (rankedRequested === true && !isRatedMode(requested)) {
+    return { ok: false, error: 'NOT_RATED_MODE' };
+  }
 
   const { mode: effective, firstMatchProtection } = applyFirstMatchProtection(
     [player.name],
@@ -131,6 +229,11 @@ export function joinQueue(player, requestedMode = 'ffa', mapId = 'junkyard') {
 
   removeFromAllQueues(player.socketId);
 
+  // Server-authoritative validation of the practice tuning (count,
+  // difficulty, grace window, passive flag). Runs BEFORE the room exists, so
+  // the room only ever sees clamped values.
+  const { botCount, difficulty, graceMs, passive } = validateBotPracticeTuning(effective, botTuning);
+
   // Bot practice NEVER waits and NEVER groups strangers: instant solo room.
   if (effective === GAME_MODES.BOT_PRACTICE) {
     const room = launchRoom({
@@ -138,31 +241,46 @@ export function joinQueue(player, requestedMode = 'ffa', mapId = 'junkyard') {
       mapId,
       humans: [{ id: player.id, socketId: player.socketId, name: player.name }],
       partyCode: null,
+      botCount,
+      difficulty,
+      graceMs,
+      passive,
     });
     return {
       ok: true,
       mode: effective,
       requestedMode: requested,
       firstMatchProtection,
+      // Never rated: practice is not on the rated allow-list, so even a
+      // ranked request that was moved here lands in an unrated room.
+      ranked: false,
       position: 0,
       roomId: room?.id || null,
       instant: true,
     };
   }
 
-  queues[effective].push({ socketId: player.socketId, name: player.name, mapId, enqueuedAt: Date.now() });
+  // Ranked survives first-match protection as a REQUEST (a veteran may be
+  // moved down to practice — in which case wantsRanked is false and the room
+  // is simply not rated). The queue key carries the separation: a ranked
+  // waiter can only ever drain with other ranked waiters.
+  const wantsRanked = rankedRequested === true && isRatedMode(effective);
+  const key = queueKey(effective, wantsRanked);
+  ensureQueue(key);
+  queues[key].push({ socketId: player.socketId, name: player.name, mapId, enqueuedAt: Date.now() });
   setQueueMode(player.socketId, effective);
-  broadcastQueuePositions(effective);
+  broadcastQueuePositions(key);
 
   // Ready now? Drain up to maxPlayers instantly (chunked if overfull).
   const tuning = tuningFor(effective);
-  if (queues[effective].length >= (tuning.minToStartNow || 2)) {
-    const room = drainQueueToRoom(effective);
+  if (queues[key].length >= (tuning.minToStartNow || 2)) {
+    const room = drainQueueToRoom(key);
     return {
       ok: true,
       mode: effective,
       requestedMode: requested,
       firstMatchProtection,
+      ranked: wantsRanked,
       position: 0,
       roomId: room?.id || null,
       instant: true,
@@ -170,47 +288,58 @@ export function joinQueue(player, requestedMode = 'ffa', mapId = 'junkyard') {
   }
 
   // Otherwise arm the solo-fallback timer (bot-filled room even if alone).
-  ensureFallbackTimer(effective);
-  const pos = queues[effective].findIndex((q) => q.socketId === player.socketId) + 1;
+  ensureFallbackTimer(key);
+  const pos = queues[key].findIndex((q) => q.socketId === player.socketId) + 1;
   return {
     ok: true,
     mode: effective,
     requestedMode: requested,
     firstMatchProtection,
+    ranked: wantsRanked,
     position: pos,
-    playersInQueue: queues[effective].length,
+    playersInQueue: queues[key].length,
     instant: false,
   };
 }
 
-/** Arm (once) the per-mode fallback timer that force-starts small queues. */
-function ensureFallbackTimer(mode) {
-  if (!ioRef || queueTimers.has(mode) || queues[mode].length === 0) return;
-  const wait = tuningFor(mode).soloWaitMs ?? 5000;
+/** Arm (once) the per-queue fallback timer that force-starts small queues. */
+function ensureFallbackTimer(key) {
+  const queue = ensureQueue(key);
+  if (!ioRef || queueTimers.has(key) || queue.length === 0) return;
+  const wait = tuningFor(keyMode(key)).soloWaitMs ?? 5000;
   if (wait <= 0) return;
   const timer = setTimeout(() => {
-    queueTimers.delete(mode);
-    if (queues[mode].length > 0) drainQueueToRoom(mode);
+    queueTimers.delete(key);
+    if (queue.length > 0) drainQueueToRoom(key);
   }, wait);
   timer?.unref?.(); // never hold the process open for matchmaking
-  queueTimers.set(mode, timer);
+  queueTimers.set(key, timer);
 }
 
 /**
- * Pop up to maxPlayers off a mode queue into ONE room (bots fill the rest).
+ * Pop up to maxPlayers off ONE queue key into ONE room (bots fill the rest).
  * Leftover players (queue > max) stay queued and re-trigger matching.
+ *
+ * S14.6: `key` may be a rated variant ('ffa#ranked'); the ranked flag is
+ * derived from the KEY, never from a client payload at this depth, and is
+ * handed to createRoom which validates it against the rated-mode allow-list.
+ *
+ * @param {string} queueKey 'ffa' | 'ffa#ranked' | ...
+ * @returns {object|null} room
  */
-export function drainQueueToRoom(mode) {
+export function drainQueueToRoom(queueKeyArg) {
+  const key = queueKeyArg;
+  const mode = keyMode(key);
   const tuning = tuningFor(mode);
   const max = tuning.maxPlayers || 10;
-  const batch = queues[mode].splice(0, max);
+  const batch = ensureQueue(key).splice(0, max);
   if (batch.length === 0) return null;
-  broadcastQueuePositions(mode);
-  if (queues[mode].length === 0 && queueTimers.has(mode)) {
-    clearTimeout(queueTimers.get(mode));
-    queueTimers.delete(mode);
-  } else if (queues[mode].length > 0) {
-    ensureFallbackTimer(mode);
+  broadcastQueuePositions(key);
+  if (queues[key].length === 0 && queueTimers.has(key)) {
+    clearTimeout(queueTimers.get(key));
+    queueTimers.delete(key);
+  } else if (queues[key].length > 0) {
+    ensureFallbackTimer(key);
   }
   const mapId = batch[0]?.mapId || 'junkyard';
   return launchRoom({
@@ -218,6 +347,7 @@ export function drainQueueToRoom(mode) {
     mapId,
     humans: batch.map((b) => ({ id: b.socketId, socketId: b.socketId, name: b.name })),
     partyCode: null,
+    ranked: keyRanked(key),
   });
 }
 
@@ -229,8 +359,10 @@ export function drainQueueToRoom(mode) {
  * @param {object} party raw party (from _getRawParty)
  * @param {string} requestedMode
  * @param {string} mapId
+ * @param {object} [tuning] - Optional Bot Practice tuning
+ *   { botCount?, difficulty?, graceMs?, passive? }.
  */
-export function startPartyMatch(party, requestedMode = 'ffa', mapId = 'junkyard') {
+export function startPartyMatch(party, requestedMode = 'ffa', mapId = 'junkyard', tuning = {}) {
   const requested = VALID_MODES().includes(requestedMode) ? requestedMode : 'ffa';
   if (!party || party.members.length === 0) return { ok: false, error: 'PARTY_NOT_FOUND' };
   const names = party.members.map((m) => m.name);
@@ -239,11 +371,22 @@ export function startPartyMatch(party, requestedMode = 'ffa', mapId = 'junkyard'
   // Parties skip queues entirely — pull members out if they were waiting.
   for (const m of party.members) removeFromAllQueues(m.socketId);
 
+  // Validate bot tuning against the EFFECTIVE mode (a party of new players may
+  // be forced into bot_practice, in which case their tuning still applies).
+  const { botCount, difficulty, graceMs, passive } = validateBotPracticeTuning(effective, tuning);
+
   const room = launchRoom({
     mode: effective,
     mapId,
     humans: party.members.map((m) => ({ id: m.id, socketId: m.socketId, name: m.name })),
     partyCode: party.code,
+    botCount,
+    difficulty,
+    graceMs,
+    passive,
+    // S14.6: parties are NEVER rated. Ranked is a solo-queue variant — no
+    // `ranked` flag reaches createRoom from this path, so a private party
+    // match cannot move anyone's ladder (placement included).
   });
   if (!room) return { ok: false, error: 'NO_MEMBERS_ONLINE' };
   setPartyRoom(party.code, room.id);
@@ -277,6 +420,9 @@ export function launchRoom(opts) {
   }
   const online = (opts.humans || []).filter((h) => ioRef.sockets.sockets.has(h.socketId));
   if (online.length === 0) return null;
+  // botCount / difficulty / graceMs / passive ride through untouched — they
+  // were validated in joinQueue/startPartyMatch before this point, so a room
+  // never sees an unclamped value.
   const room = createRoom({ ...opts, humans: online });
   // Phase 3: build live sim entities from the spawn roster NOW, so the
   // countdown roster and the first playing tick share one truth.
@@ -360,6 +506,29 @@ export function performMatchEnd(roomId, reason = 'finished') {
   const payload = ended.result;
 
   ioRef.to(roomId).emit(EV.MATCH_END, payload);
+
+  // S14.6: each ranked player gets THEIR OWN rating update, addressed by
+  // socket and never broadcast — "you gained 14" is a private fact, and a
+  // leaked update would tell a competitor what to queue next.
+  if (ended.ranked && ended.rankedByName) {
+    // The room roster is the socket → display-name map. It is read from the
+    // `room` handle captured above, which endMatch() has already detached from
+    // the store but not destroyed.
+    const season = currentSeason();
+    const board = (persistence()?.leaderboard({ seasonId: season, limit: 10 }) || [])
+      .map((r) => ({ name: r.displayName, rating: r.rating, wins: r.wins, losses: r.losses }));
+    for (const p of room?.players || []) {
+      const info = ended.rankedByName[p.name];
+      if (!info) continue;
+      ioRef.to(p.socketId || p.id).emit(EV.RANKED_UPDATE, {
+        seasonId: season,
+        you: { name: p.name, ...info },
+        leaderboard: board,
+        timestamp: Date.now(),
+      });
+    }
+  }
+
   ioRef.to(roomId).emit(EV.MATCH_STATE, {
     roomId,
     phase: 'lobby',
@@ -380,8 +549,17 @@ export function performMatchEnd(roomId, reason = 'finished') {
     }
   }
   // Clear authoritative room pointers + restore party link.
-  for (const [socketId] of ioRef.sockets.sockets) {
+  // SCOPED TO THIS ROOM'S HUMANS. This loop used to walk every connected
+  // socket in the server and null their `roomId`, which is O(all clients) per
+  // match end and silently wipes the room pointer of players who are currently
+  // in a completely different live match.
+  for (const socketId of humans) {
     setRoomId(socketId, null);
+    // Release the intent store here. The leave/disconnect paths already do,
+    // but a match can end without either (time limit, kill limit, overtime),
+    // which used to leave a stale intent entry per player alive until they
+    // joined their next room — unbounded growth across a busy server's life.
+    clearInput(socketId);
   }
   if (ended.partyCode) {
     setPartyRoom(ended.partyCode, null);

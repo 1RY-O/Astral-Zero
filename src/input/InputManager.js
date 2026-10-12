@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { canonicalAimPoint } from './aimPoint.js';
 
 /**
  * Astral Zero - input abstraction.
@@ -19,7 +20,14 @@ import Phaser from 'phaser';
  * because only the player knows whether a jump is currently possible.
  */
 
-/** Phaser key codes grouped by semantic action. */
+/** Phaser key codes grouped by semantic action.
+ *
+ * NOTE ON W: W (with SPACE and UP) is INTENTIONALLY a jump alias — this is a
+ * side-view platformer with no vertical swim axis, so W has no "move up" to
+ * conflict with, and the multi-key jump binding (plus the tutorial + HUD hint)
+ * is the documented control scheme. Holding a jump key must still produce
+ * exactly ONE jump (see update(): the edge is repeat-proof).
+ */
 export const KEY_BINDINGS = {
   left: [Phaser.Input.Keyboard.KeyCodes.LEFT, Phaser.Input.Keyboard.KeyCodes.A],
   right: [Phaser.Input.Keyboard.KeyCodes.RIGHT, Phaser.Input.Keyboard.KeyCodes.D],
@@ -28,6 +36,10 @@ export const KEY_BINDINGS = {
     Phaser.Input.Keyboard.KeyCodes.UP,
     Phaser.Input.Keyboard.KeyCodes.W,
   ],
+  // Melee: the mop swing. Keyboard-bound (F is also available on the right
+  // mouse button, see ArenaScene._bindFireInput) and edge-detected here for the
+  // same repeat-proof reason as jump — holding the key must swing once.
+  melee: [Phaser.Input.Keyboard.KeyCodes.F],
 };
 
 /**
@@ -61,12 +73,25 @@ export class InputManager {
       moveX: 0,
       jumpHeld: false,
       jumpPressed: false,
+      meleeHeld: false,
+      meleePressed: false,
       aimX: 0,
       aimY: 0,
     };
 
     /** @type {Record<string, Phaser.Input.Keyboard.Key[]>} */
     this.keyGroups = {};
+
+    /**
+     * Previous frame's held state per action, for repeat-proof edge detection.
+     * The OS auto-repeat re-fires DOM keydown while a key is HELD, and Phaser
+     * restamps the Key's down-time on every repeat — so `JustDown` pulses true
+     * again mid-hold and a held jump key re-jumps on every landing (the bunny
+     * hop). Comparing held-against-held instead makes the edge fire exactly
+     * once per physical press, no matter how long the key repeats.
+     * @type {Record<string, boolean>}
+     */
+    this._prevHeld = {};
 
     if (keyboardPlugin) {
       this._attachKeyboard(keyboardPlugin);
@@ -100,13 +125,16 @@ export class InputManager {
   }
 
   /**
-   * True when ANY key bound to an action went down on this exact frame.
-   * @param {string} action
+   * True when ANY key bound to an action went down since the last frame.
+   *
+   * Repeat-proof: derived from the HELD state transition (down now, up before),
+   * NOT from the key's down timestamp, so OS auto-repeat while held never
+   * re-fires the edge. Exactly one `true` per physical press.
+   * @param {string} action - One of 'left' | 'right' | 'jump'.
    * @returns {boolean}
    */
   _isActionJustPressed(action) {
-    const keys = this.keyGroups[action];
-    return keys ? keys.some((key) => Phaser.Input.Keyboard.JustDown(key)) : false;
+    return this._isActionDown(action) && !this._prevHeld[action];
   }
 
   /**
@@ -124,6 +152,8 @@ export class InputManager {
       intent.moveX = 0;
       intent.jumpHeld = false;
       intent.jumpPressed = false;
+      intent.meleeHeld = false;
+      intent.meleePressed = false;
       return intent;
     }
 
@@ -132,32 +162,44 @@ export class InputManager {
     const right = this._isActionDown('right');
     intent.moveX = (right ? 1 : 0) - (left ? 1 : 0);
 
-    // --- Jump intent (held state + this-frame edge) ------------------------
-    intent.jumpHeld = this._isActionDown('jump');
-    intent.jumpPressed = this._isActionJustPressed('jump');
+    // --- Jump intent (held state + repeat-proof this-press edge) ------------
+    // The edge MUST be sampled BEFORE `_prevHeld` is stored for this frame, or
+    // the press that just happened would compare against itself and vanish.
+    const jumpHeld = this._isActionDown('jump');
+    intent.jumpHeld = jumpHeld;
+    intent.jumpPressed = jumpHeld && !this._prevHeld.jump;
 
-    // --- Aim: pointer position in WORLD space -------------------------------
-    // World space (not screen space) so aiming stays correct once we add
-    // camera shake, follow, or zoom.
-    //
-    // NOTE: Phaser exposes the active pointer as `input.activePointer`; there
-    // is no `input.pointer` alias, so read it from the correct property.
-    const pointer = this.scene.input?.activePointer;
-    if (pointer) {
-      intent.aimX = pointer.worldX;
-      intent.aimY = pointer.worldY;
+    // --- Melee edge, same repeat-proof rule as jump -------------------------
+    // Bound to F (and the right mouse button, wired in ArenaScene). Held must
+    // swing once, so the edge is a held-state transition, never a key timestamp.
+    const meleeHeld = this._isActionDown('melee');
+    intent.meleeHeld = meleeHeld;
+    intent.meleePressed = meleeHeld && !this._prevHeld.melee;
+
+    this._prevHeld = { left, right, jump: jumpHeld, melee: meleeHeld };
+
+    // --- Aim: the CANONICAL world-space target ------------------------------
+    // Projected live through the active camera (scroll + zoom + rotation +
+    // viewport) so cursor, laser, weapon rotation and shot direction share one
+    // target at every resolution and zoom level. See src/input/aimPoint.js.
+    const aim = canonicalAimPoint(this.scene);
+    if (aim) {
+      intent.aimX = aim.x;
+      intent.aimY = aim.y;
     }
 
     return intent;
   }
 
   /**
-   * Release all intent. Call on scene shutdown so a paused/stopped scene does
-   * not keep steering the player with stale input.
+   * Release all intent. Call on scene shutdown, respawn, room leave and match
+   * restart so a paused/stopped scene does not keep steering the player — or
+   * auto-jumping on spawn — with stale input.
    */
   reset() {
     this.intent.moveX = 0;
     this.intent.jumpHeld = false;
     this.intent.jumpPressed = false;
+    this._prevHeld = {};
   }
 }

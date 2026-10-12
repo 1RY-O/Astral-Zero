@@ -15,6 +15,9 @@
 
 import path from 'path';
 import { fileURLToPath } from 'url';
+// Movement tuning is SHARED with the Phaser client so prediction and the
+// authoritative sim cannot drift apart (see src/shared/tuning.js).
+import { MOVEMENT, MATCH_TIMING, SIM } from './shared/tuning.js';
 
 // ESM has no __dirname — rebuild it from the module URL.
 const __filename = fileURLToPath(import.meta.url);
@@ -55,17 +58,20 @@ const config = {
   // Physics + bot AI + projectiles + respawns + win checks all run inside
   // that tick. Snapshots go out every tick; bot_update every 2nd tick.
   sim: {
-    tickHz: 20, // fixed step: 50 ms. Frontend interpolates (any 10–30 Hz works).
-    maxSpeed: 260, // px/s horizontal run speed
-    airControl: 0.7, // horizontal accel multiplier while airborne
-    gravity: 1800, // px/s^2 downward
-    jumpVelocity: 640, // px/s upward impulse
-    coyoteMs: 100, // forgiveness: jump shortly AFTER leaving ground
-    jumpBufferMs: 120, // forgiveness: jump pressed shortly BEFORE landing
+    tickHz: SIM.tickHz, // fixed step: 50 ms. Frontend interpolates (any 10–30 Hz works).
+    // Movement comes from src/shared/tuning.js — the SAME module the Phaser
+    // client predicts with. See the header of that file for the reconciliation
+    // bug that split copies of these constants caused.
+    maxSpeed: MOVEMENT.speed, // px/s horizontal run speed
+    airControl: MOVEMENT.airControl, // horizontal accel multiplier while airborne
+    gravity: MOVEMENT.gravity, // px/s^2 downward
+    jumpVelocity: MOVEMENT.jumpVelocity, // px/s upward impulse
+    coyoteMs: MOVEMENT.coyoteMs, // forgiveness: jump shortly AFTER leaving ground
+    jumpBufferMs: MOVEMENT.jumpBufferMs, // forgiveness: jump pressed shortly BEFORE landing
     entityRadius: 14, // body circle radius for hits + spawn separation
     speedHackTolerance: 1.35, // legacy player_move vx beyond maxSpeed×this = rejected
-    respawnDelayMs: 2500, // dead → alive again after this long
-    spawnProtectionMs: 1500, // fresh spawns ignore damage this long (anti-spawn-kill)
+    respawnDelayMs: MATCH_TIMING.respawnDelayMs, // dead → alive again after this long
+    spawnProtectionMs: MATCH_TIMING.spawnProtectionMs, // fresh spawns ignore damage this long (anti-spawn-kill)
     maxProjectiles: 60, // per-room shell cap (oldest fizzle first; see combat)
     // -- Phase 4: lag compensation (favor-the-shooter, bounded) -------------
     // Every entity keeps a short position history; near-miss shells are
@@ -125,17 +131,47 @@ const config = {
   gameModes: {
     // ffa: up to 10 humans; we top up with bots to feel alive.
     // Phase 3: first to killLimit kills, else highest score at durationSec.
-    ffa: { maxPlayers: 10, targetTotal: 6, minToStartNow: 2, soloWaitMs: 5000, killLimit: 10, durationSec: 180 },
+    ffa: {
+      maxPlayers: 10, targetTotal: 6, minToStartNow: 2, soloWaitMs: 5000, killLimit: 10, durationSec: 180,
+      // S14.3 orbital shifts: telegraphed platform drift. OFF for practice and
+      // scrap (those are about learning the tools, not reacting to the floor).
+      shifts: {
+        enabled: true, intervalMs: 32000, firstDelayMs: 18000,
+        warningMs: 3500, shiftMs: 1200, settleMs: 1800,
+      },
+      // S14.4 scrap mimics: decoy tokens that arm and chase. Needs 3+ players
+      // so an empty or dueling room never spawns a predator.
+      mimics: { enabled: true, maxActive: 4, spawnIntervalMs: 9000, minPlayers: 3 },
+    },
     // tdm: 4v4 = 8 total, red vs blue. Need 4 humans to start instantly,
     // otherwise wait a bit then bot-fill to 8.
     // Phase 3: first team to scoreLimit, else higher score at durationSec.
     tdm: { maxPlayers: 8, teamSize: 4, minToStartNow: 4, soloWaitMs: 10000, scoreLimit: 25, durationSec: 240 },
     // bot_practice: always bots only, starts instantly, never groups strangers.
     // Phase 3: no winner — timed session, scoreboard for fun only.
-    bot_practice: { maxPlayers: 4, targetTotal: 6, minToStartNow: 1, soloWaitMs: 0, durationSec: 180 },
+    // maxPlayers 6 = 1 human + up to 5 configurable bots (1/3/5 presets).
+    bot_practice: { maxPlayers: 6, targetTotal: 6, minToStartNow: 1, soloWaitMs: 0, durationSec: 180 },
     // scrap_collector (Phase 5): bank dropped scrap at deposit stations.
     // First to bankLimit banked, else most banked at durationSec. FFA-style.
     scrap_collector: { maxPlayers: 8, targetTotal: 6, minToStartNow: 2, soloWaitMs: 5000, bankLimit: 20, durationSec: 180 },
+    // S14.5 control_point: 4v4, win by HOLDING the central point. Inherits tdm's
+    // team machinery (isTeamMode) — the score is the objective's, not kills.
+    control_point: {
+      maxPlayers: 8, teamSize: 4, minToStartNow: 4, soloWaitMs: 10000,
+      durationSec: 300,
+      controlPoint: {
+        enabled: true, radius: 96,
+        captureRate: 40,   // %/s → ~2.5s to flip a neutral point
+        tickRate: 1.6,     // score/s while held
+        scoreLimit: 150,   // ~94s of uncontested holding
+        contestLockMs: 4000,
+        // 10%/s → a fully-held point bleeds to neutral in 10s. Tuned against
+        // tickRate: you lose ~16 score by walking away, so camping is a real
+        // cost, not a rounding error. At 3%/s it took 33s, which no one would
+        // ever pay.
+        decayRate: 10,
+      },
+    },
   },
   rooms: {
     countdownMs: 3000, // lobby → playing delay so Phaser can spawn everyone
@@ -153,6 +189,28 @@ const config = {
       'Orbit Orphan',
       'Squeegee Supreme',
     ],
+  },
+
+  // -- Durable player profiles (S14) -------------------------------------------
+  /**
+   * Where `playerStore`'s long-lived records live.
+   *
+   * This project deliberately has no database: the dataset is a few hundred
+   * bytes per player, so a single JSON document is the right-size tool and keeps
+   * "clone and run" true (no service to install, no credentials to configure).
+   * Writes are debounced and atomic (temp file + rename). See
+   * `src/players/persistence.js` for the guarantees.
+   *
+   * Set `dir` to a mounted volume in production, or `enabled: false` to run
+   * fully in-memory (tests, CI) — the game is playable either way, but ranked
+   * ratings and unlocks will not survive a restart without it.
+   */
+  persistence: {
+    enabled: true,
+    /** Directory holding `profiles.json`. Relative paths resolve from the CWD. */
+    dir: process.env.ASTRAL_DATA_DIR || './data',
+    /** Debounce before a dirty store is written, ms. */
+    flushMs: 400,
   },
 };
 

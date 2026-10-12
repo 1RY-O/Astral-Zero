@@ -98,6 +98,7 @@ Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true }
 const { LobbyScene } = await import('../src/scenes/LobbyScene.js');
 const { DESIGN } = await import('../src/config/viewportConfig.js');
 const { ROUTES } = await import('../src/ui/lobby/NavRail.js');
+const backdropModule = await import('../src/ui/brand/OrbitalBackdrop.js');
 
 let pass = 0;
 const ok = (name, fn) => { fn(); pass += 1; console.log(`PASS  ${name}`); };
@@ -225,6 +226,35 @@ ok('update() drives the backdrop without throwing', () => {
   assert.doesNotThrow(() => lobby.update(0, 16.67));
   assert.doesNotThrow(() => lobby.update(1000, 33.3));
   lobby._teardown();
+});
+
+ok('the starfield beacons are never null (OrbitalBackdrop .once crash)', () => {
+  // Bug D: an earlier build set `beacon = null` whenever `add.star` existed
+  // (a truthy-check bug), then tweened that null target — Phaser threw
+  // "Cannot read properties of null (reading 'once')" from _starfield →
+  // _build → LobbyScene.create. Here we give the container stub a real
+  // child-tracking `add` (like Phaser's Container) and assert every object
+  // added to the near layer is non-null, so a null beacon can never reach the
+  // tween that crashed.
+  const scene = makeScene(1280);
+  const trackingContainer = (x, y) => {
+    const c = new Obj({ x, y });
+    c.list = [];
+    c.add = (child) => { c.list.push(child); return c; };
+    return c;
+  };
+  scene.add.container = trackingContainer;
+
+  const { OrbitalBackdrop } = backdropModule;
+  const backdrop = new OrbitalBackdrop(scene, { width: 1280, height: 720 });
+
+  const near = backdrop.nearLayer;
+  assert.ok(near, 'near starfield layer exists');
+  // 34 near stars + 4 beacons are added to the near layer.
+  assert.strictEqual(near.list.length, 38, '34 stars + 4 beacons');
+  assert.ok(near.list.every((c) => c != null), 'no null beacon/star reaches the tween');
+  assert.doesNotThrow(() => backdrop.update(16, 640, 360), 'update runs with real beacons');
+  backdrop.destroy();
 });
 
 console.log(`\n✅ All lobby scene checks passed (${pass} groups).`);

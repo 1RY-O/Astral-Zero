@@ -13,15 +13,22 @@
  *   player       { id, name }
  *   party        normalised party or null
  *   friends      normalised friend list
- *   queue        { mode, position, playersInQueue } | null
+ *   queue        { mode, ranked, position, playersInQueue } | null
  *   room         normalised room (after `room_joined`)
  *   selectedMode 'ffa' | 'tdm' | 'bot_practice'
+ *   rankedSelected boolean — S14.6: queue the NEXT match as RATED (ffa/tdm only)
+ *   ranked       { seasonId, you, leaderboard } | null — last server `ranked_update`
+ *   character    { character, variant } | null — server-confirmed selection
+ *   profile      object|null — progression profile pushed on join (unlocks, XP)
  *   busy         string|null  — label of an in-flight command
  *   notice       { tone, text } | null
  *
  * EVENTS (subscribe with `net.on(...)`; each returns an unsubscribe fn)
  *   'connection'  'player'   'party'    'friends'  'queue'  'mode'
- *   'busy'        'notice'   'invite'   'room'     'error'
+ *   'practice'    'busy'     'notice'   'invite'   'room'   'error'
+ *   'ranked'      { you, leaderboard, seasonId }  → lobby board / results
+ *   'character'   { character, variant }          → selection UI echo
+ *   'profile'     { … }                           → progression profile arrived
  *   'match-ready' { room }   → LobbyScene switches to the Arena
  *   'match-state' { phase, payload } → Arena HUD
  *   'match-ended' { … }      → return to lobby
@@ -34,6 +41,7 @@ import { Emitter } from '../core/Emitter.js';
 import { SocketClient } from './SocketClient.js';
 import { NET_EVENTS, LOBBY_CONTRACT_EVENTS, describeError } from './events.js';
 import { DEFAULT_MODE } from '../config/lobbyConfig.js';
+import { RATED_MODES } from '../shared/ranked.js';
 import {
   normaliseParty,
   normaliseFriends,
@@ -50,6 +58,45 @@ const DEFAULT_NAMES = [
   'MopLord42', 'Dust Bunny', 'Sir Mops-A-Lot', 'Scrapheap Steve',
   'Orbit Orphan', 'Void Gremlin', 'Captain Clutter', 'Bin Chicken',
 ];
+
+/**
+ * Bot Practice presets (client-side shortcuts; the SERVER validates every
+ * field before the room is built, so these are requests, not authority).
+ * Grace options the UI offers: 0 / 5 / 10 / 15 s (server clamps 0..30 s).
+ */
+export const PRACTICE_PRESETS = Object.freeze({
+  controls: Object.freeze({
+    id: 'controls', label: 'Controls Practice',
+    botCount: 1, difficulty: 'beginner', graceMs: 0, passive: true,
+    blurb: 'Passive targets. They move but never shoot — learn to move, aim and fire.',
+  }),
+  beginner: Object.freeze({
+    id: 'beginner', label: 'Beginner',
+    botCount: 1, difficulty: 'beginner', graceMs: 10000, passive: false,
+    blurb: 'One slow bot. 10 s of peace first, then gentle pressure.',
+  }),
+  normal: Object.freeze({
+    id: 'normal', label: 'Normal',
+    botCount: 3, difficulty: 'normal', graceMs: 0, passive: false,
+    blurb: 'A modest crew playing for real. No grace period.',
+  }),
+  advanced: Object.freeze({
+    id: 'advanced', label: 'Advanced',
+    botCount: 5, difficulty: 'advanced', graceMs: 0, passive: false,
+    blurb: 'A full aggressive crew of five. For janitors who sweep competitively.',
+  }),
+});
+
+export const PRACTICE_PRESET_ORDER = Object.freeze(['controls', 'beginner', 'normal', 'advanced']);
+
+/** Allowed grace choices in the UI (ms). */
+export const PRACTICE_GRACE_CHOICES = Object.freeze([0, 5000, 10000, 15000]);
+
+/** Max bots the practice room accepts (mirrors server cap of 5 + 1 human = 6). */
+export const PRACTICE_BOT_MAX = 5;
+
+/** Supported bot-count choices offered by the setup UI (beginner default: 1). */
+export const PRACTICE_BOT_CHOICES = Object.freeze([1, 3, 5]);
 
 export class NetworkManager extends Emitter {
   /**
@@ -71,8 +118,23 @@ export class NetworkManager extends Emitter {
       queue: null,
       room: null,
       selectedMode: DEFAULT_MODE,
+      // Bot Practice configuration (defaults = Beginner preset). Written by
+      // setPracticeOptions, read by queueJoin/startPartyMatch.
+      practice: { preset: 'beginner', botCount: 1, difficulty: 'beginner', graceMs: 10000, passive: false },
       busy: null,
       notice: null,
+      // S14.6: ranked is a QUEUE VARIANT of ffa/tdm — never a mode of its own.
+      // This flag only expresses INTENT; the server re-validates the request
+      // (rated-mode allow-list, first-match protection) before anything rates.
+      rankedSelected: false,
+      // Latest `ranked_update` — server truth only. Never invented locally:
+      // a fabricated rating would be worse than no rating at all.
+      ranked: null,
+      // Server-confirmed character selection (echo of `character_set`).
+      character: null,
+      // Progression profile pushed on join (`character_update.profile`):
+      // unlocks, mastery, loadouts, XP and ranked standing. Server truth only.
+      profile: null,
       // Phase 5: set when a full room offered us the spectator booth.
       spectateOffer: null,
       // Phase 4: true while we are trying to re-acquire a dropped match.
@@ -168,8 +230,119 @@ export class NetworkManager extends Emitter {
    */
   setMode(mode) {
     this.state.selectedMode = normaliseMode(mode);
+    // Ranked only exists for rated modes (ffa/tdm). A mode switch away from
+    // one drops the intent locally so the next queue_join cannot even ASK for
+    // a rating the server would refuse.
+    if (this.state.rankedSelected && !RATED_MODES.includes(this.state.selectedMode)) {
+      this.state.rankedSelected = false;
+      this.emit('ranked-select', { ranked: false });
+    }
     this.emit('mode', { mode: this.state.selectedMode });
     return this.state.selectedMode;
+  }
+
+  /**
+   * S14.6 — express intent to queue the next match as RATED.
+   *
+   * Local-only until `queue_join`; the server decides (rated-mode allow-list,
+   * first-match protection) and answers honestly. `false` is always accepted.
+   *
+   * @param {boolean} on
+   * @returns {boolean} the effective flag.
+   */
+  setRanked(on) {
+    const allowed = on === true && RATED_MODES.includes(this.state.selectedMode);
+    this.state.rankedSelected = allowed;
+    this.emit('ranked-select', { ranked: allowed, mode: this.state.selectedMode });
+    return allowed;
+  }
+
+  /**
+   * S14.1 — choose a character (+ optional loadout variant) via the server.
+   * The server validates against the roster and the player's unlocks and
+   * answers `{ ok, character, variant }` or `{ ok:false, error }`; a rejected
+   * selection surfaces as an error notice, never as a silent local swap.
+   *
+   * @param {string} characterId
+   * @param {string|null} [variantId]
+   * @returns {Promise<object>} always settles.
+   */
+  setCharacter(characterId, variantId = null) {
+    return this._command(
+      'setCharacter',
+      async () => {
+        const res = await this.socket.request(NET_EVENTS.CHARACTER_SET, {
+          character: characterId,
+          variant: variantId ?? undefined,
+        });
+        if (res?.ok) {
+          this.state.character = { character: res.character, variant: res.variant ?? null };
+          this.emit('character', this.state.character);
+        }
+        return res;
+      },
+    );
+  }
+
+  /**
+   * S14.6 — request the season leaderboard + our standing. The server replies
+   * on `ranked_update` (state.ranked + 'ranked' event); the ack only confirms
+   * the request was accepted. Shows a `board` busy state for the UI.
+   * @returns {Promise<object>} always settles.
+   */
+  requestRankedBoard() {
+    return this._command(
+      'rankedBoard',
+      () => this.socket.request(NET_EVENTS.RANKED_BOARD, {}),
+    );
+  }
+
+  /**
+   * Set Bot Practice options. A known `preset` id replaces the whole row;
+   * individual fields override afterwards (and drop the preset to 'custom').
+   * Lightly sanitised here for instant UI feedback — the SERVER re-validates
+   * everything before the room exists.
+   * @param {object} [patch] - `{ preset?, botCount?, difficulty?, graceMs?, passive? }`
+   * @returns {object} The effective practice state.
+   */
+  setPracticeOptions(patch = {}) {
+    const next = { ...this.state.practice };
+    if (typeof patch.preset === 'string' && PRACTICE_PRESETS[patch.preset]) {
+      const p = PRACTICE_PRESETS[patch.preset];
+      next.preset = p.id;
+      next.botCount = p.botCount;
+      next.difficulty = p.difficulty;
+      next.graceMs = p.graceMs;
+      next.passive = p.passive;
+    }
+    if (patch.botCount !== undefined) {
+      const n = Math.floor(Number(patch.botCount));
+      if (Number.isFinite(n)) {
+        next.botCount = Math.min(PRACTICE_BOT_MAX, Math.max(0, n));
+        if (patch.preset === undefined) next.preset = 'custom';
+      }
+    }
+    if (typeof patch.difficulty === 'string') {
+      const d = patch.difficulty.trim().toLowerCase();
+      if (['beginner', 'normal', 'advanced', 'elite'].includes(d)) {
+        next.difficulty = d;
+        if (patch.preset === undefined) next.preset = 'custom';
+      }
+    }
+    if (patch.graceMs !== undefined) {
+      const g = Math.round(Number(patch.graceMs));
+      if (Number.isFinite(g)) {
+        next.graceMs = Math.min(30000, Math.max(0, g));
+        if (patch.preset === undefined) next.preset = 'custom';
+      }
+    }
+    if (patch.passive !== undefined) {
+      next.passive = patch.passive === true;
+      if (patch.preset === undefined) next.preset = 'custom';
+    }
+    this.state.practice = next;
+    this.emit('practice', { practice: { ...next } });
+    return { ...next };
   }
 
   // --- Party ---------------------------------------------------------------
@@ -218,8 +391,13 @@ export class NetworkManager extends Emitter {
     return this._command(
       'startPartyMatch',
       async () => {
+        const p = this.state.practice ?? {};
         const res = await this.socket.request(NET_EVENTS.PARTY_START_MATCH, {
           mode: this.state.selectedMode,
+          botCount: p.botCount,
+          difficulty: p.difficulty,
+          graceMs: p.graceMs,
+          passive: p.passive,
         });
         if (res.ok && res.firstMatchProtection) {
           const protection = describeProtection(res);
@@ -349,6 +527,9 @@ export class NetworkManager extends Emitter {
       this.state.queue = payload.mode
         ? {
             mode: normaliseMode(payload.mode),
+            // S14.6 additive: WHICH queue we are actually in. Missing on old
+            // servers → false, never a fabricated "you are ranked".
+            ranked: payload.ranked === true,
             position: payload.position ?? null,
             playersInQueue: payload.playersInQueue ?? null,
           }
@@ -387,6 +568,31 @@ export class NetworkManager extends Emitter {
     s.on(NET_EVENTS.ERROR, (payload = {}) => {
       this.setNotice('error', describeError(payload));
       this.emit('error', payload);
+    });
+
+    // --- S14: characters + ranked (server truth; never computed here) -------
+    s.on(NET_EVENTS.CHARACTER_UPDATE, (payload = {}) => {
+      // The join-time push carries the FULL profile (unlocks, loadouts, XP,
+      // ranked standing) even before any selection exists — the lobby needs it
+      // to render locked/unlocked state honestly.
+      if (payload.profile) {
+        this.state.profile = payload.profile;
+        this.emit('profile', payload.profile);
+      }
+      if (!payload.character) return;
+      this.state.character = {
+        character: String(payload.character),
+        variant: payload.variant ?? null,
+      };
+      this.emit('character', this.state.character);
+    });
+    s.on(NET_EVENTS.RANKED_UPDATE, (payload = {}) => {
+      this.state.ranked = {
+        seasonId: String(payload.seasonId ?? ''),
+        you: payload.you ?? null,
+        leaderboard: Array.isArray(payload.leaderboard) ? payload.leaderboard : [],
+      };
+      this.emit('ranked', this.state.ranked);
     });
   }
 
@@ -431,10 +637,22 @@ export class NetworkManager extends Emitter {
    * Explicit friends refresh (`friend_list` → `friend_update` push).
    * @returns {Promise<{ok: boolean}>}
    */
+  /**
+   * Read-only friends refresh (`friend_list` → `friend_update` push).
+   *
+   * NOTE: this is NOT a `_command` busy operation — it is fired at boot (and
+   * from the lobby's name flow) purely to populate the friends list, and a
+   * slow or flapping transport must never keep `state.busy` set and block the
+   * start-match CTA. `socket.request()` already always settles (OFFLINE/TIMEOUT
+   * on the client side), so this is a plain fire-and-forget-ish call: the
+   * returned promise is only used to detect a hard client-side failure.
+   * @returns {Promise<{ok: boolean}>}
+   */
   requestFriends() {
-    return this._command('requestFriends', () =>
-      this.socket.request(NET_EVENTS.FRIEND_LIST, {}),
-    );
+    if (!this.socket || !this.socket.isConnected) {
+      return Promise.resolve({ ok: false, code: 'OFFLINE' });
+    }
+    return this.socket.request(NET_EVENTS.FRIEND_LIST, {});
   }
 
   /**
@@ -475,9 +693,17 @@ export class NetworkManager extends Emitter {
     return this._command(
       'queueJoin',
       async () => {
+        const p = this.state.practice ?? {};
         const res = await this.socket.request(NET_EVENTS.QUEUE_JOIN, {
           mode: this.state.selectedMode,
           mapId: 'junkyard',
+          // S14.6: intent only — the server re-validates (rated-mode list,
+          // first-match protection) and answers honestly in the ack.
+          ranked: this.state.rankedSelected === true,
+          botCount: p.botCount,
+          difficulty: p.difficulty,
+          graceMs: p.graceMs,
+          passive: p.passive,
         });
         if (res.ok && res.firstMatchProtection) {
           const protection = describeProtection(res);
@@ -499,12 +725,27 @@ export class NetworkManager extends Emitter {
 
   /**
    * Leave the current room (back to lobby).
+   *
+   * The local room/queue references are cleared ONLY once the server confirms
+   * the leave (or when we are offline, where the server already dropped us via
+   * the disconnect path). Clearing optimistically BEFORE the ack caused the
+   * stuck-button class of bug: a failed/timeout leave left the client believing
+   * it was out while the server still seated it, so the next queue was rejected
+   * with ALREADY_IN_MATCH and the UI could never return to a clean state.
+   * On failure the room is KEPT and the notice explains the retry — the lobby
+   * CTA therefore only ever shows LOADING while a match genuinely exists.
    * @returns {Promise<{ok: boolean}>}
    */
   leaveRoom() {
-    this.state.room = null;
-    this.emit('room', { room: null });
-    return this._command('leaveRoom', () => this.socket.request(NET_EVENTS.ROOM_LEAVE, {}));
+    return this._command('leaveRoom', async () => {
+      const res = await this.socket.request(NET_EVENTS.ROOM_LEAVE, {});
+      if (res?.ok === false && res?.code !== 'OFFLINE' && res?.error !== 'OFFLINE') return res;
+      this.state.room = null;
+      this.state.queue = null;
+      this.emit('room', { room: null });
+      this.emit('queue', { queue: null });
+      return res?.ok === false ? { ok: true, offline: true } : res;
+    });
   }
 
   /**
@@ -568,8 +809,9 @@ export class NetworkManager extends Emitter {
         this.setNotice('error', 'Connected backend does not support the lobby (Phase 2 contract missing).');
       }
     } else if (typeof version === 'string') {
-      // '1.1.0-phase2' → starts with '1.1'
-      this.state.contractOk = version.startsWith('1.1');
+      // '1.4.0-phase6' and any 1.x contract speak the lobby events; only a
+      // genuinely older major (or unparsable) version is called out.
+      this.state.contractOk = version.startsWith('1.');
       if (!this.state.contractOk) {
         this.setNotice('error', `Backend contract ${version} is older than this client expects.`);
       }

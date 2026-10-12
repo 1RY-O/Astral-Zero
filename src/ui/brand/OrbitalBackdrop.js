@@ -32,7 +32,7 @@
  */
 
 import Phaser from 'phaser';
-import { THEME } from '../../config/uiTheme.js';
+import { ART, THEME, BORDERS } from '../../config/uiTheme.js';
 import { DESIGN } from '../../config/viewportConfig.js';
 import * as Motion from '../../core/Motion.js';
 
@@ -88,9 +88,9 @@ export class OrbitalBackdrop {
     // Three stacked bands fake a vertical gradient without a texture. Phaser
     // has no gradient fill on Graphics, so bands are the cheapest honest option.
     const bands = [
-      { y: 0, h: this.h * 0.42, color: 0x050810, alpha: 1 },
-      { y: this.h * 0.42, h: this.h * 0.33, color: 0x070b18, alpha: 1 },
-      { y: this.h * 0.75, h: this.h * 0.25, color: 0x0a1024, alpha: 1 },
+      { y: 0, h: this.h * 0.42, color: ART.bands[0].color, alpha: ART.bands[0].alpha },
+      { y: this.h * 0.42, h: this.h * 0.33, color: ART.bands[1].color, alpha: ART.bands[1].alpha },
+      { y: this.h * 0.75, h: this.h * 0.25, color: ART.bands[2].color, alpha: ART.bands[2].alpha },
     ];
     bands.forEach((b) => {
       const rect = this.scene.add
@@ -105,7 +105,7 @@ export class OrbitalBackdrop {
   // Layer 1 — nebula
   // ---------------------------------------------------------------------------
   _nebula() {
-    const hues = [0x2a1a5e, 0x0d3a5c, 0x501a44, 0x123f52];
+    const hues = ART.nebula;
     for (let i = 0; i < 4; i += 1) {
       const r = 200 + this.rand.between(0, 180);
       const blob = this.scene.add
@@ -151,7 +151,7 @@ export class OrbitalBackdrop {
         this.rand.between(0, this.h),
         s,
         s,
-        0xcfe6ff,
+        ART.stars.far,
         this.rand.realInRange(0.1, 0.34),
       );
       this.farLayer.add(star);
@@ -165,7 +165,7 @@ export class OrbitalBackdrop {
         this.rand.between(0, this.h),
         s,
         s,
-        0xffffff,
+        ART.stars.near,
         this.rand.realInRange(0.35, 0.75),
       );
       this.nearLayer.add(star);
@@ -175,8 +175,8 @@ export class OrbitalBackdrop {
       const bx = this.rand.between(0, this.w);
       const by = this.rand.between(0, this.h);
       const beacon = typeof this.scene.add.star === 'function'
-        ? this.scene.add.star(bx, by, 5, 2, 4, 0x9fe8ff, 0.9)
-        : this.scene.add.rectangle(bx, by, 4, 4, 0x9fe8ff, 0.9);
+        ? this.scene.add.star(bx, by, 5, 2, 4, ART.stars.twinkle, 0.9)
+        : this.scene.add.rectangle(bx, by, 4, 4, ART.stars.twinkle, 0.9);
       this.nearLayer.add(beacon);
       if (!Motion.isReduced()) {
         Motion.tween(this.scene, {
@@ -202,14 +202,14 @@ export class OrbitalBackdrop {
     // Body of the planet: a huge circle whose top edge cuts across the
     // bottom-left corner. Only the visible crescent needs to be drawn.
     const planet = this.scene.add
-      .circle(cx, cy, r, 0x0d2a4a, 1)
+      .circle(cx, cy, r, ART.earth.fill, 1)
       .setDepth(this.baseDepth + 3)
       .setScrollFactor(0);
 
     // Atmosphere rim: a slightly larger, brighter circle behind it, which
     // leaves a glowing crescent along the limb.
     const glow = this.scene.add
-      .circle(cx, cy, r + 16, 0x2f7fbf, 0.5)
+      .circle(cx, cy, r + 16, ART.earth.rim, 0.5)
       .setDepth(this.baseDepth + 2)
       .setScrollFactor(0);
     glow.setScale(1.0);
@@ -217,7 +217,7 @@ export class OrbitalBackdrop {
     // A brighter thin arc right on the horizon line reads as atmospheric
     // scattering, which is the single detail that sells "this is Earth".
     const rim = this.scene.add.graphics().setDepth(this.baseDepth + 3).setScrollFactor(0);
-    rim.lineStyle(5, 0x7fe7ff, 0.55);
+    rim.lineStyle(BORDERS.emphasis, ART.earth.glow, 0.55);
     rim.beginPath();
     rim.arc(cx, cy, r + 4, Math.PI * 1.18, Math.PI * 1.82, false);
     rim.strokePath();
@@ -238,7 +238,7 @@ export class OrbitalBackdrop {
           this.rand.between(-20, this.h * 0.8),
           w,
           3 + this.rand.between(0, 5),
-          this.rand.pick([0x4a5f86, 0x6b4f2a, 0x3d5a72, 0x7a6a4a]),
+          this.rand.pick(ART.debris),
           0.75,
         )
         .setDepth(this.baseDepth + 5)
@@ -262,12 +262,12 @@ export class OrbitalBackdrop {
     for (let i = 0; i < 3; i += 1) {
       const g = this.scene.add.graphics().setDepth(this.baseDepth + 6).setScrollFactor(0);
       // A body + two solar panels. Tiny, so a couple of rects is enough.
-      g.fillStyle(0xb8c6dd, 1);
+      g.fillStyle(ART.satellite.light, 1);
       g.fillRoundedRect(-5, -4, 10, 8, 2);
-      g.fillStyle(0x3f6ea8, 1);
+      g.fillStyle(ART.satellite.body, 1);
       g.fillRect(-14, -3, 8, 6);
       g.fillRect(6, -3, 8, 6);
-      g.lineStyle(1, 0x8fd8ff, 0.8);
+      g.lineStyle(BORDERS.hairline, ART.satellite.panel, 0.8);
       g.strokeRoundedRect(-5, -4, 10, 8, 2);
 
       const cx = this.rand.between(this.w * 0.3, this.w * 0.95);
@@ -320,11 +320,11 @@ export class OrbitalBackdrop {
       const t = i / steps;
       const alpha = 0.05 * (1 - t);
       const inset = t * 90;
-      g.lineStyle(90 / steps + 1, 0x03050c, alpha);
+      g.lineStyle(90 / steps + 1, ART.vignette, alpha);
       g.strokeRect(-inset / 2, -inset / 2, this.w + inset, this.h + inset);
     }
     // Darken the bottom where the HUD/footer will sit.
-    g.fillStyle(0x03050c, 0.22);
+    g.fillStyle(ART.vignette, 0.22);
     g.fillRect(0, this.h - 150, this.w, 150);
     this._vignetteGfx = g;
     this._objects.push(g);

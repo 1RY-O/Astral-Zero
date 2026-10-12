@@ -20,9 +20,21 @@
  * compromise for a 10-20 Hz snapshot stream on a LAN/Cable connection.
  */
 
+import { SIM, MATCH_TIMING, MOVEMENT } from '../shared/tuning.js';
+
+import { COMBAT_FX } from './uiTheme.js';
+
 export const NET_TICK = Object.freeze({
-  /** Server simulation / snapshot broadcast rate (Hz). */
-  simulationHz: 15,
+  /**
+   * Server simulation / snapshot broadcast rate (Hz).
+   *
+   * Read from the SHARED tuning module rather than being restated here: it used
+   * to say 15 while the server actually ticked 20. A client that underestimates
+   * the snapshot rate mis-times its interpolation buffer and its "is a new
+   * snapshot in flight?" deadlines, so the number must be the server's, not a
+   * hopeful local copy.
+   */
+  simulationHz: SIM.tickHz,
   /** How often we SEND input. Higher = more responsive, more bandwidth. */
   inputSendHz: 60,
   /** Hard cap on how often we emit, independent of frame rate. */
@@ -105,14 +117,22 @@ export const RECONCILIATION = Object.freeze({
 export const COMBAT = Object.freeze({
   /** Seconds between shots. */
   fireCooldown: 0.16,
-  /** Simultaneous shots allowed per trigger pull (feels better on fast mouse). */
+  /**
+   * DEPRECATED / unused. Kept for config compatibility only.
+   *
+   * This once capped the shots a single trigger pull could produce, which made
+   * a HELD trigger stop after three rounds — contradicting the "hold for
+   * sustained fire" control hint and reading as a jammed gun. Fire rate is now
+   * bounded solely by the equipped weapon's cooldown (which the server also
+   * enforces), so held fire sustains and taps still fire once.
+   */
   maxShotsPerPull: 3,
   /** Muzzle tracer lifetime (ms). */
   tracerMs: 90,
   /** A predicted (not yet confirmed) hit shows a hollow marker. */
-  predictedHitColor: 0x9fb6cc,
+  predictedHitColor: COMBAT_FX.damagePredictedInt,
   /** A server-confirmed hit shows a solid marker. */
-  confirmedHitColor: 0xffffff,
+  confirmedHitColor: COMBAT_FX.tracer,
   /** Damage number rises this many px over its lifetime. */
   damageRisePx: 42,
   /** Damage number lifetime (ms). */
@@ -131,7 +151,7 @@ export const COMBAT = Object.freeze({
 
   // --- Phase 4: tracer + muzzle presentation -------------------------------
   /** Base tracer tint; weapons may override (mortar = amber, rail = cyan). */
-  tracerColor: 0xffd166,
+  tracerColor: COMBAT_FX.tracerAmber,
   /** Bright core line width (px). */
   tracerWidth: 2,
   /** Wide additive glow behind the core (px). */
@@ -143,7 +163,7 @@ export const COMBAT = Object.freeze({
   /** Muzzle flash lifetime (ms) — must be short or it looks like a bug. */
   muzzleFlashMs: 70,
   /** Muzzle flash tint. */
-  muzzleFlashColor: 0xffe9a8,
+  muzzleFlashColor: COMBAT_FX.muzzleFlash,
 
   // --- Phase 5: object pools -----------------------------------------------
   /**
@@ -197,8 +217,14 @@ export const COMBAT = Object.freeze({
  */
 export const HEALTH = Object.freeze({
   defaultMax: 100,
-  /** Respawn delay (ms) shown on the death overlay. */
-  respawnMs: 2600,
+  /**
+   * Respawn delay (ms) shown on the death overlay.
+   *
+   * Shared with the server. This used to be a local 2600 while the server's
+   * authoritative delay was 2500, so the overlay's countdown and the actual
+   * revival disagreed by 100 ms on every death.
+   */
+  respawnMs: MATCH_TIMING.respawnDelayMs,
   /** Fade-in of the player after respawning (ms). */
   respawnFadeMs: 320,
   /** Name-tag health bar geometry, in world px. */
@@ -239,7 +265,7 @@ export const MEDALS = Object.freeze({
   /** Someone else's streak medal — present, never shouty. */
   otherPx: 20,
   /** First blood is gold so it is instantly distinct from a streak. */
-  firstBloodColor: '#ffd166',
+  firstBloodColor: COMBAT_FX.firstBloodColor,
   /** How long the banner sits at full opacity (ms). */
   firstBloodHoldMs: 2200,
   selfHoldMs: 1700,

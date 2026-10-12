@@ -182,13 +182,6 @@ export class Combat {
     /** now() of the last accepted shot. */
     this._lastShotAt = -Infinity;
 
-    /**
-     * Shots produced by the current trigger pull. A fast clicker dumps 3
-     * rounds in one pull, which feels far better than one-per-click; a HELD
-     * trigger must not auto-fire, which the cooldown handles.
-     */
-    this._shotsThisPull = 0;
-
     /** Rising counters for the debug overlay. */
     this.stats = { shots: 0, predictedHits: 0 };
   }
@@ -213,8 +206,6 @@ export class Combat {
     // boundary would let the very first shot after a swap go straight through.
     // One millisecond short keeps the swap honest without punishing it.
     this._lastShotAt = this.now() - this.model.cooldownMs + 1;
-    // A weapon change is a new trigger context; the next pull must be explicit.
-    this._shotsThisPull = 0;
   }
 
   /**
@@ -224,27 +215,24 @@ export class Combat {
    * @param {boolean} [justPressed] - Did it go down THIS frame?
    * @returns {{fired: boolean, hit: object|null, damage: number, endX: number, endY: number, travelMs: number}}
    */
-  tryFire(triggerHeld, justPressed = false) {
-    // Gate on the SERVER's cooldown for the equipped weapon, not a client
-    // constant. Phase 3 fired every 160ms while the rifle allows 320ms, so half
-    // of every burst was rejected by the server as COOLDOWN — the gun felt
-    // broken and half the rounds appeared to vanish.
+  tryFire(triggerHeld, _justPressed = false) {
+    // Fire rate is governed SOLELY by the equipped weapon's cooldown — the same
+    // value the server enforces — so the client can never out-fire the sim.
+    //
+    // A HELD trigger fires continuously at that cadence and a tap fires once.
+    // There is deliberately NO per-pull cap: the old `maxShotsPerPull` halted a
+    // held trigger after three rounds, so holding the button "jammed" the gun
+    // mid-fight even though the tutorial and HUD promise "hold for sustained
+    // fire". The cooldown already bounds the rate, so nothing is left unbounded.
+    if (!triggerHeld) return NO_SHOT;
+
     const cooldownMs = this.model.cooldownMs;
     const now = this.now();
-
-    // A new pull resets the burst counter; a held trigger fires only on cooldown.
-    if (justPressed || !triggerHeld) this._shotsThisPull = 0;
-
-    const canBurst = this._shotsThisPull < COMBAT.maxShotsPerPull;
-    if (!triggerHeld || (!canBurst && !justPressed)) {
-      return NO_SHOT;
-    }
     if (now - this._lastShotAt < cooldownMs) {
       return NO_SHOT;
     }
 
     this._lastShotAt = now;
-    this._shotsThisPull += 1;
     this.stats.shots += 1;
 
     const origin = this.getOrigin();
@@ -294,6 +282,10 @@ export class Combat {
     for (const target of this.getTargets()) {
       if (!target.alive || target.hp <= 0) continue;
       if (!this.canDamage(target)) continue;
+      // Spawn protection is enforced by the authoritative resolver; honouring it
+      // here keeps local prediction honest instead of firing at a target the
+      // server is ignoring (phantom hitmarkers + damage numbers).
+      if (target.protected) continue;
 
       // Vector from the muzzle to the target centre.
       const toX = target.x - x;
@@ -358,7 +350,6 @@ export class Combat {
   reset() {
     this.tracers = [];
     this._lastShotAt = -Infinity;
-    this._shotsThisPull = 0;
     this.stats = { shots: 0, predictedHits: 0 };
   }
 }

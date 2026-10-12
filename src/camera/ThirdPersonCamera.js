@@ -58,7 +58,6 @@ export class ThirdPersonCamera {
     // --- Aim smoothing (mouse-look inertia) --------------------------------
     this._leadX = 0;
     this._leadY = 0;
-    this._tilt = 0;
 
     // --- Recoil accumulator, decayed every frame ---------------------------
     this._kickX = 0;
@@ -83,21 +82,46 @@ export class ThirdPersonCamera {
   }
 
   /**
-   * Push the arena rect to the camera as bounds, grown by `CAMERA.boundsPadding`
-   * on every side.
+   * The overscan the camera bounds need for the scroll to actually be able to
+   * move.
    *
-   * WHY THE PADDING MATTERS: the gray-box arena is exactly the size of the
-   * viewport, so with hard bounds the camera can barely pan at all — Phaser
-   * clamps the scroll and the off-centre anchor silently becomes a dead-centre
-   * one. The overscan is empty headroom that gives the shoulder bias and aim
-   * lead room to move without the framing snapping when the player nears an
-   * edge. Nothing is drawn in the overscan region.
+   * Phaser clamps scroll to `bounds.x` whenever `bounds.width <= viewport
+   * width`, so a bounds rect the size of the arena (or smaller, which is every
+   * map in this project) pins the camera to one value per axis and every framing
+   * parameter below quietly stops working. The fix is to guarantee the rect is
+   * wider than the viewport by at least the framing headroom on each side.
+   *
+   * Re-derived whenever zoom or the viewport changes, so the guarantee holds at
+   * every zoom level rather than only the one the bounds were set for.
+   *
+   * @returns {number} Padding in world px.
+   */
+  _boundsPadding() {
+    // The camera's viewport, in WORLD units (zoom shrinks the visible area).
+    const viewW = this.cam.width / Math.max(this.cam.zoom, 0.0001);
+    const viewH = this.cam.height / Math.max(this.cam.zoom, 0.0001);
+    const b = this.worldBounds;
+    if (!b) return CAMERA.boundsPadding;
+    const needX = (viewW - b.width) / 2 + CAMERA.framingOverscan;
+    const needY = (viewH - b.height) / 2 + CAMERA.framingOverscan;
+    return Math.max(CAMERA.boundsPadding, needX, needY);
+  }
+
+  /**
+   * Push the arena rect to the camera as bounds, grown by the overscan the
+   * current viewport needs (see {@link _boundsPadding}).
+   *
+   * Without the padding the scroll is pinned and the off-centre anchor silently
+   * becomes a dead-centre one; the overscan is empty headroom that gives the
+   * shoulder bias and aim lead room to move. Nothing is drawn in the overscan
+   * region.
    *
    * @param {{x:number,y:number,width:number,height:number}} bounds
    * @returns {void}
    */
   _applyBounds(bounds) {
-    const pad = CAMERA.boundsPadding;
+    const pad = this._boundsPadding();
+    this._boundsPx = pad;
     this.cam.setBounds(
       bounds.x - pad,
       bounds.y - pad,
@@ -119,6 +143,12 @@ export class ThirdPersonCamera {
 
     const lerpPos = this._smoothing(CAMERA.positionLerp, delta);
     const lerpZoom = this._smoothing(CAMERA.zoomLerp, delta);
+
+    // Keep the bounds guarantee true at the CURRENT zoom. The overscan is
+    // derived from the viewport in world units, and zoom changes that every
+    // frame — so the rect is re-derived here rather than once, or the camera
+    // would clamp again the moment the aim tighten kicked in.
+    if (this.worldBounds) this._applyBounds(this.worldBounds);
 
     // -- 1. AIM LEAD (mouse-look) -------------------------------------------
     // Normalise the cursor offset from the player into a -1..1 deflection,
@@ -172,12 +202,11 @@ export class ThirdPersonCamera {
     this.cam.setZoom(this.currentZoom);
     this.cam.setScroll(this.currentScrollX, this.currentScrollY);
 
-    // -- 6. TILT -------------------------------------------------------------
-    // A tiny rotation reacting to vertical aim: the cheapest convincing 3D
-    // depth cue available on a flat 2D plane.
-    const targetTilt = Phaser.Math.Clamp(-aimDy / 1400, -1, 1) * 0.021; // ≈1.2°
-    this._tilt = Phaser.Math.Linear(this._tilt, targetTilt, lerpPos);
-    this.cam.setRotation(this._tilt);
+    // NOTE: no camera tilt. A rotated camera re-projects every screen point
+    // through a rotation matrix, so the cursor's world mapping shifts whenever
+    // the aim moves — the camera would literally steer the aim it is supposed
+    // to frame (aim drift). The world stays axis-aligned; depth comes from
+    // parallax and lighting instead.
 
     // -- 7. DECAY RECOIL -----------------------------------------------------
     this._kickX = Phaser.Math.Linear(this._kickX, 0, lerpPos);
@@ -276,6 +305,17 @@ export class ThirdPersonCamera {
   }
 
   /**
+   * Alias for `applyRecoil` (ArenaScene's `_shake` calls this name).
+   * @param {number|null} angle - Shot angle in radians, or null for a flat shake.
+   * @param {number} [strength] - Pixels of kick.
+   * @returns {void}
+   */
+  recoil(angle, strength = 7) {
+    if (angle === null || angle === undefined) return;
+    this.applyRecoil(angle, strength ?? 7);
+  }
+
+  /**
    * One-shot camera shake (hits, explosions, jumpscares).
    * @param {number} [intensity] - Duration in ms.
    * @param {number} [amount] - Magnitude as a fraction of the viewport.
@@ -331,10 +371,10 @@ export class ThirdPersonCamera {
     const anchorY = this.currentScrollY + visibleH * CAMERA.anchorYRatio;
 
     const g = scene.add.graphics().setDepth(9999);
-    g.lineStyle(1, 0xffd166, 0.5).strokeRect(this.currentScrollX, this.currentScrollY, visibleW, visibleH);
-    g.lineStyle(2, 0xffd166, 0.9).strokeCircle(anchorX, anchorY, 16);
-    g.lineStyle(2, 0x7fe7ff, 0.9).lineBetween(player.x, player.y, anchorX, anchorY);
-    g.fillStyle(0x7fe7ff, 0.9).fillCircle(player.x, player.y, 4);
+    g.lineStyle(1, PALETTE.amberLight, 0.5).strokeRect(this.currentScrollX, this.currentScrollY, visibleW, visibleH);
+    g.lineStyle(2, PALETTE.amberLight, 0.9).strokeCircle(anchorX, anchorY, 16);
+    g.lineStyle(2, PALETTE.cyanLight, 0.9).lineBetween(player.x, player.y, anchorX, anchorY);
+    g.fillStyle(PALETTE.cyanLight, 0.9).fillCircle(player.x, player.y, 4);
     g.destroy();
   }
 }

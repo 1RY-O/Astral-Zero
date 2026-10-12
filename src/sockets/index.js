@@ -27,12 +27,16 @@
  */
 
 import config from '../server-config.js';
+import { sanitizeName, logSafe } from '../players/identity.js';
+import { allow as allowEvent, resetSocket as resetEventLimits, limitsNow } from './limits.js';
 import { SOCKET_EVENTS, SOCKET_EVENTS_VERSION } from './events.js';
 import {
   upsertOnJoin,
   removeBySocket,
   getBySocket,
   setPartyCode,
+  ensureProfile,
+  activeCharacterFor,
 } from '../players/playerStore.js';
 import { listFriends } from '../friends/friendManager.js';
 import { handleDisconnect as partyDisconnect, toPublic as partyToPublic } from '../parties/partyManager.js';
@@ -45,9 +49,45 @@ import { registerPartyHandlers } from './handlers/partyHandlers.js';
 import { registerFriendHandlers } from './handlers/friendHandlers.js';
 import { registerMatchmakingHandlers } from './handlers/matchmakingHandlers.js';
 import { registerInputHandlers, bridgeShoot, bridgeMelee } from './handlers/inputHandlers.js';
+import { registerProgressionHandlers, publicProfile } from './handlers/progressionHandlers.js';
 import { getRoomForSocket, getSpectatorRoom, removeSpectatorEverywhere } from '../rooms/roomManager.js';
 import { storeLegacyMove, clearInput } from '../game/inputs.js';
 import { tryRejoin } from '../game/reconnect.js';
+
+/**
+ * Sockets that tried to write authoritative HP.
+ *
+ * Bounded (a Set of socket ids, cleared on disconnect) and surfaced through
+ * {@link diagnostics} rather than logged per packet. Logging the full client
+ * payload on every rejected event made the rejection path itself the DoS: a
+ * client could drive unbounded log growth from a request the server already
+ * refuses. The client still gets the error, so nothing is hidden from the
+ * player — only the noise is removed from the operator's log.
+ */
+const healthRejections = new Set();
+
+/**
+ * True when a socket has exceeded its ceiling for an event. Ceilings live in
+ * src/sockets/limits.js so every handler consults the same table.
+ * @param {string} event
+ * @param {string} socketId
+ * @returns {boolean}
+ */
+function rateLimited(event, socketId) {
+  return !allowEvent(event, socketId);
+}
+
+/**
+ * Operator-facing counters, safe to poll from a health check: structured, small,
+ * and free of payloads, per-frame noise and client-controlled strings.
+ * @returns {{ rateLimits: Record<string, number>, hpRejections: number }}
+ */
+export function diagnostics() {
+  return {
+    rateLimits: limitsNow(),
+    hpRejections: healthRejections.size,
+  };
+}
 
 /**
  * Attach all Astral Zero socket handlers to an `io` server.
@@ -76,6 +116,8 @@ export function initSockets(io) {
     registerPartyHandlers(io, socket);
     registerFriendHandlers(io, socket);
     registerMatchmakingHandlers(io, socket);
+    // S14: character / loadout / ranked selection (validated server-side).
+    registerProgressionHandlers(io, socket);
     // -- Phase 3: authoritative input channel --------------------------------
     registerInputHandlers(io, socket);
 
@@ -84,12 +126,28 @@ export function initSockets(io) {
     // Phase 2 addition: register identity (friends/protection) + push the
     // caller's persistent friends list. Broadcast shape UNCHANGED.
     socket.on(SOCKET_EVENTS.PLAYER_JOIN, (payload = {}, ack) => {
-      console.log(`[Astral Zero] player_join from ${socket.id}:`, payload);
+      if (rateLimited('player_join', socket.id)) {
+        socket.emit(SOCKET_EVENTS.ERROR, {
+          code: 'RATE_LIMITED',
+          message: 'Too many player_join events. Reconnect to continue.',
+        });
+        if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
+        return;
+      }
+      // Sanitised, logged safely.
+      const cleanName = sanitizeName(payload?.name);
+      if (String(payload?.name || '') !== cleanName) {
+        socket.emit(SOCKET_EVENTS.ERROR, {
+          code: 'NAME_SANITIZED',
+          message: `Display name adjusted to "${cleanName}".`,
+        });
+      }
+      console.log(`[Astral Zero] player_join from ${socket.id}:`, { name: cleanName });
 
       // Phase 1: stamp identity server-side, trust the rest.
       const player = {
         id: socket.id,
-        name: String(payload.name || 'Unnamed Janitor').slice(0, 24),
+        name: cleanName,
         mapId: payload.mapId || 'junkyard',
         difficulty: payload.difficulty || 'normal',
         joinedAt: Date.now(),
@@ -125,6 +183,20 @@ export function initSockets(io) {
         friends: listFriends(player.name),
         timestamp: Date.now(),
       });
+
+      // S14.7: hand the caller their PROGRESSION profile the same way, on the
+      // existing `character_update` channel (documented shape already carries
+      // `profile` — this is the first PUSH of it, not a new event). Without
+      // this the selection screen could not know which characters are
+      // unlocked or which one is active until the player changed something.
+      const prof = ensureProfile(player.name);
+      const activeChar = activeCharacterFor(player.name);
+      socket.emit(SOCKET_EVENTS.CHARACTER_UPDATE, {
+        character: activeChar,
+        variant: prof?.loadouts?.[activeChar] || null,
+        profile: publicProfile(prof),
+        timestamp: Date.now(),
+      });
     });
 
     // -- 2. player_move ------------------------------------------------------
@@ -134,8 +206,17 @@ export function initSockets(io) {
     // only a velocity hint becomes intent. Peers learn positions from
     // `entity_snapshot`, never from this echo (no conflicting truths).
     socket.on(SOCKET_EVENTS.PLAYER_MOVE, (payload = {}, ack) => {
-      // Avoid spamming logs for 20–60 Hz input; uncomment to debug:
-      // console.log(`[move] ${socket.id}`, payload);
+      // Lobby relay is an O(N^2) broadcast path: every move from every client
+      // is re-sent to every other client. Ceilinged here so one socket cannot
+      // multiply that unboundedly.
+      if (getSpectatorRoom(socket.id) && rateLimited('player_move', socket.id)) {
+        socket.emit(SOCKET_EVENTS.ERROR, {
+          code: 'RATE_LIMITED',
+          message: 'Too many player_move events.',
+        });
+        if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
+        return;
+      }
       // Phase 5: spectators have no body — their move packets are dropped,
       // NEVER relayed (a ghost tracer broadcast would haunt every client).
       if (getSpectatorRoom(socket.id)) {
@@ -170,7 +251,11 @@ export function initSockets(io) {
       }
       const room = getRoomForSocket(socket.id);
       if (!room?.sim) {
-        console.log(`[Astral Zero] player_shoot from ${socket.id}:`, payload);
+        if (rateLimited('player_shoot', socket.id)) {
+          socket.emit(SOCKET_EVENTS.ERROR, { code: 'RATE_LIMITED', message: 'Too many player_shoot events.' });
+          if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
+          return;
+        }
         socket.broadcast.emit(SOCKET_EVENTS.PLAYER_SHOOT, {
           id: socket.id,
           ...payload, // { x, y, angle, weaponId, seq, timestamp }
@@ -200,7 +285,11 @@ export function initSockets(io) {
       }
       const room = getRoomForSocket(socket.id);
       if (!room?.sim) {
-        console.log(`[Astral Zero] player_melee from ${socket.id}:`, payload);
+        if (rateLimited('player_melee', socket.id)) {
+          socket.emit(SOCKET_EVENTS.ERROR, { code: 'RATE_LIMITED', message: 'Too many player_melee events.' });
+          if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
+          return;
+        }
         socket.broadcast.emit(SOCKET_EVENTS.PLAYER_MELEE, {
           id: socket.id,
           ...payload, // { x, y, direction, swingId, timestamp }
@@ -222,11 +311,13 @@ export function initSockets(io) {
     // Phase 3: SERVER-ONLY, enforced. Client sends are rejected with
     // NOT_AUTHORITATIVE (the locked flip previewed since the Phase 1 doc).
     // HP is written exclusively by combat/damage.js → broadcast room-scoped.
-    socket.on(SOCKET_EVENTS.PLAYER_HEALTH_UPDATE, (payload = {}) => {
-      console.warn(
-        `[Astral Zero] ⚠ client ${socket.id} sent authoritative 'player_health_update'. Rejected:`,
-        payload,
-      );
+    socket.on(SOCKET_EVENTS.PLAYER_HEALTH_UPDATE, () => {
+      // Counted, not logged. This used to console.warn the whole client payload
+      // on every packet, which made the rejection path itself the DoS: a client
+      // could drive unbounded log growth from a rejected event. The client
+      // still gets the error, so nothing is hidden from the player — the count
+      // surfaces through `diagnostics()` below for operator visibility.
+      healthRejections.add(socket.id);
       socket.emit(SOCKET_EVENTS.ERROR, {
         code: 'NOT_AUTHORITATIVE',
         message: `'player_health_update' is server→client only. Clients must never set HP.`,
@@ -339,6 +430,10 @@ export function initSockets(io) {
       // Phase 3: forget intent (a stale entry would steer a corpse for 1.5 s;
       // in-room entity removal already happened in leaveRoom/removeHuman).
       clearInput(socket.id);
+      // Release this socket's rate-limit buckets so a fresh connection is not
+      // punished for a previous session's traffic.
+      resetEventLimits(socket.id);
+      healthRejections.delete(socket.id);
       // Phase 5: free spectator booths (spectators never stash — no re-seat).
       removeSpectatorEverywhere(socket.id);
     });

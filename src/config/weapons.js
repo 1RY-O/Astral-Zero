@@ -30,6 +30,8 @@
  */
 
 /** Client's copy of the server weapon table. Ids MUST match the server keys. */
+import { COMBAT_FX } from './uiTheme.js';
+
 export const WEAPONS = Object.freeze({
   'scrap-rifle': Object.freeze({
     id: 'scrap-rifle',
@@ -41,7 +43,7 @@ export const WEAPONS = Object.freeze({
     magazine: 30,
     reloadMs: 1400,
     splash: 0,
-    tracerColor: 0xffd166,
+    tracerColor: COMBAT_FX.tracerAmber,
     recoilPx: 7,
     flashScale: 1,
   }),
@@ -55,7 +57,7 @@ export const WEAPONS = Object.freeze({
     magazine: 6,
     reloadMs: 2200,
     splash: 0,
-    tracerColor: 0x7fe7ff,
+    tracerColor: COMBAT_FX.tracerCyan,
     recoilPx: 16,
     flashScale: 1.7,
   }),
@@ -69,7 +71,7 @@ export const WEAPONS = Object.freeze({
     magazine: 4,
     reloadMs: 2600,
     splash: 90,
-    tracerColor: 0xff9f43,
+    tracerColor: COMBAT_FX.tracerHot,
     recoilPx: 24,
     flashScale: 2.1,
   }),

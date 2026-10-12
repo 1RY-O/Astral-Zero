@@ -16,6 +16,7 @@
  */
 
 import { THEME, FONTS, RADII } from '../../config/uiTheme.js';
+import { PROFILE_ACCENTS, SURFACES } from '../../config/uiTheme.js';
 
 export class ProfileCard {
   /**
@@ -94,13 +95,13 @@ export class ProfileCard {
     const name = this.net.state.player?.name ?? '';
     // Deterministic hue pick from the brand accents (cyan, amber, violet, green)
     // so the palette stays on-brand rather than using arbitrary HSL.
-    const accents = [0x5ad8ff, 0xffc247, 0xb58cff, 0x4ade80];
+    const accents = PROFILE_ACCENTS;
     let hash = 0;
     for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
     const tint = accents[hash % accents.length];
 
     g.clear();
-    g.fillStyle(0x0a1120, 1);
+    g.fillStyle(SURFACES.trackBg, 1);
     g.fillCircle(cx, cy, r);
     g.lineStyle(2, tint, 0.9);
     g.strokeCircle(cx, cy, r);

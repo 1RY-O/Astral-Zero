@@ -178,6 +178,31 @@ export function stationAt(map, x, y) {
 }
 
 /**
+ * Spawn table with hazard volumes removed. Initial + bot spawns draw from
+ * here so nobody materialises standing in acid: the junkyard's first floor
+ * slot (x≈100) sits inside the reactor-leak, and spawn protection only
+ * delays the burn by 1.5 s. The margin covers spawn jitter (±30 px), so a
+ * scattered boot still lands clear. Falls back to the full table when every
+ * slot is hazardous (never strand the spawner).
+ * @param {object|string} [map] - Def, id, or nothing (default arena).
+ * @param {number} [margin] - Clearance px around each hazard rect.
+ * @returns {Array<{x:number,y:number}>} Safe spawn points (may be the full table).
+ */
+export function safeSpawnTable(map = null, margin = 40) {
+  const m = useDef(map);
+  const pts = m.spawns?.length ? m.spawns : [{ x: 640, y: 650 }];
+  const hazards = m.zones?.hazard || [];
+  if (!hazards.length) return pts;
+  const safe = pts.filter(
+    (p) => !hazards.some(
+      (z) => p.x > z.x - margin && p.x < z.x + z.w + margin
+        && p.y > z.y - margin && p.y < z.y + (z.h ?? 0) + margin,
+    ),
+  );
+  return safe.length ? safe : pts;
+}
+
+/**
  * Wire shape for `room_joined.map` (clients render zones + stations).
  * Spawns included (cheap, lets HUDs draw spawn markers if they want).
  */

@@ -166,20 +166,22 @@ npm run dev          # terminal 2 — game on :5173
 | --- | --- |
 | `npm test` | Party/friends/mode behaviour, leader permissions, invite gating |
 | `npm run test:camera` | Off-centre anchoring, visibility guarantee, zoom clamps, aim lead |
-| `npm run test:all` | Both |
+| `npm run test:bots` | Bot Practice bypasses the public queue; dedicated AI room; tuning validation |
+| `npm run test:all` | Every suite |
 
 `tests/phaser-stub.mjs` lets the real game modules load in plain Node, so both
 suites run without a browser or a backend.
 
 ---
 
-## 9. Known limitations (Phase 3)
+## 9. Known limitations
 
-- **Bots stand still.** The server fills the roster but has no AI tick yet, so
-  `RemoteActor` idles in place. Movement wiring is already in place — it needs
-  a `bot_update` consumer.
-- **Damage is not implemented.** The HUD shows the roster, not health bars.
-- **`player_move` is broadcast but not applied.** The client relays its position
-  at 20 Hz, but remote humans only move once Phase 3 adds server-side movement.
-- **No reconnect recovery of a party.** `socket.id` changes on reconnect, so a
-  dropped player must rejoin with the code (documented in the backend).
+> This document describes the **Phase 2** frontend work. Later phases superseded
+> several of these notes; the authoritative current state is the README's
+> "Implemented vs. planned" section and `src/sockets/events.js`
+> (contract `1.4.0-phase6`). The items below are retained for historical context.
+
+- Bots now move and fight (Phase 3+ `botBrain`); `RemoteActor` is server-driven.
+- `player_move` is a legacy intent bridge — the authoritative channel is `player_input`.
+- Reconnect re-seats by **normalized name** within a grace window (Phase 4), so a
+  dropped player no longer has to rejoin with the code.

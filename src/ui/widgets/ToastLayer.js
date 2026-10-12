@@ -17,15 +17,13 @@
  *  - `?fastToasts` shortens the dwell time when iterating on the UI.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { TONES, THEME, FONTS, RADII, MOTION } from '../../config/uiTheme.js';
 
-/** Colour per tone. Kept next to the tone names so they never drift. */
-const TONE_STYLES = {
-  info: { fill: 0x0f2540, border: 0x38e1ff, text: '#d8f4ff' },
-  success: { fill: 0x0f2c1e, border: 0x4ade80, text: '#dcffe8' },
-  error: { fill: 0x331522, border: 0xff6b8b, text: '#ffe0e6' },
-  warning: { fill: 0x33250f, border: 0xff9f43, text: '#ffeed6' },
-};
+/**
+ * Colour per tone: SEVERITY, never message. Lives in the theme so a toast, a
+ * HUD banner and a validation error cannot each invent a different red.
+ */
+const TONE_STYLES = TONES;
 
 export class ToastLayer {
   /**

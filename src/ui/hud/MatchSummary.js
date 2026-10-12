@@ -17,7 +17,7 @@
  * 1.3/1.4 contract, so nothing here is pretending to be authoritative.
  */
 
-import { THEME, FONTS } from '../../config/uiTheme.js';
+import { THEME, FONTS, SURFACES } from '../../config/uiTheme.js';
 import { Button } from '../widgets/Button.js';
 import { MEDAL_TYPES, summarise } from '../../game/Progression.js';
 
@@ -52,7 +52,7 @@ export class MatchSummary {
     const cx = width / 2;
 
     const scrim = this.scene.add
-      .rectangle(cx, height / 2, width, height, 0x03060d, 0.86)
+      .rectangle(cx, height / 2, width, height, SURFACES.scrim, 0.86)
       .setScrollFactor(0);
     this.root.add(scrim);
 
@@ -115,6 +115,9 @@ export class MatchSummary {
     // The button lives on the scene, not in the container, so it needs the same
     // visibility treatment as the panel.
     this._nodes.push(this.continueButton);
+    // Hidden until show(): the container starts invisible, but the button is
+    // scene-level and would otherwise sit on screen for the whole match.
+    this.continueButton.setVisible(false);
   }
 
   /**
@@ -177,6 +180,10 @@ export class MatchSummary {
     } else {
       this.medalText.setText('No medals this match').setColor(THEME.textFaint);
     }
+
+    this.root.setVisible(true);
+    this.continueButton.setVisible?.(true);
+    this.visible = true;
   }
 
   /** @returns {void} */

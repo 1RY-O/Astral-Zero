@@ -455,6 +455,89 @@ export class MatchStream extends Emitter {
         });
       }),
     );
+
+    // -- S14.3 Orbital shifts -------------------------------------------------
+    // The server owns the geometry; this republishes the SAME platforms the sim
+    // now collides against, so the floor the player sees IS the floor they
+    // stand on. `warning` is the telegraph (no geometry change yet).
+    this._offs.push(
+      s.on(NET_EVENTS.ORBITAL_SHIFT, (payload = {}) => {
+        const platforms = Array.isArray(payload.platforms)
+          ? payload.platforms.map((p) => ({
+            x: Number(p.x) || 0,
+            y: Number(p.y) || 0,
+          }))
+          : null;
+        this.emit('shift', {
+          type: payload.type === 'warning' || payload.type === 'shift' || payload.type === 'settled'
+            ? payload.type
+            : 'settled',
+          cycle: Number(payload.cycle) || 0,
+          seq: Number(payload.seq) || 0,
+          warningMs: Number(payload.warningMs) || 0,
+          shiftAt: Number(payload.shiftAt) || 0,
+          platforms,
+          moving: Array.isArray(payload.platforms) && payload.type === 'warning'
+            ? payload.platforms
+            : null,
+        });
+      }),
+    );
+
+    // -- S14.4 Scrap mimics ------------------------------------------------------
+    // The server decides when a decoy arms, chases, bites or dies. We only
+    // render: dormant mimics are indistinguishable from scrap tokens on
+    // purpose — the `arm` event is the moment the player learns they were bait.
+    this._offs.push(
+      s.on(NET_EVENTS.MIMIC_EVENT, (payload = {}) => {
+        const kind = String(payload.kind ?? '');
+        const evt = {
+          kind,
+          id: String(payload.id ?? ''),
+          x: Number(payload.x) || 0,
+          y: Number(payload.y) || 0,
+          byId: payload.byId ? String(payload.byId) : null,
+          byName: payload.byName ?? null,
+          hp: Number(payload.hp) || 0,
+          isSelf: payload.byId ? String(payload.byId) === this._selfId() : false,
+        };
+        if (kind === 'kill' || kind === 'hit') delete evt.x;
+        this.emit('mimic', evt);
+      }),
+    );
+
+    // -- S14.5 Control point ---------------------------------------------------
+    this._offs.push(
+      s.on(NET_EVENTS.OBJECTIVE_EVENT, (payload = {}) => {
+        this.emit('objective', {
+          kind: String(payload.kind ?? ''),
+          team: payload.team ?? null,
+          from: payload.from ?? null,
+          owner: payload.owner ?? 'neutral',
+          progress: Number(payload.progress) || 0,
+        });
+      }),
+    );
+
+    // -- S14 characters / ranked ---------------------------------------------
+    this._offs.push(
+      s.on(NET_EVENTS.CHARACTER_UPDATE, (payload = {}) => {
+        this.emit('character', {
+          character: String(payload.character ?? ''),
+          variant: payload.variant ?? null,
+          profile: payload.profile ?? null,
+        });
+      }),
+    );
+    this._offs.push(
+      s.on(NET_EVENTS.RANKED_UPDATE, (payload = {}) => {
+        this.emit('ranked', {
+          seasonId: String(payload.seasonId ?? ''),
+          you: payload.you ?? null,
+          leaderboard: Array.isArray(payload.leaderboard) ? payload.leaderboard : [],
+        });
+      }),
+    );
   }
 
   /**

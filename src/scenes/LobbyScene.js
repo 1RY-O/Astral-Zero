@@ -46,6 +46,7 @@ import { SCENES, GAME_CONFIG } from '../config/gameConfig.js';
 import { LOBBY } from '../config/lobbyConfig.js';
 import { THEME, FONTS, RADII, MOTION } from '../config/uiTheme.js';
 import { DESIGN, LAYOUTS, currentLayout, isTouchPrimary } from '../config/viewportConfig.js';
+import { reloadOnTierChange } from '../core/Responsive.js';
 import { net } from '../net/NetworkManager.js';
 import { isLobbySkipped } from '../net/netConfig.js';
 import { PartyPanel } from '../ui/lobby/PartyPanel.js';
@@ -61,6 +62,7 @@ import { Logo } from '../ui/brand/Logo.js';
 import { OrbitalBackdrop } from '../ui/brand/OrbitalBackdrop.js';
 import { StatusPill } from '../ui/brand/StatusPill.js';
 import { SettingsMenu } from '../ui/menus/SettingsMenu.js';
+import { navigate } from '../core/Router.js';
 import * as Motion from '../core/Motion.js';
 
 export class LobbyScene extends Phaser.Scene {
@@ -78,6 +80,9 @@ export class LobbyScene extends Phaser.Scene {
   create() {
     this.net = net;
     this._offs = [];
+    // A tier-based layout cannot be patched in place, so the scene rebuilds
+    // when the device crosses a breakpoint (window resize / phone rotation).
+    this._offs.push(reloadOnTierChange(this));
 
     // Follow the OS reduced-motion preference for the whole scene.
     Motion.init();
@@ -223,9 +228,9 @@ export class LobbyScene extends Phaser.Scene {
       depth: 12,
       active: 'play',
       handlers: {
-        home: () => this._focus('home'),
-        play: () => this._focus('play'),
-        friends: () => this._focus('friends'),
+        home: () => navigate('home'),
+        play: () => navigate('lobby'),
+        friends: () => navigate('lobby'),
         settings: () => this.settings?.show(),
       },
     });

@@ -36,7 +36,8 @@ class Obj {
   constructor(o={}){ Object.assign(this, o); }
   setDepth(){ return this; } setScrollFactor(){ return this; } setOrigin(){ return this; }
   setVisible(v){ this.visible=v; return this; } setAlpha(){ return this; }
-  setPosition(){ return this; } setScale(){ return this; } setColor(c){ this.color=c; return this; }
+  setPosition(x, y){ this.x = x; this.y = y; return this; } setScale(){ return this; } setColor(c){ this.color=c; return this; }
+  setSize(w, h){ this.width = w; this.height = h; return this; }
   setText(t){ this.text=t; return this; } setInteractive(){ this.interactive=true; return this; }
   setWordWrapWidth(){ return this; } setAlign(){ return this; } add(){ return this; }
   disableInteractive(){ this.interactive=false; return this; }

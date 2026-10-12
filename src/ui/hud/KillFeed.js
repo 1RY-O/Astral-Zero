@@ -32,7 +32,7 @@ export class KillFeed {
     this.width = width;
     this.rowHeight = rowHeight;
 
-    /** @type {Array<{text: Phaser.GameObjects.Text, expiresAt: number}>} */
+    /** @type {Array<{text: Phaser.GameObjects.Text, plate: Phaser.GameObjects.Rectangle|null, expiresAt: number}>} */
     this._rows = [];
   }
 
@@ -64,9 +64,12 @@ export class KillFeed {
       .setAlpha(0);
 
     // A translucent plate behind self-involved rows keeps them legible over a
-    // bright platform without boxing in every row.
+    // bright platform without boxing in every row. Tracked with the row so
+    // expiry destroys it too (previously plates leaked one Rectangle per
+    // self-involved kill for the life of the scene).
+    let plate = null;
     if (involvesSelf) {
-      this.scene.add
+      plate = this.scene.add
         .rectangle(this.x - 6, text.y + 2, this.width, this.rowHeight - 4, THEME.panel, 0.55)
         .setOrigin(0, 0)
         .setDepth(this.depth - 1)
@@ -75,11 +78,17 @@ export class KillFeed {
 
     this.scene.tweens.add({ targets: text, alpha: 1, duration: 140 });
 
-    this._rows.push({ text, expiresAt: this.scene.time.now + MATCH_UI.killFeedRowMs });
+    this._rows.push({ text, plate, expiresAt: this.scene.time.now + MATCH_UI.killFeedRowMs });
 
     // Trim to the cap so a burst of kills cannot flood the screen.
     while (this._rows.length > MATCH_UI.killFeedRows) this._removeAt(0);
     this._relayout();
+  }
+
+  _repositionPlates() {
+    this._rows.forEach((row, i) => {
+      row.plate?.setY(this.y + i * this.rowHeight + 2);
+    });
   }
 
   /**
@@ -95,6 +104,7 @@ export class KillFeed {
         ease: 'Quad.easeOut',
       });
     });
+    this._repositionPlates();
   }
 
   /**
@@ -106,6 +116,7 @@ export class KillFeed {
     const row = this._rows[index];
     if (!row) return;
     this._rows.splice(index, 1);
+    row.plate?.destroy();
     this.scene.tweens.add({
       targets: row.text,
       alpha: 0,
@@ -130,7 +141,10 @@ export class KillFeed {
 
   /** @returns {void} */
   clear() {
-    this._rows.forEach((row) => row.text.destroy());
+    this._rows.forEach((row) => {
+      row.text.destroy();
+      row.plate?.destroy();
+    });
     this._rows = [];
   }
 

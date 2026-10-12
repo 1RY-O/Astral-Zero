@@ -30,7 +30,7 @@ import Phaser from 'phaser';
 // `ARENA` is intentionally no longer imported: Phase 5 moved the layout into
 // src/config/maps.js so each map can have its own geometry (the server picks the
 // map; the client owns the collision).
-import { SCENES, PLAYER, AIM, GAME_CONFIG } from '../config/gameConfig.js';
+import { SCENES, PLAYER, AIM, AIM_RAY, GAME_CONFIG } from '../config/gameConfig.js';
 import { MATCH_MODES } from '../config/lobbyConfig.js';
 import { Player } from '../entities/Player.js';
 import { RemoteActor } from '../entities/RemoteActor.js';
@@ -39,24 +39,29 @@ import { InputManager } from '../input/InputManager.js';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
 import { ArenaHud } from '../ui/hud/ArenaHud.js';
 import { CombatFx } from '../ui/fx/CombatFx.js';
+import { AimRay } from '../ui/fx/AimRay.js';
 import { Feedback } from '../ui/fx/Feedback.js';
 import { KillFeed } from '../ui/hud/KillFeed.js';
 import { Scoreboard } from '../ui/hud/Scoreboard.js';
 import { Medals } from '../ui/hud/Medals.js';
-import { MatchResults } from '../ui/hud/MatchResults.js';
 import { Combat } from '../combat/Combat.js';
 import { MatchStream } from '../net/MatchStream.js';
 import { Prediction } from '../net/Prediction.js';
 import { CAMERA_DEBUG } from '../config/cameraConfig.js';
 import { NET_TICK, RECONCILIATION, COMBAT, HEALTH, NET_DEBUG } from '../config/netConfig.js';
 import { weaponFor, DEFAULT_WEAPON, WEAPON_LIST } from '../config/weapons.js';
+import { WEAPON as SHARED_WEAPON } from '../shared/tuning.js';
 import { net } from '../net/NetworkManager.js';
 import { NET_EVENTS } from '../net/events.js';
-import { resolveLocalSpawn, normaliseRoom } from '../net/MatchModel.js';
+import { PALETTE, ART, COMBAT_FX, CHARACTER_TINTS } from '../config/uiTheme.js';
+import { CHARACTERS, STARTER_CHARACTER } from '../shared/characters.js';
+import { resolveLocalSpawn, normaliseRoom, selectWireMap } from '../net/MatchModel.js';
+import { authoritativeToSprite, spriteToAuthoritative, centreToFeet, feetToCentre } from '../shared/coords.js';
 // --- Phase 5 ---------------------------------------------------------------
 import { mapFromWire } from '../config/maps.js';
 import { WorldRenderer } from '../world/WorldRenderer.js';
 import { AmbientFx } from '../ui/fx/AmbientFx.js';
+import { FirstTimeTutorial, loadTutorialSeen } from '../scenes/FirstTimeTutorial.js';
 import { AudioManager } from '../audio/AudioManager.js';
 import { AUDIO } from '../config/audioConfig.js';
 import { SpectatorCam } from '../camera/SpectatorCam.js';
@@ -106,6 +111,22 @@ export class ArenaScene extends Phaser.Scene {
     // arrives we build nothing — previously the client kept its own layouts,
     // which is exactly the kind of guess that desyncs from the sim.
     this.world = new WorldRenderer(this);
+    // The arena does NOT rebuild on resize (unlike Home/Lobby). A match is
+    // live here: the world comes from the authoritative manifest, the player is
+    // mid-simulation, and a scene restart would throw away state only the server
+    // has. The tier is re-read by the HUD instead, which re-lays out without
+    // touching the match. Marked so the shared emitter cannot restart it.
+    this._layoutLocked = true;
+
+    // Explicit input edges from the start: `undefined` happens to be falsy, but
+    // a flag that only exists after its first event is a flag that reads wrong
+    // the moment anything introspects the scene (debug overlay, tests, teardown).
+    this._fireHeld = false;
+    this._firePressed = false;
+    this._meleePressed = false;
+    // Alias used by the aiming ray (and anything else that needs the arena's
+    // solid geometry without knowing about the renderer's internals).
+    this.worldRenderer = this.world;
     this.mapDef = mapFromWire(this.stream?.getMap?.() ?? null, this.net.state.room?.mapId);
 
     this._createBackdrop();
@@ -119,8 +140,18 @@ export class ArenaScene extends Phaser.Scene {
     // --- Match roster, or the Phase 1 solo fallback ------------------------
     this.room = net.state.room ?? normaliseRoom({}, { localPlayerId: this.localId });
 
+    // Anchor the match clock NOW from the adopted manifest: the `match-ready`
+    // handler below also does this, but it only fires for rooms adopted AFTER
+    // this scene subscribed — the normal entry path adopted the room in the
+    // lobby, so without this the clock reads --:-- for the whole match.
+    if (this.room?.roomId) this._startMatchClock(this.room);
+
     this._createPlayer(this._resolveSpawn());
     this._spawnRemotes(this.room);
+
+    // Local-only aiming guide (laser sight). Purely visual: it draws the muzzle
+    // direction and never emits an event or decides a hit (see AimRay).
+    this.aimRay = new AimRay(this);
 
     // --- Combat + feedback -------------------------------------------------
     // `getTargets` hands Combat a live, flat view of everyone we may shoot,
@@ -159,10 +190,8 @@ export class ArenaScene extends Phaser.Scene {
     // --- Arsenal-style over-the-shoulder camera ---------------------------
     // Bounds match the arena rect exactly, which is what stops the camera
     // from ever showing empty space outside the level.
-    this.cameraRig = new ThirdPersonCamera(this, {
-      camera: this.cameras.main,
-      worldBounds: { x: 0, y: 0, width: GAME_CONFIG.width, height: GAME_CONFIG.height },
-    });
+    // The rig may already exist (built early so world setup could bound it).
+    if (!this.cameraRig) this._createCameraRig();
     // Frame the player correctly on the very first frame (no lerp-in pan).
     this.cameraRig.snapTo(this.player);
 
@@ -172,6 +201,7 @@ export class ArenaScene extends Phaser.Scene {
         room: this.room,
         net: this.net,
         onLeave: () => this._leaveMatch(),
+        onReset: () => this._resetPractice(),
       });
       this.killFeed = new KillFeed(this);
       this.scoreboard = new Scoreboard(this);
@@ -182,6 +212,14 @@ export class ArenaScene extends Phaser.Scene {
       // Seed the weapon readout so it is correct from frame one rather than
       // only after the first weapon switch.
       this.hud.setWeapon(this.weapon);
+      // S14.1: adopt the selection the server confirmed in the LOBBY (it rode
+      // in on `character_update` before the match). The in-match echo
+      // re-applies it if it changes mid-match; without this the HUD chip and
+      // the player tint would stay blank until the first echo.
+      {
+        const sel = this.net.state.character;
+        this._applyCharacter(sel?.character || STARTER_CHARACTER, sel?.variant || null);
+      }
       this._bindWeaponSwitch();
     } else {
       this.hud = null;
@@ -194,6 +232,16 @@ export class ArenaScene extends Phaser.Scene {
     this.events.on('update', this._update, this);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._shutdown());
+
+    // --- First-time in-arena training (once per device) -----------------
+    // Launched ONLY after server-confirmed room membership (this.room.roomId
+    // is set from `room_joined`), never on the offline `?skipLobby` fallback.
+    // Runs as an overlay via launch() so the match continues behind the dim;
+    // completion/skip marks localStorage so respawns and re-entries never
+    // re-trigger it (H reopens it on demand).
+    if (this.room?.roomId) {
+      this.time.delayedCall(600, () => this._launchTutorial());
+    }
 
     // Phase 5 systems are created BEFORE the network is bound: a `match_state`
     // or `entity_death` can arrive the instant we subscribe, and the handlers
@@ -230,15 +278,30 @@ export class ArenaScene extends Phaser.Scene {
       // A teammate is not a valid target in practice mode.
       if (friendly && entity.isBot === false && this._myTeam() === entity.team) continue;
 
+      // ONE coordinate space. The predicted shot originates at `player.x/y`,
+      // which is sprite-centre space, so a target read out of an authoritative
+      // source (a snapshot sample, or the roster row) must be converted from the
+      // server's FEET space before it is compared against it. Mixing the two —
+      // snapshot path giving feet-space y and actor path giving centre-space y —
+      // put hits at two different heights depending on which branch produced
+      // the number. See src/shared/coords.js.
+      const fromSample = sample ? authoritativeToSprite(sample) : null;
+      const fromRoster = authoritativeToSprite(entity);
+
       out.push({
         id: entity.id,
-        x: sample?.x ?? actor?.sprite.x ?? entity.x,
-        y: sample?.y ?? actor?.sprite.y ?? entity.y,
+        x: fromSample?.x ?? actor?.sprite.x ?? fromRoster.x,
+        y: fromSample?.y ?? actor?.sprite.y ?? fromRoster.y,
         hp: actor?.hp ?? entity.hp,
         maxHp: entity.maxHp,
-        alive: actor ? actor.alive : true,
+        alive: actor ? actor.alive : Boolean(entity.alive ?? true),
         isBot: entity.isBot,
         team: entity.team,
+        // Spawn protection is authoritative and travels on the snapshot. Local
+        // hit prediction must refuse a target the server will ignore, or the
+        // player sees a hitmarker and a damage number for a shot that never
+        // counts — "invulnerable-looking enemies" by the opposite mistake.
+        protected: Boolean(sample?.protected),
       });
     }
 
@@ -257,28 +320,37 @@ export class ArenaScene extends Phaser.Scene {
 
   /**
    * Tab shows the scoreboard while held; tapping the hint opens it briefly.
+   * Each binding stores a REAL unsubscribe wrapper (Phaser's `.on` returns the
+   * emitter, not a function — storing emitters made the arena tear-down crash
+   * inside the scene-manager queue.
    * @returns {void}
    */
   _bindScoreboardToggle() {
     const keyboard = this.input.keyboard;
     if (!keyboard) return;
 
+    const onKeydown = (event) => {
+      if (event.code !== 'Tab') return;
+      // Tab would otherwise move browser focus out of the canvas.
+      event.preventDefault?.();
+      this.scoreboard.render({
+        entities: [...this.room.players, ...this.room.bots],
+        mode: this.room.mode,
+        localId: this.localId,
+        scores: this.scores,
+      });
+      this.scoreboard.show();
+    };
+
+    const onKeyup = (event) => {
+      if (event.code === 'Tab') this.scoreboard.hide();
+    };
+
+    keyboard.on('keydown', onKeydown);
+    keyboard.on('keyup', onKeyup);
     this._offs.push(
-      keyboard.on('keydown', (event) => {
-        if (event.code !== 'Tab') return;
-        // Tab would otherwise move browser focus out of the canvas.
-        event.preventDefault?.();
-        this.scoreboard.render({
-          entities: [...this.room.players, ...this.room.bots],
-          mode: this.room.mode,
-          localId: this.localId,
-          scores: this.scores,
-        });
-        this.scoreboard.show();
-      }),
-      keyboard.on('keyup', (event) => {
-        if (event.code === 'Tab') this.scoreboard.hide();
-      }),
+      () => keyboard.off('keydown', onKeydown),
+      () => keyboard.off('keyup', onKeyup),
     );
   }
 
@@ -364,7 +436,7 @@ export class ArenaScene extends Phaser.Scene {
           rand.between(0, GAME_CONFIG.height),
           size,
           size,
-          0xffffff,
+          ART.stars.near,
           rand.realInRange(0.15, starAlpha),
         )
         .setDepth(-9);
@@ -377,30 +449,88 @@ export class ArenaScene extends Phaser.Scene {
   /** @type {Array<() => void>} Socket unsubscribe handles. */
   _offs = [];
   /**
+   * The authoritative map, from the liveest source available.
+   *
+   * The stream only knows the map if `room_joined` / `match_state` fired AFTER
+   * this scene subscribed — but the normal path is the opposite: the lobby
+   * adopts the manifest, THEN starts this scene, so the events are long gone
+   * and the stream's map slot is empty. The adopted room state (`room.raw.map`,
+   * the verbatim server payload) is the fallback that makes arena entry
+   * correct. Without it the scene builds an EMPTY world (no floor, no
+   * platforms): the player falls to the physics edge while the server sim
+   * rests on the real floor, and reconciliation ping-pongs between the two —
+   * the perpetual "bounce" with no input.
+   * @returns {object|null} Wire map, or null when nothing has arrived yet.
+   */
+  _authoritativeMap() {
+    return selectWireMap(this.stream?.getMap?.() ?? null, this.net?.state?.room ?? null);
+  }
+
+  /**
+   * Construct the camera rig. Split out so `_buildWorldFromServer` can ensure
+   * one exists before it pushes authoritative bounds onto it (world building
+   * happens earlier in create() than the rig used to be created), without
+   * creating a second rig later on.
+   *
+   * @returns {void}
+   */
+  _createCameraRig() {
+    this.cameraRig = new ThirdPersonCamera(this, {
+      camera: this.cameras.main,
+      worldBounds: { x: 0, y: 0, width: GAME_CONFIG.width, height: GAME_CONFIG.height },
+    });
+  }
+
+  /**
    * Build the playable world from the SERVER's map payload.
    *
    * Phase 5 made map geometry authoritative: platforms, hazard zones, low-gravity
    * volumes and deposit stations all arrive in `room_joined.map`. Collision here
    * must match the sim exactly, so nothing is computed locally.
    *
-   * Safe to call before the map arrives — it simply builds nothing, and
-   * `room_joined` calls it again. The physics bounds are derived from the
-   * server's own `bounds` when present so the arena edge cannot disagree with it
-   * either.
-   *
+   * Safe to call before the map arrives — it simply builds nothing, and a late
+   * `room_joined` / `match_state` map rebuilds it then (re-seating the player
+   * collider).
    * @returns {void}
    */
   _buildWorldFromServer() {
-    const wire = this.stream?.getMap?.() ?? null;
+    const wire = this._authoritativeMap();
     this.mapDef = mapFromWire(wire, this.net.state.room?.mapId);
     this.world.build(this.mapDef);
 
     const b = this.mapDef.bounds;
     if (b) {
       this.physics.world.setBounds(b.minX, b.ceilingY, b.maxX - b.minX, b.groundY - b.ceilingY);
+    // Bounds the CAMERA too. The physics world used to be the only thing
+    // bounded, so the rig had nothing to clamp against: the framing could drift
+    // arbitrarily far off the arena and there was no guarantee the player was
+    // still on screen after a long run at high speed. The rig grows this into
+    // whatever overscan the current viewport needs (see
+    // ThirdPersonCamera._boundsPadding), so it stays bounded AND keeps the
+    // off-centre anchor live.
+    //
+    // The rig is normally constructed later in create(), so create it here if it
+    // is genuinely missing — calling into it while undefined would throw during
+    // world setup and the arena would never start.
+    if (!this.cameraRig) this._createCameraRig();
+    this.cameraRig.setWorldBounds({
+      x: b.minX, y: b.ceilingY, width: b.maxX - b.minX, height: b.groundY - b.ceilingY,
+    });
     }
 
     this.platforms = this.world._static.filter((o) => o.body);
+
+    // A rebuilt world is a NEW platform array: re-seat the player collider or
+    // the player keeps colliding with the old (possibly empty) set.
+    if (this.player) {
+      if (this._playerCollider) {
+        this.physics.world.removeCollider(this._playerCollider);
+        this._playerCollider = null;
+      }
+      if (this.platforms.length) {
+        this._playerCollider = this.player.registerCollisions(this.platforms, this.physics);
+      }
+    }
   }
 
   /**
@@ -410,9 +540,14 @@ export class ArenaScene extends Phaser.Scene {
    *   the match roster when there is one, else the gray-box default).
    * @returns {void}
    */
-  _createPlayer(spawn) {
+  _createPlayer(requestedSpawn) {
+    const spawn = requestedSpawn ?? resolveLocalSpawn(this.room, this.localId, this.mapDef);
+    // The manifest hands back FEET-SPACE angles (what the server simulated us
+    // into), and the sprite is a centre-origin body hanging below its centre —
+    // convert once, here, not in three separate places.
     const x = spawn?.x ?? this.mapDef.spawn.x;
-    const y = spawn?.y ?? this.mapDef.spawn.y;
+    const feetY = spawn?.y ?? this.mapDef.spawn.y;
+    const y = feetToCentre(feetY);
 
     // Aim indicator: a small marker that orbits the player and rotates to
     // point at the cursor. In Phase 2 this becomes the actual weapon muzzle.
@@ -424,8 +559,13 @@ export class ArenaScene extends Phaser.Scene {
     this.player = new Player(this, x, y);
     this.player.attachMuzzle(this.muzzle);
 
-    // Collide the player against the platforms (floor included).
-    this.player.registerCollisions(this.platforms, this.physics);
+    // Collide the player against the platforms (floor included). The collider
+    // is owned here (not just fired-and-forgotten) so a late authoritative
+    // map rebuild can re-seat it — see _buildWorldFromServer.
+    this._playerCollider = null;
+    if (this.platforms.length) {
+      this._playerCollider = this.player.registerCollisions(this.platforms, this.physics);
+    }
 
     // Optional: press D in the browser console for physics body overlays.
     if (typeof window !== 'undefined' && window.location.search.includes('debug')) {
@@ -441,10 +581,10 @@ export class ArenaScene extends Phaser.Scene {
    */
   _createHudHint() {
     this.add
-      .text(16, 14, 'A / D or ← →  move     SPACE / W / ↑  jump     mouse  aim     CLICK  shoot', {
+      .text(16, 14, 'A / D or ← →  move     SPACE / W / ↑  jump     mouse  aim     LMB / RMB  shoot · mop     Q  swap weapon', {
         fontFamily: 'Segoe UI, system-ui, sans-serif',
         fontSize: '15px',
-        color: '#7fe7ff',
+        color: COMBAT_FX.spawnMark,
       })
       .setDepth(100)
       .setAlpha(0.85);
@@ -457,7 +597,7 @@ export class ArenaScene extends Phaser.Scene {
         .text(16, 36, '', {
           fontFamily: 'Consolas, ui-monospace, monospace',
           fontSize: '13px',
-          color: '#ffd166',
+          color: COMBAT_FX.practiceNotice,
         })
         .setDepth(100)
         .setAlpha(0.9);
@@ -519,9 +659,37 @@ export class ArenaScene extends Phaser.Scene {
       if (event?.repeat) return;
       this.settingsMenu?.toggle();
     });
+    this._offs.push(() => kb.off('keydown-ESC'));
+
+    // H reopens the practice training overlay on demand (it auto-shows only
+    // once, on the first server-confirmed entry).
+    const onH = (event) => {
+      if (event?.repeat) return;
+      this._launchTutorial({ demanded: true });
+    };
+    kb.on('keydown-H', onH);
+    this._offs.push(() => kb.off('keydown-H', onH));
 
     // TAB is already the scoreboard; the Phase 2 harness expects TAB there, so
     // the scoreboard keeps TAB and settings use ESC alone to avoid a conflict.
+  }
+
+  /**
+   * Launch the training overlay on top of the arena.
+   * @param {{demanded?: boolean}} [opts] - demanded = explicit H press, bypasses the seen flag.
+   * @returns {void}
+   */
+  _launchTutorial({ demanded = false } = {}) {
+    if (this.scene.isActive('FirstTimeTutorial')) return;
+    if (!demanded && loadTutorialSeen() !== false) return;
+    try {
+      if (!this.scene.get('FirstTimeTutorial')) {
+        this.scene.add('FirstTimeTutorial', FirstTimeTutorial, false);
+      }
+      this.scene.launch('FirstTimeTutorial');
+    } catch {
+      // A broken tutorial must never take the arena down with it.
+    }
   }
 
   /**
@@ -543,6 +711,7 @@ export class ArenaScene extends Phaser.Scene {
         this.audio?.suspendForBackground();
         this._fireHeld = false; // never resume holding the trigger
         this._firePressed = false;
+        this._meleePressed = false; // ...nor swinging the mop
       } else {
         this.audio?.resumeFromBackground();
       }
@@ -667,6 +836,7 @@ export class ArenaScene extends Phaser.Scene {
     if (this.settingsMenu?.visible) {
       this.hud?.update(time, delta);
       this.fx?.update();
+      this.aimRay?.setVisible(false);
       return;
     }
 
@@ -710,8 +880,12 @@ export class ArenaScene extends Phaser.Scene {
     // `match_time` event), so this is a display counter the server still overrules.
     if (inMatch) this._updateMatchClock();
 
+    // 5e. Practice pacing notice (display only; the server enforces it).
+    if (inMatch) this._updatePracticeNotice();
+
     // 6. Combat feedback + HUD.
     if (inMatch) this._updateCombat();
+    this._updateAimRay(inMatch);
     this.fx?.update();
     this.hud?.update(time, delta);
     this._updateNetDebug();
@@ -768,7 +942,9 @@ export class ArenaScene extends Phaser.Scene {
 
     // Remember where we believed we were for this input, so when the server
     // echoes the authoritative result we can measure the disagreement.
-    this._sentPositions.set(seq, { x: this.player.x, y: this.player.y });
+    // Stored in FEET space to match the snapshot it will be compared against.
+    const feet = spriteToAuthoritative(this.player);
+    this._sentPositions.set(seq, { x: feet.x, y: feet.y });
 
     // Bound the history: only recent inputs can still be in flight.
     if (this._sentPositions.size > RECONCILIATION.inputHistorySize) {
@@ -800,12 +976,18 @@ export class ArenaScene extends Phaser.Scene {
 
     // Compare against the position we PREDICTED at that input (not our live
     // position) — that is what keeps round-trip latency out of the error.
-    const sent = this._sentPositions.get(auth.seq) ?? { x: this.player.x, y: this.player.y };
+    // Both sides must be in the SAME space when we do: the snapshot is
+    // FEET-SPACE (authoritative) and `_sentPositions` therefore stores our
+    // prediction converted to feet-space too. Comparing a feet-space snapshot
+    // against a centre-space prediction is what produced a constant, never
+    // decaying 25 px vertical error (see src/shared/coords.js).
+    const sent = this._sentPositions.get(auth.seq) ?? spriteToAuthoritative(this.player);
     const result = this.prediction.reconcile({ x: auth.x, y: auth.y, clientX: sent.x, clientY: sent.y });
 
     // A 'decay' result needs no action here: step() above applies it gradually.
     if (result.action === 'snap') {
-      this.player.setPosition(auth.x, auth.y);
+      const p = authoritativeToSprite(auth);
+      this.player.setPosition(p.x, p.y);
       this.prediction.reset();
     }
   }
@@ -855,7 +1037,12 @@ export class ArenaScene extends Phaser.Scene {
 
       const step = (NET_TICK.minInputIntervalMs / 1000) * BOT_SPEED;
       const x = Phaser.Math.Clamp(actor.sprite.x + intent.moveX * step, 40, GAME_CONFIG.width - 40);
-      const y = actor.sprite.y;
+      // The snapshot buffer is the SAME one the server fills, so it is
+      // FEET-SPACE. Writing the local brain's sprite-centre y straight in would
+      // put these fallback bots 25 px off the authoritative ones they are
+      // standing next to. (The tracer below stays in sprite space — it is a
+      // pure visual, not an authoritative position.)
+      const y = centreToFeet(actor.sprite.y);
 
       this.stream.snapshots.push({
         id: bot.id,
@@ -874,7 +1061,7 @@ export class ArenaScene extends Phaser.Scene {
         const ox = x + intent.moveX * 14;
         const endX = ox + Math.cos(intent.aimAngle) * COMBAT.range * 0.7;
         const endY = y + Math.sin(intent.aimAngle) * COMBAT.range * 0.7;
-        this.fx?.tracer(ox, y, endX, endY, 0xff9f43);
+        this.fx?.tracer(ox, y, endX, endY, COMBAT_FX.damageIncoming);
       }
     }
   }
@@ -884,12 +1071,23 @@ export class ArenaScene extends Phaser.Scene {
    * @returns {void}
    */
   _updateCombat() {
-    if (this.player.dead || !this._fireHeld) return;
+    // The press edge is sticky: a click whose down+up both land between two
+    // frames must still fire once. Without this, quick taps (shorter than one
+    // frame) are silently dropped and the gun feels broken on fast machines.
+    // Melee first, and BEFORE the fire guard: a swing can be requested while
+    // the weapon is on cooldown or not held, so gating it on `_fireHeld` would
+    // silently swallow every mop swing the player asked for.
+    if (!this.player.dead && (this._meleePressed || this.inputManager.intent.meleePressed)) {
+      this._sendMelee();
+    }
+
+    if (this.player.dead || (!this._fireHeld && !this._firePressed)) return;
 
     const angle = this.player.getAimAngle();
-    const shot = this.combat.tryFire(this._fireHeld, this._firePressed);
+    const pressed = this._firePressed;
+    this._firePressed = false; // consume the edge exactly once
+    const shot = this.combat.tryFire(this._fireHeld || pressed, pressed);
     if (!shot.fired) return;
-    this._firePressed = false;
 
     const weapon = this.weapon;
     const ox = this.player.x + Math.cos(angle) * AIM.muzzleLength;
@@ -932,13 +1130,39 @@ export class ArenaScene extends Phaser.Scene {
         // Deliberately a different, quieter cue: the player should be able to
         // tell "maybe" from "yes" with their eyes off the screen.
         this.audio?.play('hitMarkerPredicted');
-        this.fx?.damageNumber(hx, hy - 24, shot.damage, { color: '#9fb6cc' });
+        this.fx?.damageNumber(hx, hy - 24, shot.damage, { color: COMBAT_FX.damagePredicted });
         if (actor) this.tweens.add({ targets: actor.sprite, alpha: 0.55, duration: 60, yoyo: true });
       };
 
       if (delay > 0) this.time.delayedCall(delay, showPrediction);
       else showPrediction();
     }
+  }
+
+  /**
+   * Refresh the aiming ray from the CURRENT muzzle + aim angle.
+   *
+   * Uses exactly the values the weapon fires with — `player.getAimAngle()` and
+   * the same `AIM.muzzleLength` barrel offset — so the sight always agrees with
+   * the barrel. Length is the equipped weapon's real projectile range (clamped
+   * to the hitscan prediction cap), so the guide never promises a reach the
+   * round cannot cover.
+   *
+   * Hidden while dead, spectating, tabbed away, or before the room exists.
+   *
+   * @param {boolean} inMatch
+   * @returns {void}
+   */
+  _updateAimRay(inMatch) {
+    if (!this.aimRay) return;
+    const angle = this.player.getAimAngle();
+    this.aimRay.update({
+      x: this.player.x + Math.cos(angle) * AIM.muzzleLength,
+      y: this.player.y + Math.sin(angle) * AIM.muzzleLength,
+      angle,
+      range: Math.min(this.weapon.range, COMBAT.range),
+      visible: inMatch && !this.player.dead && !this.spectator?.mode && !this._pageHidden,
+    });
   }
 
   /**
@@ -962,6 +1186,32 @@ export class ArenaScene extends Phaser.Scene {
    * @param {object} weapon
    * @returns {void}
    */
+  /**
+   * Apply a server-confirmed character selection to the LOCAL player (S14.1).
+   *
+   * The server has already validated the id and owns every stat that matters;
+   * this is presentation only — a distinct tint so the roster reads at a glance.
+   * It deliberately does NOT touch speed, damage or health: those are the
+   * server's, and re-deriving them here would reintroduce the prediction/authority
+   * drift the shared tuning module exists to prevent.
+   *
+   * @param {string} characterId
+   * @param {string|null} [variantId]
+   * @returns {void}
+   */
+  _applyCharacter(characterId, variantId) {
+    const c = CHARACTERS[characterId] || CHARACTERS[STARTER_CHARACTER];
+    this.character = c;
+    this.loadoutVariant = variantId || null;
+    const tint = CHARACTER_TINTS[c.id] || PALETTE.cyan;
+    // Local player + any actor sharing this id (only we can be this character,
+    // but the guard keeps a future spectated-self path safe).
+    this.player?.setTint(tint);
+    this.aimRay?.g?.setAlpha(0.42);
+    if (this.hud?.setCharacter) this.hud.setCharacter(c);
+    this.toasts?.info?.(`${c.name} online`);
+  }
+
   setWeapon(weapon) {
     this.weapon = weapon;
     this.combat.setWeapon(weapon);
@@ -981,7 +1231,9 @@ export class ArenaScene extends Phaser.Scene {
   _bindWeaponSwitch() {
     const key = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     if (!key) return;
-    this._offs.push(key.on('down', () => this.cycleWeapon()));
+    const onQ = () => this.cycleWeapon();
+    key.on('down', onQ);
+    this._offs.push(() => key.off('down', onQ));
   }
 
   /**
@@ -989,27 +1241,62 @@ export class ArenaScene extends Phaser.Scene {
    *
    * Reading `pointer.isDown` every frame would also work, but Phaser exposes no
    * "just pressed" edge on the pointer itself, which the burst-fire rule needs.
+   * The input plugin is the only object that carries real pointer events, so
+   * the Phaser Pointer (which exposes no `on`) is never touched directly.
    * @returns {void}
    */
   _bindFireInput() {
     const pointer = this.input.activePointer;
     if (!pointer) return;
 
-    pointer.on('down', (p) => {
+    const onPointerDown = (p) => {
+      // Right button swings the mop; the left button fires the weapon.
+      if (p.rightButtonDown()) {
+        this._meleePressed = true;
+        return;
+      }
       if (p.rightButtonReleased()) return; // left button only
       this._fireHeld = true;
       this._firePressed = true;
-    });
-    pointer.on('up', () => {
+    };
+    const onPointerUp = (p) => {
       this._fireHeld = false;
-    });
+    };
+
+    this.input.on('pointerdown', onPointerDown);
+    this.input.on('pointerup', onPointerUp);
 
     // Losing focus mid-hold would otherwise leave the gun firing forever.
-    this._offs.push(
-      this.game.events.on(Phaser.Core.Events.BLUR, () => {
-        this._fireHeld = false;
-      }),
-    );
+    const onBlur = () => {
+      this._fireHeld = false;
+    };
+    this.game.events.on(Phaser.Core.Events.BLUR, onBlur, this);
+    this._offs.push(() => this.game.events.off(Phaser.Core.Events.BLUR, onBlur, this));
+  }
+
+  /**
+   * Ask the authoritative server to swing the mop.
+   *
+   * The server owns the whole swing: cooldown, arc and knockback (see the MELEE
+   * row in src/combat/weapons.js). All this does is report the intent with the
+   * direction we believe we face; there is no local melee simulation to predict
+   * or reconcile, which is why the mop was unreachable for so long — nothing on
+   * the client side ever asked for it.
+   *
+   * @returns {void}
+   */
+  _sendMelee() {
+    this._meleePressed = false;
+    if (!this.player || this.player.dead) return;
+    const angle = this.player.getAimAngle();
+    const dir = Math.cos(angle) >= 0 ? 1 : -1;
+    this.net.socket.emit(NET_EVENTS.PLAYER_MELEE, {
+      direction: dir,
+      timestamp: Date.now(),
+    });
+    // Local feedback only (a swing flash). Hits are reported authoritatively.
+    this.audio?.play('weaponFire', { gain: 0.4, rate: 0.6 });
+    this.fx?.muzzleFlash(this.player.x, this.player.y, angle, 1.2);
   }
 
   /**
@@ -1055,6 +1342,10 @@ export class ArenaScene extends Phaser.Scene {
     this.player.setPosition(spawn.x, spawn.y);
     this.player.setAlpha(1);
     this.prediction.reset();
+    // Fresh body, fresh input: a jump held through death must not auto-fire on
+    // spawn, and a buffered pre-death press must not survive the teleport.
+    this.player.resetJump();
+    this.inputManager?.reset();
     this.hud?.setHealth(this.player.hp, maxHp ?? HEALTH.defaultMax);
     this.hud?.hideDeathOverlay();
 
@@ -1198,8 +1489,35 @@ export class ArenaScene extends Phaser.Scene {
         this.fx?.hitMarkerFlash(true, fatal);
         this.audio?.play('hitMarker');
         if (damage > 0) {
-          this.fx?.damageNumber(hx, hy - 24, damage, { color: '#ffffff', crit: damage > 30 });
+          this.fx?.damageNumber(hx, hy - 24, damage, { color: COMBAT_FX.damageConfirmed, crit: damage > 30 });
         }
+      }),
+    );
+
+    // Other players' shots: the server re-broadcasts every validated shot on
+    // `player_shoot`, and MatchStream republishes it as 'shot'. Without a
+    // listener nothing consumed it, so other shooters were completely invisible
+    // in this client — you could be shot by a gun you never saw fire. We draw
+    // their tracer only (our own is already drawn by local prediction the
+    // instant we click, with the right colour and no double-fire).
+    this._offs.push(
+      this.stream.on('shot', (shot) => {
+        if (!shot || shot.isSelf) return;
+        if (shot.x < 1 && shot.y < 1) return; // server had no origin to report
+        // The server reports the authoritative muzzle in FEET space; the client
+        // draws in sprite-centre space (see src/shared/coords.js).
+        const muzzle = { x: shot.x, y: feetToCentre(shot.y) };
+        const weapon = weaponFor(shot.weaponId);
+        const ox = muzzle.x + Math.cos(shot.angle) * SHARED_WEAPON.muzzleReachPx;
+        const oy = muzzle.y + Math.sin(shot.angle) * SHARED_WEAPON.muzzleReachPx;
+        this.fx?.tracer(
+          ox,
+          oy,
+          ox + Math.cos(shot.angle) * weapon.range,
+          oy + Math.sin(shot.angle) * weapon.range,
+          weapon.tracerColor,
+        );
+        this.audio?.play('weaponFire', { gain: 0.3 });
       }),
     );
 
@@ -1283,7 +1601,16 @@ export class ArenaScene extends Phaser.Scene {
     // Phase 5: scrap tokens ride every snapshot in full (static pickups, no
     // interpolation). Reconciled by id so a bobbing token does not jitter.
     this._offs.push(
-      this.stream.on('snapshot', ({ tokens }) => this.world?.syncTokens(tokens ?? [])),
+      this.stream.on('snapshot', ({ tokens, mimics, control }) => {
+        this.world?.syncTokens(tokens ?? []);
+        // S14.4: mimics arrive on the same authoritative snapshot as tokens.
+        this.world?.syncMimics(mimics ?? []);
+        // S14.5: the objective bar is server state, rendered — never decided here.
+        this.world?.syncControlPoint(control ?? null);
+        // The HUD objective line reads the SAME snapshot field, so the top-of
+        // screen text and the world's capture bar can never disagree.
+        this.hud?.setControl(control ?? null);
+      }),
     );
 
     // Our own satchel count rides the snapshot (`entities[].carried`). Read it
@@ -1306,6 +1633,51 @@ export class ArenaScene extends Phaser.Scene {
           this.audio?.play(kind === 'pickup' ? 'uiClick' : 'respawn', { bus: 'ui' });
         }
         this.hud?.setScrap(kind === 'deposit' ? 0 : total, kind === 'deposit' ? total : null);
+      }),
+    );
+
+    // S14.3 orbital shifts: the telegraph warns, the commit moves the slabs.
+    this._offs.push(
+      this.stream.on('shift', (shift) => {
+        if (!shift) return;
+        if (shift.type === 'warning') {
+          this.feedback?.show('objective', { sub: 'ORBITAL SHIFT INBOUND — SALVAGE IS MOVING' });
+          this.audio?.play('countdownBeep');
+        } else if (shift.type === 'shift' && Array.isArray(shift.platforms)) {
+          // The server has already moved its collision geometry; this syncs the
+          // slabs the player SEES to the same positions.
+          this.world?.applyPlatformShift(shift.platforms);
+          this._shake(null, null, { ms: 160, amount: 3 });
+        }
+      }),
+      this.stream.on('character', ({ character, variant }) => {
+        if (character) this._applyCharacter(character, variant);
+      }),
+      // S14.4: the decoy revealing itself is a scare beat — sound + a short
+      // camera kick sell it, but no screen-filling flash (that would punish a
+      // player for being baited, which is the opposite of the intent).
+      this.stream.on('mimic', (mk) => {
+        if (!mk) return;
+        if (mk.kind === 'arm' || mk.kind === 'lunge') {
+          this.audio?.play('mimicReveal');
+          this._shake(null, null, { ms: 140, amount: 4 });
+        } else if (mk.kind === 'bite' && mk.isSelf) {
+          this.audio?.play('mimicBite');
+        } else if (mk.kind === 'kill' && mk.isSelf) {
+          this.audio?.play('medal');
+          this.feedback?.show('combo', { text: '+7 SALVAGE' });
+        }
+      }),
+      // S14.5: a capture is a team beat — announce it, and shake only if it was
+      // the local player's team that took it.
+      this.stream.on('objective', (o) => {
+        if (!o || o.kind !== 'capture') return;
+        const mine = this.player?.team && o.team === this.player.team;
+        this.audio?.play(mine ? 'medal' : 'countdownBeep');
+        this.feedback?.show('objective', {
+          sub: mine ? `${o.team.toUpperCase()} SECURED THE PLATFORM` : 'PLATFORM LOST',
+        });
+        if (mine) this._shake(null, null, { ms: 180, amount: 5 });
       }),
     );
 
@@ -1356,6 +1728,13 @@ export class ArenaScene extends Phaser.Scene {
     // visibly stutter.
     this._offs.push(
       this.net.on('match-ready', ({ room }) => {
+        // A DIFFERENT room while already in the arena (practice reset):
+        // restart cleanly so actors/HUD/world rebuild from the new manifest
+        // instead of stacking a second match onto this one.
+        if (room?.roomId && this.room?.roomId && room.roomId !== this.room.roomId) {
+          this.scene.restart();
+          return;
+        }
         this._startMatchClock(room);
         // Phase 5: the authoritative map arrives with the manifest. Rebuilding
         // here (rather than in create) is what makes a LATE JOIN correct — the
@@ -1431,17 +1810,73 @@ export class ArenaScene extends Phaser.Scene {
 
   /**
    * Voluntary exit: tell the server we left the room, then return to the
-   * lobby. The server answers with `match_end`, which also triggers the
-   * `match-ended` handler above — doing both would double-start the scene,
-   * so we simply let the server drive the transition.
+   * lobby — but ONLY after the server confirms. Navigating on an unconfirmed
+   * leave strands the server-side seat: the next queue is then rejected with
+   * ALREADY_IN_MATCH while the lobby insists everything is fine. On failure
+   * the notice (set by the network layer) explains the retry and we STAY, so
+   * the player can try again instead of being parked in a broken lobby.
+   * @returns {Promise<void>}
+   */
+  async _leaveMatch() {
+    if (this._leaving) return;
+    this._leaving = true;
+    try {
+      const res = await this.net.leaveRoom();
+      if (res?.ok === false) return; // notice already shown; stay for retry
+      // Room references are confirmed-clear: drop stale input and go home.
+      this.inputManager?.reset();
+      if (this.scene.isActive()) this.scene.start(SCENES.LOBBY);
+    } finally {
+      this._leaving = false;
+    }
+  }
+
+  /**
+   * Reset the practice session with the same setup: leave the current room,
+   * then re-queue. The server builds a FRESH room (fresh bots, fresh grace),
+   * and `match-ready` with the new room id restarts this scene — no app
+   * refresh, no stacked matches. Failures surface via the usual notice path
+   * and leave the current match untouched.
+   * @returns {Promise<void>}
+   */
+  async _resetPractice() {
+    if (this._resetting || this.net.state.busy) return;
+    if (this.room?.mode !== 'bot_practice') return;
+    this._resetting = true;
+    try {
+      await this.net.leaveRoom();
+      if (this.net.state.room) return; // leave failed; notice already shown
+      this.net.setMode('bot_practice');
+      await this.net.queueJoin();
+      // Success lands via match-ready → scene.restart. Failure leaves us here
+      // with the notice explaining why (the old room is already gone, so the
+      // HUD Leave path still returns to the lobby).
+    } finally {
+      this._resetting = false;
+    }
+  }
+
+  /**
+   * Practice pacing notice: grace countdown while pacified, passive label for
+   * Controls Practice. Display only — the server enforces the behaviour.
    * @returns {void}
    */
-  _leaveMatch() {
-    this.net.leaveRoom();
-    // Safety net: if the server is unreachable, still get out of the arena.
-    this.time.delayedCall(1200, () => {
-      if (this.scene.isActive() && !this.net.state.room) this.scene.start(SCENES.LOBBY);
-    });
+  _updatePracticeNotice() {
+    if (this.room?.mode !== 'bot_practice') {
+      this.hud?.setPracticeNotice('');
+      return;
+    }
+    if (this.room.passive) {
+      this.hud?.setPracticeNotice('PASSIVE TARGETS — bots never shoot');
+      return;
+    }
+    const until = Number(this.room.graceUntil) || 0;
+    const remaining = until - Date.now();
+    if (remaining > 0) {
+      this.hud?.setPracticeNotice(`CALM START — bots hold fire ${Math.ceil(remaining / 1000)}s`);
+    } else {
+      this.hud?.setPracticeNotice('');
+    }
   }
 
   /**
@@ -1455,7 +1890,13 @@ export class ArenaScene extends Phaser.Scene {
     // Order matters: stop consuming world events BEFORE dropping the buffers,
     // or a late snapshot could repopulate state we are tearing down.
     this.stream?.stop();
-    this._offs.forEach((off) => off());
+    // `_offs` may contain legacy Phaser emitters (`keyboard.on()`/`key.on()`
+    // return the emitter, not an unsubscribe function). Call only real
+    // functions so a teardown can never abort inside the scene-manager
+    // queue and orphan the next scene (the "Starting match…" stall).
+    this._offs.forEach((off) => {
+      if (typeof off === 'function') off();
+    });
     this._offs = [];
 
     this.actors.forEach((actor) => actor.destroy());
@@ -1486,6 +1927,8 @@ export class ArenaScene extends Phaser.Scene {
     this.medals?.destroy();
     this.medals = null;
 
+    this.aimRay?.destroy();
+    this.aimRay = null;
     this.fx?.destroy();
     this.fx = null;
     this.killFeed?.destroy();
@@ -1498,6 +1941,26 @@ export class ArenaScene extends Phaser.Scene {
     this.feedback = null;
     this.hud?.destroy();
     this.hud = null;
+
+    // The rig holds a reference to THIS scene's main camera. Phaser reuses the
+    // scene instance across restarts but rebuilds its cameras, so a rig kept
+    // here would still point at the previous match's destroyed camera — and the
+    // next `_buildWorldFromServer` would call setBounds() on a null internals
+    // object (`TypeError: ... reading 'setTo'`), killing the second match before
+    // it ever rendered. Drop it so create() builds a fresh one (line 195/516).
+    this.cameraRig = null;
+
+    // World + player are scene-owned and rebuilt from the authoritative map on
+    // every entry. Leaving them behind would let a late snapshot or a respawn
+    // write into the previous match's destroyed bodies.
+    this.world?.clear?.();
+    this.world = null;
+    this.player = null;
+    this.platforms = null;
+    this.room = null;
+    this.localId = null;
+    this.scores = null;
+    this.teamScores = null;
   }
 }
 

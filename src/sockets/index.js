@@ -1,443 +1,76 @@
 /**
- * Astral Zero — Socket.io wiring (PHASE 3).
+ * Solar Sentinel — Socket.io initialization.
  * ============================================================
- * What this file DOES:
- *  - Greets each connecting Phaser client (`connected` hello).
- *  - Phase 1/2 COMPAT: player_join/leave, party, friends, queue, room
- *    handlers keep their exact ack + broadcast behavior (old smoke tests
- *    target LOBBY sockets — no room — and those paths are byte-identical).
- *  - Phase 3 AUTHORITY (in-room senders only):
- *      player_input  → validated intent store (primary channel)
- *      player_move   → legacy bridge: position IGNORED, velocity hint → intent
- *      player_shoot  → validated trigger (server spawns the shell + tracer)
- *      player_melee  → validated swing (server arc-tests)
- *      player_health_update → server-ONLY now (client sends rejected)
- *    Out-of-room senders keep Phase 2 global-relay behavior so single-arena
- *    dev builds and old smoke tests keep passing untouched.
- *  - Identity + disconnect fan-out: unchanged from Phase 2, plus input
- *    cleanup (no phantom steering after a drop).
- *
- * What this file DOES NOT do (Phase 4+):
- *  - ❌ No lag compensation / client prediction reconciliation on server.
- *  - ❌ No raycast LOS (distance + height check only).
- *  - ❌ No persistence beyond in-memory Maps.
- *
- * Frontend engineer: implement against `websocket_events.md`
- * (§13–§15 are new in 1.2.0-phase3; §1–§12 unchanged).
+ * Sets up the NASA orbital data loop and socket event handlers.
  */
 
-import config from '../server-config.js';
-import { sanitizeName, logSafe } from '../players/identity.js';
-import { allow as allowEvent, resetSocket as resetEventLimits, limitsNow } from './limits.js';
-import { SOCKET_EVENTS, SOCKET_EVENTS_VERSION } from './events.js';
-import {
-  upsertOnJoin,
-  removeBySocket,
-  getBySocket,
-  setPartyCode,
-  ensureProfile,
-  activeCharacterFor,
-} from '../players/playerStore.js';
-import { listFriends } from '../friends/friendManager.js';
-import { handleDisconnect as partyDisconnect, toPublic as partyToPublic } from '../parties/partyManager.js';
-import {
-  initMatchmaking,
-  handleDisconnect as queueDisconnect,
-  leaveRoom,
-} from '../matchmaking/matchmakingManager.js';
-import { registerPartyHandlers } from './handlers/partyHandlers.js';
-import { registerFriendHandlers } from './handlers/friendHandlers.js';
-import { registerMatchmakingHandlers } from './handlers/matchmakingHandlers.js';
-import { registerInputHandlers, bridgeShoot, bridgeMelee } from './handlers/inputHandlers.js';
-import { registerProgressionHandlers, publicProfile } from './handlers/progressionHandlers.js';
-import { getRoomForSocket, getSpectatorRoom, removeSpectatorEverywhere } from '../rooms/roomManager.js';
-import { storeLegacyMove, clearInput } from '../game/inputs.js';
-import { tryRejoin } from '../game/reconnect.js';
+import { ensureLoop, handlePlayerCleanup } from '../game/loop.js';
+import { SOCKET_EVENTS } from './events.js';
+
+let loopStarted = false;
 
 /**
- * Sockets that tried to write authoritative HP.
- *
- * Bounded (a Set of socket ids, cleared on disconnect) and surfaced through
- * {@link diagnostics} rather than logged per packet. Logging the full client
- * payload on every rejected event made the rejection path itself the DoS: a
- * client could drive unbounded log growth from a request the server already
- * refuses. The client still gets the error, so nothing is hidden from the
- * player — only the noise is removed from the operator's log.
- */
-const healthRejections = new Set();
-
-/**
- * True when a socket has exceeded its ceiling for an event. Ceilings live in
- * src/sockets/limits.js so every handler consults the same table.
- * @param {string} event
- * @param {string} socketId
- * @returns {boolean}
- */
-function rateLimited(event, socketId) {
-  return !allowEvent(event, socketId);
-}
-
-/**
- * Operator-facing counters, safe to poll from a health check: structured, small,
- * and free of payloads, per-frame noise and client-controlled strings.
- * @returns {{ rateLimits: Record<string, number>, hpRejections: number }}
- */
-export function diagnostics() {
-  return {
-    rateLimits: limitsNow(),
-    hpRejections: healthRejections.size,
-  };
-}
-
-/**
- * Attach all Astral Zero socket handlers to an `io` server.
+ * Initialize Socket.io handlers and start the orbital monitoring loop.
  * @param {import('socket.io').Server} io
  */
 export function initSockets(io) {
-  // Matchmaking owns batching timers → needs io long after sockets leave.
-  initMatchmaking(io, SOCKET_EVENTS);
+  // Start the 2 Hz orbital monitoring loop
+  if (!loopStarted) {
+    ensureLoop(io, SOCKET_EVENTS);
+    loopStarted = true;
+    console.log('[Solar Sentinel] Orbital monitoring loop started (2 Hz)');
+  }
 
-  io.on(SOCKET_EVENTS.CONNECTION, (socket) => {
-    console.log(`[Astral Zero] 🤖 client connected: ${socket.id}`);
+  // Connection handler
+  io.on('connection', (socket) => {
+    console.log(`[Solar Sentinel] Client connected: ${socket.id}`);
 
-    // -- Welcome packet ----------------------------------------------------
-    // Gives Phaser everything it needs to confirm contract compatibility.
+    // Welcome message with contract info
     socket.emit(SOCKET_EVENTS.CONNECTED, {
       socketId: socket.id,
-      game: config.gameName,
-      serverVersion: config.gameVersion,
-      socketEventsVersion: SOCKET_EVENTS_VERSION,
-      message: `Welcome to ${config.gameName}! See websocket_events.md for the contract.`,
+      version: '1.0.0',
+      serverName: 'Solar Sentinel',
+      timestamp: new Date().toISOString(),
     });
 
-    // -- Phase 2 modular handlers (party / friends / queue / room) ---------
-    // Registered FIRST so their event names never collide with the
-    // Phase 1 core below (all names are disjoint by construction).
-    registerPartyHandlers(io, socket);
-    registerFriendHandlers(io, socket);
-    registerMatchmakingHandlers(io, socket);
-    // S14: character / loadout / ranked selection (validated server-side).
-    registerProgressionHandlers(io, socket);
-    // -- Phase 3: authoritative input channel --------------------------------
-    registerInputHandlers(io, socket);
+    socket.on('disconnect', () => {
+      console.log(`[Solar Sentinel] Client disconnected: ${socket.id}`);
+    });
 
-    // -- 1. player_join ------------------------------------------------------
-    // Contract: C->S { name, mapId?, difficulty? } → S broadcasts presence.
-    // Phase 2 addition: register identity (friends/protection) + push the
-    // caller's persistent friends list. Broadcast shape UNCHANGED.
-    socket.on(SOCKET_EVENTS.PLAYER_JOIN, (payload = {}, ack) => {
-      if (rateLimited('player_join', socket.id)) {
-        socket.emit(SOCKET_EVENTS.ERROR, {
-          code: 'RATE_LIMITED',
-          message: 'Too many player_join events. Reconnect to continue.',
+    // Handle player_cleanup: client requests removal of a tracked orbital object.
+    // Validation is server-authoritative (energy + active-list check) via loop.js.
+    socket.on(SOCKET_EVENTS.PLAYER_CLEANUP, (payload) => {
+      const { id } = payload || {};
+      const result = handlePlayerCleanup(id);
+
+      if (result.success) {
+        socket.emit(SOCKET_EVENTS.CLEANUP_SUCCESS, {
+          id: result.id,
+          success: true,
+          energy: result.energy,
+          score: result.score,
+          cost: result.cost,
+          currentWave: result.currentWave,
+          wave: result.wave,
         });
-        if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
-        return;
-      }
-      // Sanitised, logged safely.
-      const cleanName = sanitizeName(payload?.name);
-      if (String(payload?.name || '') !== cleanName) {
-        socket.emit(SOCKET_EVENTS.ERROR, {
-          code: 'NAME_SANITIZED',
-          message: `Display name adjusted to "${cleanName}".`,
-        });
-      }
-      console.log(`[Astral Zero] player_join from ${socket.id}:`, { name: cleanName });
-
-      // Phase 1: stamp identity server-side, trust the rest.
-      const player = {
-        id: socket.id,
-        name: cleanName,
-        mapId: payload.mapId || 'junkyard',
-        difficulty: payload.difficulty || 'normal',
-        joinedAt: Date.now(),
-      };
-      // Phase 2: stable profile (keyed on username) for friends/protection.
-      upsertOnJoin(socket.id, player);
-
-      // Tell everyone else a janitor arrived (skip sender).
-      socket.broadcast.emit(SOCKET_EVENTS.PLAYER_JOIN, player);
-
-      // Phase 4: reconnect grace — same name back within 60 s re-seats into
-      // the live room (catch-up manifest pushed inside tryRejoin). The ack
-      // carries rejoined:true so the client skips the lobby and loads in.
-      const rejoin = tryRejoin(io, SOCKET_EVENTS, socket, player);
-      if (rejoin.rejoined) {
-        console.log(`[Astral Zero] player rejoined ${player.name} → ${rejoin.roomId}`);
-      }
-
-      // Acknowledge the sender (works with or without client callback).
-      if (typeof ack === 'function') {
-        ack(
-          rejoin.rejoined
-            ? { ok: true, player, rejoined: true, roomId: rejoin.roomId }
-            : { ok: true, player },
+        console.log(
+          `[Solar Sentinel] ✅ Cleanup authorized for object ${id} (client: ${socket.id}) ` +
+            `→ energy=${result.energy}, score=${result.score}, wave=${result.currentWave}`
         );
       } else {
-        socket.emit(SOCKET_EVENTS.PLAYER_JOIN, player);
-      }
-
-      // Phase 2: hand the caller their persistent friends list right away
-      // so lobby UI renders without an extra round-trip.
-      socket.emit(SOCKET_EVENTS.FRIEND_UPDATE, {
-        friends: listFriends(player.name),
-        timestamp: Date.now(),
-      });
-
-      // S14.7: hand the caller their PROGRESSION profile the same way, on the
-      // existing `character_update` channel (documented shape already carries
-      // `profile` — this is the first PUSH of it, not a new event). Without
-      // this the selection screen could not know which characters are
-      // unlocked or which one is active until the player changed something.
-      const prof = ensureProfile(player.name);
-      const activeChar = activeCharacterFor(player.name);
-      socket.emit(SOCKET_EVENTS.CHARACTER_UPDATE, {
-        character: activeChar,
-        variant: prof?.loadouts?.[activeChar] || null,
-        profile: publicProfile(prof),
-        timestamp: Date.now(),
-      });
-    });
-
-    // -- 2. player_move ------------------------------------------------------
-    // LOBBY (no room): Phase 1/2 global relay, byte-identical — old smoke
-    // tests and single-arena dev builds hit exactly this branch.
-    // IN ROOM (Phase 3): the claimed POSITION is ignored (server owns it);
-    // only a velocity hint becomes intent. Peers learn positions from
-    // `entity_snapshot`, never from this echo (no conflicting truths).
-    socket.on(SOCKET_EVENTS.PLAYER_MOVE, (payload = {}, ack) => {
-      // Lobby relay is an O(N^2) broadcast path: every move from every client
-      // is re-sent to every other client. Ceilinged here so one socket cannot
-      // multiply that unboundedly.
-      if (getSpectatorRoom(socket.id) && rateLimited('player_move', socket.id)) {
-        socket.emit(SOCKET_EVENTS.ERROR, {
-          code: 'RATE_LIMITED',
-          message: 'Too many player_move events.',
+        socket.emit(SOCKET_EVENTS.CLEANUP_FAILED, {
+          id: id === undefined || id === null ? null : String(id),
+          success: false,
+          reason: result.reason,
+          energy: result.energy,
+          cost: result.cost,
         });
-        if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
-        return;
-      }
-      // Phase 5: spectators have no body — their move packets are dropped,
-      // NEVER relayed (a ghost tracer broadcast would haunt every client).
-      if (getSpectatorRoom(socket.id)) {
-        if (typeof ack === 'function') ack({ ok: false, error: 'SPECTATING' });
-        return;
-      }
-      const room = getRoomForSocket(socket.id);
-      if (!room?.sim) {
-        socket.broadcast.emit(SOCKET_EVENTS.PLAYER_MOVE, {
-          id: socket.id,
-          ...payload, // { x, y, vx, vy, facing, seq, timestamp }
-        });
-        if (typeof ack === 'function') ack({ ok: true, relayed: true });
-        return;
-      }
-      const res = storeLegacyMove(socket.id, payload);
-      if (typeof ack === 'function') {
-        ack(res.ok ? { ok: true, bridged: true, seq: res.seq } : { ok: false, error: res.dropped || 'BAD_PAYLOAD' });
-      }
-    });
-
-    // -- 3. player_shoot -----------------------------------------------------
-    // LOBBY: legacy rebroadcast + ack (unchanged). IN ROOM: validated trigger
-    // — cooldown-gated, re-anchored at the server body, tracer re-emitted
-    // with server values (see combat/triggers.js).
-    socket.on(SOCKET_EVENTS.PLAYER_SHOOT, (payload = {}, ack) => {
-      // Phase 5: spectators can't shoot (no body, no muzzle, no debate).
-      if (getSpectatorRoom(socket.id)) {
-        socket.emit(SOCKET_EVENTS.ERROR, { code: 'SPECTATING', message: 'Spectators cannot shoot.' });
-        if (typeof ack === 'function') ack({ ok: false, error: 'SPECTATING' });
-        return;
-      }
-      const room = getRoomForSocket(socket.id);
-      if (!room?.sim) {
-        if (rateLimited('player_shoot', socket.id)) {
-          socket.emit(SOCKET_EVENTS.ERROR, { code: 'RATE_LIMITED', message: 'Too many player_shoot events.' });
-          if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
-          return;
-        }
-        socket.broadcast.emit(SOCKET_EVENTS.PLAYER_SHOOT, {
-          id: socket.id,
-          ...payload, // { x, y, angle, weaponId, seq, timestamp }
-        });
-        if (typeof ack === 'function') ack({ ok: true });
-        return;
-      }
-      const res = bridgeShoot(io, SOCKET_EVENTS, socket, payload);
-      if (!res.ok) {
-        socket.emit(SOCKET_EVENTS.ERROR, {
-          code: res.error,
-          message: `player_shoot rejected: ${res.error}`,
-        });
-      }
-      if (typeof ack === 'function') ack(res);
-    });
-
-    // -- 4. player_melee -----------------------------------------------------
-    // The sacred Mop Swing. Same split as shooting: lobby relays, rooms
-    // server-arc-test (combat/damage.js → meleeSwing).
-    socket.on(SOCKET_EVENTS.PLAYER_MELEE, (payload = {}, ack) => {
-      // Phase 5: spectators can't swing either (same no-body rule).
-      if (getSpectatorRoom(socket.id)) {
-        socket.emit(SOCKET_EVENTS.ERROR, { code: 'SPECTATING', message: 'Spectators cannot attack.' });
-        if (typeof ack === 'function') ack({ ok: false, error: 'SPECTATING' });
-        return;
-      }
-      const room = getRoomForSocket(socket.id);
-      if (!room?.sim) {
-        if (rateLimited('player_melee', socket.id)) {
-          socket.emit(SOCKET_EVENTS.ERROR, { code: 'RATE_LIMITED', message: 'Too many player_melee events.' });
-          if (typeof ack === 'function') ack({ ok: false, error: 'RATE_LIMITED' });
-          return;
-        }
-        socket.broadcast.emit(SOCKET_EVENTS.PLAYER_MELEE, {
-          id: socket.id,
-          ...payload, // { x, y, direction, swingId, timestamp }
-        });
-        if (typeof ack === 'function') ack({ ok: true });
-        return;
-      }
-      const res = bridgeMelee(io, SOCKET_EVENTS, socket, payload);
-      if (!res.ok) {
-        socket.emit(SOCKET_EVENTS.ERROR, {
-          code: res.error,
-          message: `player_melee rejected: ${res.error}`,
-        });
-      }
-      if (typeof ack === 'function') ack(res);
-    });
-
-    // -- 5. player_health_update ---------------------------------------------
-    // Phase 3: SERVER-ONLY, enforced. Client sends are rejected with
-    // NOT_AUTHORITATIVE (the locked flip previewed since the Phase 1 doc).
-    // HP is written exclusively by combat/damage.js → broadcast room-scoped.
-    socket.on(SOCKET_EVENTS.PLAYER_HEALTH_UPDATE, () => {
-      // Counted, not logged. This used to console.warn the whole client payload
-      // on every packet, which made the rejection path itself the DoS: a client
-      // could drive unbounded log growth from a rejected event. The client
-      // still gets the error, so nothing is hidden from the player — the count
-      // surfaces through `diagnostics()` below for operator visibility.
-      healthRejections.add(socket.id);
-      socket.emit(SOCKET_EVENTS.ERROR, {
-        code: 'NOT_AUTHORITATIVE',
-        message: `'player_health_update' is server→client only. Clients must never set HP.`,
-      });
-    });
-
-    // -- 6. Bot stubs ----------------------------------------------------------
-    // Bots are server-driven, so clients should only LISTEN for these.
-    // If a client emits them in Phase 1 we log + ignore (anti-cheat preview).
-    // Phase 2 KEEPS this guard: rooms emit bot_* from the server only.
-    for (const evt of [SOCKET_EVENTS.BOT_SPAWN, SOCKET_EVENTS.BOT_UPDATE, SOCKET_EVENTS.BOT_DEATH]) {
-      socket.on(evt, (payload) => {
-        console.warn(
-          `[Astral Zero] ⚠ client ${socket.id} emitted server-only event '${evt}'. Ignored:`,
-          payload,
+        console.log(
+          `[Solar Sentinel] ❌ Cleanup failed for object ${id} (client: ${socket.id}): ${result.reason}`
         );
-        socket.emit(SOCKET_EVENTS.ERROR, {
-          code: 'SERVER_ONLY_EVENT',
-          message: `'${evt}' is server→client only in ${config.gameName}.`,
-        });
-      });
-    }
-
-    // -- 7. Reserved future events (puzzle / jumpscare / rocket-jump / ...) ----
-    // Shapes are frozen in websocket_events.md; handlers are stubs.
-    // They log + rebroadcast so Phaser can prototype UI/FX early.
-
-    socket.on(SOCKET_EVENTS.PUZZLE_SOLVED, (payload = {}, ack) => {
-      console.log(`[Astral Zero] puzzle_solved from ${socket.id}:`, payload);
-      socket.broadcast.emit(SOCKET_EVENTS.PUZZLE_SOLVED, { id: socket.id, ...payload });
-      if (typeof ack === 'function') ack({ ok: true, received: true });
-    });
-
-    socket.on(SOCKET_EVENTS.ROCKET_JUMP, (payload = {}, ack) => {
-      console.log(`[Astral Zero] rocket_jump from ${socket.id}:`, payload);
-      socket.broadcast.emit(SOCKET_EVENTS.ROCKET_JUMP, { id: socket.id, ...payload });
-      if (typeof ack === 'function') ack({ ok: true });
-    });
-
-    socket.on(SOCKET_EVENTS.PICKUP_COLLECTED, (payload = {}, ack) => {
-      console.log(`[Astral Zero] pickup_collected from ${socket.id}:`, payload);
-      socket.broadcast.emit(SOCKET_EVENTS.PICKUP_COLLECTED, { id: socket.id, ...payload });
-      if (typeof ack === 'function') ack({ ok: true });
-    });
-
-    // JUMPSCARE_TRIGGER is server→client only (same guard as bots).
-    // NOTE: MATCH_STATE is EMITTED by the server in Phase 2 (rooms), but
-    // clients must still never SEND it — the guard stays so a malicious
-    // client can't fake lobby/countdown/playing/gameover for everyone.
-    // Phase 3 adds the sim/combat pushes to the same server-only list.
-    for (const evt of [
-      SOCKET_EVENTS.JUMPSCARE_TRIGGER,
-      SOCKET_EVENTS.MATCH_STATE,
-      SOCKET_EVENTS.ENTITY_SNAPSHOT,
-      SOCKET_EVENTS.ENTITY_DEATH,
-      SOCKET_EVENTS.ENTITY_RESPAWN,
-      SOCKET_EVENTS.SCORE_UPDATE,
-    ]) {
-      socket.on(evt, (payload) => {
-        console.warn(`[Astral Zero] ⚠ client emitted server-only '${evt}'. Ignored:`, payload);
-        socket.emit(SOCKET_EVENTS.ERROR, {
-          code: 'SERVER_ONLY_EVENT',
-          message: `'${evt}' is server→client only.`,
-        });
-      });
-    }
-
-    // -- Disconnect ------------------------------------------------------------
-    // Phase 1 behavior KEPT (player_leave broadcast), then Phase 2 cleanup:
-    // party promotion/disband, queue drop, room exit — all best-effort.
-    socket.on(SOCKET_EVENTS.DISCONNECT, (reason) => {
-      console.log(`[Astral Zero] 👋 client disconnected: ${socket.id} (${reason})`);
-      // Let remaining players remove this janitor from their scene.
-      socket.broadcast.emit(SOCKET_EVENTS.PLAYER_LEAVE, {
-        id: socket.id,
-        reason: String(reason),
-        timestamp: Date.now(),
-      });
-
-      // Phase 2: party fix-up (promote survivor or disband) + notify.
-      try {
-        const partyRes = partyDisconnect(socket.id);
-        if (partyRes && partyRes.remaining) {
-          const snap = partyToPublic(partyRes.remaining);
-          for (const m of partyRes.remaining.members) {
-            io.to(m.socketId).emit(SOCKET_EVENTS.PARTY_UPDATE, {
-              party: snap,
-              timestamp: Date.now(),
-            });
-          }
-        }
-      } catch (err) {
-        console.warn(`[Astral Zero] party disconnect cleanup failed: ${err.message}`);
       }
-      setPartyCode(socket.id, null);
-
-      // Phase 2: matchmaking + room cleanup (queue drop, room_update).
-      // Phase 4: stash=true snapshots the leaver for reconnect grace
-      // (voluntary room_leave never stashes — only real disconnects re-seat).
-      try {
-        queueDisconnect(socket.id);
-        leaveRoom(socket.id, { stash: true });
-      } catch (err) {
-        console.warn(`[Astral Zero] match cleanup failed: ${err.message}`);
-      }
-
-      // Phase 2: identity session drop (profile + friends + history KEPT).
-      removeBySocket(socket.id);
-      void getBySocket;
-      // Phase 3: forget intent (a stale entry would steer a corpse for 1.5 s;
-      // in-room entity removal already happened in leaveRoom/removeHuman).
-      clearInput(socket.id);
-      // Release this socket's rate-limit buckets so a fresh connection is not
-      // punished for a previous session's traffic.
-      resetEventLimits(socket.id);
-      healthRejections.delete(socket.id);
-      // Phase 5: free spectator booths (spectators never stash — no re-seat).
-      removeSpectatorEverywhere(socket.id);
     });
   });
 
-  console.log('[Astral Zero] Socket.io Phase 3 handlers registered (authoritative sim + combat + Phase 1/2 compat).');
+  console.log('[Solar Sentinel] Socket.io initialized');
 }

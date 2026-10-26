@@ -1,25 +1,10 @@
 /**
- * Astral Zero — Rewind hit tests (Phase 4, lag compensation).
+ * Solar Sentinel — Rewind hit tests (Kessler cascade debris tracking).
  * ============================================================
- * Decides ONE question: "the shell missed the live position, but would it
- * have hit where the victim was when the shooter fired?"
- *
- * RULES (bounded favor-the-shooter):
- *  1. Direct hits on LIVE positions always count (fast path, unchanged).
- *  2. A miss is only re-tested when the shell passed within
- *     (hitRadius + lagComp.gracePx) of the live body — the "grace band".
- *     Anything wider was never close on anyone's screen; no rewind.
- *  3. Rewind target time = shell.impactTime − shooterLatencyMs, where
- *     latency is clamped to [0, lagComp.maxLatencyMs]. Beyond the clamp the
- *     sample is too stale to trust → no hit.
- *  4. Rewound hits count at FULL damage (no falloff games) but are flagged
- *     `lagComp: true` so damage logs can distinguish them.
- *  5. Melee uses the same rule on its arc test (range + grace, rewound feet
- *     point) — knife fights stay honest at 120 ms too.
- *
- * ANTI-ABUSE: grace is ±26 px and history is 2 s; a lag-switcher gains no
- * teleport kills because rewind only NARROWLY widens a near-miss. Latency
- * itself is estimated from client send timestamps (inputs.js) and clamped.
+ * SOLAR SENTINEL NOTE: this module is retained for legacy hit-tracking
+ * utilities. Orbital debris is tracked, not fought; the cascade physics
+ * in src/game/loop.js replace the old favor-the-operator logic. These
+ * helpers are kept as a no-op-safe reference and are not on the live path.
  *
  * Pure math over (positions, histories) — no io, fully unit-testable.
  */
@@ -31,7 +16,7 @@ const gracePx = () => config.sim?.lagComp?.gracePx ?? 26;
 
 /**
  * Rewind circle test for projectiles.
- * @param {object} proj projectile (carries shooterLatencyMs)
+ * @param {object} proj projectile (carries latencyMs)
  * @param {object} victim sim entity (carries history[])
  * @param {number} px, py shell position this tick
  * @param {number} hitRadius direct-hit radius used by the caller
@@ -44,7 +29,7 @@ export function rewindCircleTest(proj, victim, px, py, hitRadius, now) {
   if (dLive <= hitRadius) return { hit: true, lagComp: false }; // fast path
   if (dLive > hitRadius + gracePx()) return { hit: false, lagComp: false }; // never close
 
-  const latency = clampLatency(proj.shooterLatencyMs);
+  const latency = clampLatency(proj.latencyMs);
   if (latency <= 0) return { hit: false, lagComp: false }; // no info → no favor
   const past = sampleAt(victim.history, now - latency);
   if (!past) return { hit: false, lagComp: false }; // history too short
@@ -60,7 +45,7 @@ export function rewindCircleTest(proj, victim, px, py, hitRadius, now) {
  * @param {object} victim sim entity
  * @param {number} range melee range + body (caller's direct-test radius)
  * @param {number} halfArc arc half-angle (caller's)
- * @param {number} attackerLatencyMs shooter's estimate
+ * @param {number} attackerLatencyMs operator's estimate
  * @param {number} now server ms
  * @returns {{ hit: boolean, lagComp: boolean }}
  */
@@ -86,7 +71,7 @@ export function rewindArcTest(ax, ay, dir, victim, range, halfArc, attackerLaten
   return { hit: false, lagComp: false };
 }
 
-/** Feet-point torso anchor (mirrors combat/projectiles.torso). */
+/** Feet-point torso anchor (mirrors projectiles.torso). */
 function torsoOf(e) {
   return { x: e.x, y: e.y - 20 };
 }

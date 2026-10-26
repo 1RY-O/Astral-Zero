@@ -1,17 +1,10 @@
 /**
- * Astral Zero — Position history ring (Phase 4, lag compensation).
+ * Solar Sentinel — Position history ring (Kessler cascade tracking).
  * ============================================================
- * FAIRNESS PROBLEM: at 20 Hz with 50–120 ms of latency, the victim a
- * shooter sees on screen is ~2–5 ticks behind the server truth. A shell
- * that visibly connects on the shooter's screen can miss server-side
- * because the victim already moved — infuriating and wrong-feeling.
- *
- * FIX (favor-the-shooter, bounded): every entity records its feet position
- * every tick into a small ring (40 samples ≈ 2 s). Hit resolution may
- * re-test a NEAR miss against where the victim was when the shooter fired
- * (see rewind.js). Direct hits still win fast-path; history is consulted
- * ONLY inside a narrow grace band, so the steady-state cost is ~zero and a
- * 500 ms-lag sniper can't hit ghosts across the map.
+ * SOLAR SENTINEL NOTE: this module is retained for legacy hit-tracking
+ * utilities. Orbital debris is tracked, not fought; the cascade physics
+ * in src/game/loop.js replace the old favor-the-operator logic. These
+ * helpers are kept as a no-op-safe reference and are not on the live path.
  *
  * Pure functions over plain arrays — the ring lives on `entity.history`
  * (owned by the tick loop), these helpers never touch io.

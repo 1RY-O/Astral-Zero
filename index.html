@@ -3,86 +3,265 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#070b18" />
+    <meta name="theme-color" content="#0a0a0c" />
     <meta
       name="description"
-      content="Astral Zero - a fast-paced 2D arena platformer-shooter where a space janitor cleans low-Earth orbit junk."
+      content="Solar Sentinel — real-time orbital debris threat command. NASA Space Apps Challenge 2026."
     />
-    <title>Astral Zero</title>
+    <title>Solar Sentinel — Orbital Debris Command</title>
 
-    <!-- Inline SVG favicon: avoids a 404 for /favicon.ico before real art exists. -->
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23070b18'/><ellipse cx='16' cy='16' rx='11' ry='11' fill='none' stroke='%235ad8ff' stroke-width='2.5' stroke-dasharray='52 18' transform='rotate(-28 16 16)'/><circle cx='16' cy='16' r='3' fill='%23ffc247'/></svg>"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a0a0c'/><circle cx='16' cy='16' r='6' fill='none' stroke='%2300f3ff' stroke-width='2'/><ellipse cx='16' cy='16' rx='13' ry='5' fill='none' stroke='%2300f3ff' stroke-width='1.5' transform='rotate(-24 16 16)'/><circle cx='27' cy='10' r='2' fill='%23ff003c'/></svg>"
     />
 
-    <style>
-      /* Full-viewport space background so the letterboxed canvas blends in. */
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        background: #070b18;
-        overflow: hidden;
-        font-family: 'Trebuchet MS', 'Segoe UI', system-ui, -apple-system, sans-serif;
-        /* Respect the notch / rounded corners on phones. */
-        padding: env(safe-area-inset-top) env(safe-area-inset-right)
-          env(safe-area-inset-bottom) env(safe-area-inset-left);
-        /* Stop iOS rubber-banding the page while the game is fullscreen. */
-        overscroll-behavior: none;
-        -webkit-tap-highlight-color: transparent;
-      }
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&family=Share+Tech+Mono&display=swap"
+      rel="stylesheet"
+    />
 
-      /* Phaser injects its canvas here; centre it both axes. */
-      #game-root {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      #game-root canvas {
-        display: block;
-        image-rendering: auto;
-        /* The canvas owns all gameplay input; never let the browser pan/zoom
-           the page in response to a swipe or a double-tap. */
-        touch-action: none;
-      }
-
-      /*
-        Boot screen container.
-        Its visible contents are built by src/ui/boot/BootScreen.js so the
-        progress bar, the step labels and the ARIA attributes all live next to
-        the state machine that drives them. The empty shell below is only the
-        full-bleed container; `pointer-events: none` means it can never eat a
-        click meant for the canvas, and the JS opts back in for the retry
-        button when a connection actually fails.
-      */
-      #boot-status {
-        position: fixed;
-        inset: 0;
-        z-index: 10;
-        pointer-events: none;
-      }
-    </style>
+    <link rel="stylesheet" href="./src/styles.css" />
   </head>
 
   <body>
-    <!-- The game canvas is rendered into this element by Phaser 3. -->
-    <div id="game-root"></div>
+    <!-- ═══════════════ LANDING ═══════════════ -->
+    <div id="landing" class="landing">
+      <canvas id="starfield-canvas" aria-hidden="true"></canvas>
+      <div class="landing__grid" aria-hidden="true"></div>
 
-    <!--
-      Boot / loading screen. Populated by BootScreen (src/ui/boot/BootScreen.js)
-      and driven by real boot milestones — no simulated progress.
-    -->
-    <div id="boot-status" role="region" aria-label="Astral Zero loading"></div>
+      <div class="landing__body">
+        <p class="landing__badge">NASA SPACE APPS CHALLENGE · 2026</p>
 
-    <!--
-      ES module entry point. Vite resolves the bare "phaser" specifier and
-      bundles the engine for both `npm run dev` and `npm run build`.
-    -->
-    <script type="module" src="/src/main.js"></script>
+        <h1 class="landing__title">
+          SOLAR<span class="landing__title-accent">SENTINEL</span>
+        </h1>
+
+        <p class="landing__tagline">
+          Real-time orbital debris threat command.<br />
+          Track. Assess. Protect low-Earth orbit.
+        </p>
+
+        <ul class="landing__stats-row" aria-label="System highlights">
+          <li><span class="landing__stat-value">2&nbsp;Hz</span><span class="landing__stat-label">TELEMETRY</span></li>
+          <li><span class="landing__stat-value">LEO</span><span class="landing__stat-label">COVERAGE</span></li>
+          <li><span class="landing__stat-value">1–10</span><span class="landing__stat-label">RISK INDEX</span></li>
+        </ul>
+
+        <button id="start-btn" class="btn-start" type="button">
+          <span class="btn-start__bracket" aria-hidden="true">[</span>
+          START MISSION
+          <span class="btn-start__bracket" aria-hidden="true">]</span>
+        </button>
+
+        <p class="landing__hint">Live NASA TLE data · Socket.io relay · Canvas rendering</p>
+
+        <p class=landing__ticker>
+          <span>WARNING: KESSLER SYNDROME IMMINENT...</span>
+          <span>TRACKING 12,000+ DEBRIS...</span>
+          <span>SYSTEM ARMED...</span>
+        </p>
+      </div>
+
+      <footer class="landing__footer">
+        <span>ORBITAL DEFENSE NETWORK</span>
+        <span class="landing__footer-dot" aria-hidden="true"></span>
+        <span>SENTINEL CORE v1.0</span>
+      </footer>
+    </div>
+
+    <!-- ═══════════════ COMMAND CENTER ═══════════════ -->
+    <div id="command-center" class="command-center" hidden>
+      <header class="topbar">
+        <div class="topbar__brand">
+          <span class="topbar__mark" aria-hidden="true"></span>
+          <span class="topbar__name">SOLAR&nbsp;SENTINEL</span>
+          <span class="topbar__section">/ COMMAND CENTER</span>
+        </div>
+        <div class="topbar__right">
+          <span id="feed-clock" class="topbar__clock">--:--:-- UTC</span>
+          <span id="link-pill" class="pill pill--pending" role="status">LINK&nbsp;·&nbsp;CONNECTING</span>
+        </div>
+      </header>
+
+      <div class="command-grid">
+        <!-- LEFT: Mission Stats -->
+        <aside class="panel panel--stats" aria-label="Mission stats">
+          <h2 class="panel__title">
+            <i class="led led--cyan" aria-hidden="true"></i>MISSION STATS
+          </h2>
+
+          <div class="stat-row">
+            <div class="stat-card stat-card--compact">
+              <div class="stat-card__head">
+                <span class="stat-card__label">WAVE</span>
+                <span id="wave-value" class="stat-card__value stat-card__value--wave">1</span>
+              </div>
+            </div>
+            <div class="stat-card stat-card--compact">
+              <div class="stat-card__head">
+                <span class="stat-card__label">SCORE</span>
+                <span id="score-value" class="stat-card__value stat-card__value--score">0</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-card__head">
+              <span class="stat-card__label">GLOBAL THREAT LEVEL</span>
+              <span id="threat-value" class="stat-card__value stat-card__value--threat">—</span>
+            </div>
+            <div class="meter" role="meter" aria-label="Global threat level" aria-valuemin="0" aria-valuemax="100">
+              <div id="threat-bar" class="meter__fill meter__fill--threat" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="stat-card stat-card--energy">
+            <div class="stat-card__head">
+              <span class="stat-card__label">CLEANUP ENERGY</span>
+              <span id="energy-value" class="stat-card__value stat-card__value--energy">100%</span>
+            </div>
+            <div class="meter meter--energy" role="meter" aria-label="Cleanup energy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+              <div id="energy-bar" class="meter__fill meter__fill--energy" style="width: 100%"></div>
+            </div>
+            <p class="stat-card__sub">−10% / shot · +1% / 5s</p>
+          </div>
+
+          <div class="stat-card stat-card--integrity">
+            <div class="stat-card__head">
+              <span class="stat-card__label">THREAT METER</span>
+              <span id="collision-value" class="stat-card__value stat-card__value--collisions">0/3</span>
+            </div>
+            <div
+              id="threat-meter"
+              class="meter meter--threat-meter"
+              role="meter"
+              aria-label="Collision threat meter"
+              aria-valuemin="0"
+              aria-valuemax="3"
+              aria-valuenow="0"
+            >
+              <div id="threat-meter-fill" class="meter__fill meter__fill--collision" style="width: 0%"></div>
+            </div>
+            <div id="integrity-leds" class="leds" aria-label="Collision status">
+              <i class="led led--alive"></i>
+              <i class="led led--alive"></i>
+              <i class="led led--alive"></i>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-card__head">
+              <span class="stat-card__label">TRACKED OBJECTS</span>
+              <span id="tracked-value" class="stat-card__value">—</span>
+            </div>
+            <p id="tracked-sub" class="stat-card__sub">Awaiting first orbital snapshot…</p>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-card__head">
+              <span class="stat-card__label">SYSTEM UPTIME</span>
+              <span id="uptime-value" class="stat-card__value stat-card__value--mono">—</span>
+            </div>
+            <p id="stats-source" class="stat-card__sub">Source: /api/stats</p>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-card__head">
+              <span class="stat-card__label">DEBRIS CLEARED</span>
+              <span id="cleared-value" class="stat-card__value stat-card__value--score">0</span>
+            </div>
+            <p class="stat-card__sub">Authorize cleanup from the Target List</p>
+          </div>
+
+          <div class="legend">
+            <span class="legend__item"><i class="dot dot--high"></i>HIGH RISK · 8–10</span>
+            <span class="legend__item"><i class="dot dot--elev"></i>ELEVATED · 5–7</span>
+            <span class="legend__item"><i class="dot dot--low"></i>LOW · 1–4</span>
+          </div>
+        </aside>
+
+        <!-- CENTER: Orbital map -->
+        <main class="panel panel--map" aria-label="Orbital map">
+          <div class="panel__map-head">
+            <h2 class="panel__title"><i class="led led--cyan" aria-hidden="true"></i>ORBITAL MAP · LEO</h2>
+            <span id="map-mode" class="map-mode">800×600 · EQUIRECTANGULAR</span>
+          </div>
+          <div id="canvas-wrap" class="canvas-wrap">
+            <canvas id="orbital-map" width="800" height="600" aria-label="Live orbital debris map"></canvas>
+          </div>
+        </main>
+
+        <!-- RIGHT: Target list -->
+        <aside class="panel panel--targets" aria-label="Target list">
+          <h2 class="panel__title">
+            <i class="led led--cyan" aria-hidden="true"></i>TARGET LIST
+            <span id="target-count" class="panel__count">0</span>
+          </h2>
+          <ul id="target-list" class="target-list">
+            <li class="target-list__empty">No objects tracked yet.</li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+
+    <!-- ═══════════════ MISSION BRIEFING (typewriter boot sequence) ═══════════════ -->
+    <div id="how-to" class="howto" hidden>
+      <div class="howto__card" role="dialog" aria-modal="true" aria-labelledby="howto-title">
+        <span class="classified" aria-hidden="true">CLASSIFIED</span>
+        <p class="howto__eyebrow">// EMERGENCY TRANSMISSION · EYES ONLY</p>
+        <h2 id="howto-title" class="howto__title">ORBITAL COMMAND</h2>
+
+        <div id="typewriter" class="typewriter">
+          <p data-line class="typewriter__line typewriter__line--alert">COMMANDER, KESSLER SYNDROME IS IMMINENT.</p>
+          <p data-line class="typewriter__line">We have limited orbital lasers. Prioritize high-risk debris (RED) before they collide with the ISS.</p>
+          <p data-line class="typewriter__line">Manage your energy wisely. Every shot costs 10% Energy.</p>
+          <p data-line class="typewriter__line typewriter__line--alert">If 3 collisions occur, orbit is lost.</p>
+        </div>
+
+        <button id="howto-start" class="btn-accept" type="button" hidden>[ ACCEPT MISSION ]</button>
+        <p id="typewriter-hint" class="typewriter__hint">CLICK TO SKIP DECRYPTION</p>
+      </div>
+    </div>
+
+    <!-- ═══════════════ LOADING OVERLAY ═══════════════ -->
+    <div id="loading-overlay" class="overlay" hidden role="status" aria-live="polite">
+      <div class="radar" aria-hidden="true">
+        <div class="radar__ring radar__ring--1"></div>
+        <div class="radar__ring radar__ring--2"></div>
+        <div class="radar__ring radar__ring--3"></div>
+        <div class="radar__cross radar__cross--h"></div>
+        <div class="radar__cross radar__cross--v"></div>
+        <div class="radar__sweep"></div>
+        <div class="radar__blip radar__blip--1"></div>
+        <div class="radar__blip radar__blip--2"></div>
+        <div class="radar__blip radar__blip--3"></div>
+      </div>
+      <p id="loading-text" class="overlay__text">Connecting to NASA Data Streams<span class="overlay__dots"><i>.</i><i>.</i><i>.</i></span></p>
+      <p id="loading-sub" class="overlay__sub">OPENING SOCKET.IO RELAY</p>
+    </div>
+
+    <!-- ═══════════════ IMPACT FRAME ═══════════════ -->
+    <div id="impact-flash" class="impact-flash" hidden aria-hidden="true"></div>
+
+    <!-- ═══════════════ CLEANUP IMPACT FRAME (orbital strike) ═══════════════ -->
+    <div id="cleanup-flash" class="cleanup-flash" hidden aria-hidden="true"></div>
+
+    <!-- ═══════════════ CRACKED GLASS OVERLAY (collision impact) ═══════════════ -->
+    <div id="screen-cracks" aria-hidden="true"></div>
+
+    <!-- ═══════════════ GAME OVER ═══════════════ -->
+    <div id="game-over" class="gameover" hidden role="alert">
+      <div class="gameover__frame">
+        <p class="gameover__eyebrow">// CRITICAL FAILURE · KESSLER CASCADE</p>
+        <h2 class="gameover__title">MISSION FAILED<span>ORBIT LOST</span></h2>
+        <p class="gameover__score">DEBRIS CLEARED <strong id="final-score">0</strong></p>
+        <p class="gameover__sub">Three collisions registered. Low-Earth orbit is unrecoverable.</p>
+        <button id="restart-btn" class="btn-accept btn-accept--danger" type="button">[ REINITIALIZE SYSTEM ]</button>
+      </div>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>

@@ -1,504 +1,704 @@
 /**
- * Astral Zero — Fixed-step simulation loop (Phase 3, maps/scrap in Phase 5).
- * ============================================================
- * ONE global interval (tickHz from config, default 20 Hz → 50 ms) drives
- * every `playing` room. Per tick, per room, in order:
+ * Solar Sentinel — Orbital Debris Monitoring + Game Loop
+ * ===========================================================
+ * ONE global interval (2 Hz → 500 ms) that updates the (x, y) positions of
+ * tracked orbital objects from live TLE data and broadcasts the authoritative
+ * game snapshot.
  *
- *   1. INPUT   humans ← inputs.js store · bots ← ai/botBrain.think()
- *   2. PHYSICS stepEntity() on the room's MAP (low-grav volumes scale gravity)
- *   3. FIRE    validated shots → projectiles + room-scoped player_shoot tracer
- *   4. MELEE   validated swings → arc hits
- *   5. SHELLS  stepProjectiles() → applyHit() → deaths → score_update on kills
- *   5b. HAZARD map hazard volumes deal DoT (cause 'hazard', uncredited)
- *   5c. SCRAP  (scrap mode) token expiry → walk-over pickup → station deposit
- *   6. RESPAWN processRespawns() (safe spawns, protection, entity_respawn)
- *   7. SCORE   checkWin() → onMatchEnd(roomId, reason) when decided
- *   8. SYNC    entity_snapshot (every tick, +tokens) + bot_update (every 2nd)
+ * Game mechanics:
+ * - Opening wave: 5 simulated debris.
+ * - Waves: when fewer than 2 simulated debris remain, a new wave spawns with
+ *   currentWave * 3 objects and level_up is broadcast with the new wave.
+ * - Energy: starts at 100, cleanup costs 15, +2 regenerates every 5 s.
+ * - Cleanup: +100 score, removes the object, emits via sockets/index.js.
+ * - Kessler cascade: every 10 s the highest-risk object is checked. Risk >= 7
+ *   collides, spawns 3 simulated debris at the exact impact point, and emits
+ *   collision_alert. Three collisions end the run with game_over.
  *
- * OWNERSHIP (no cycles by construction):
- *  - loop OWNS io + EV (injected via ensureLoop) and the match-end callback
- *    (injected by matchmaking — loop never imports matchmaking).
- *  - roomManager OWNS roster + lifecycle; loop only reads/mutates room.sim.
- *  - damage/scoring are pure-ish helpers; io is always passed down, never
- *    imported, so unit tests can run the whole sim headless with io=null.
- *
- * LIFETIME: the interval is unref'd (never holds the process open for CLI
- * tests) and created lazily on first room boot. Rooms without room.sim are
- * skipped (unit-context rooms created without io never simulate).
+ * orbital_snapshot carries globalEnergy, globalScore, currentWave and
+ * collisionCount alongside the active debris array.
  */
 
-import config from '../server-config.js';
-import { intentFor, consumeEdges, neutralIntent, latencyFor } from './inputs.js';
-import { record as recordHistory } from '../lagcomp/history.js';
-import { resolveMap as resolveRoomMap } from './maps.js';
-import { hazardAt, stationAt } from './maps.js';
-import { stepEntity } from './physics.js';
-import { think, fireCooldownScale } from '../ai/botBrain.js';
-import { ensurePersonality } from '../ai/personalities.js';
-import { WEAPONS } from '../combat/weapons.js';
-import { stepProjectiles } from '../combat/projectiles.js';
-import { tryFire, tryMelee } from '../combat/triggers.js';
-import { applyHit, processRespawns } from '../combat/damage.js';
-import { initMatchClock, recordTeamKill, checkWin, scoreboard } from './scoring.js';
-import { buildSnapshot, buildBotUpdate } from './snapshots.js';
-import { createEntity } from './entities.js';
-import { listRooms } from '../rooms/roomManager.js';
-import { isKnownCharacter, STARTER_CHARACTER } from '../shared/characters.js';
-import { resolveLoadout } from '../shared/loadouts.js';
-import { initShifts, tickShifts, activeGeometry } from './shifts.js';
-import { initMimics, tickMimics, damageMimic } from './mimics.js';
-import { initControlPoint, tickControlPoint } from './control.js';
+import '../server-config.js';
+import { fetchOrbitalData } from './nasa-api.js';
+import { processOrbitalData } from './orbital-calc.js';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const MAP_WIDTH = 800;
+const MAP_HEIGHT = 600;
+
+const ORBITAL_UPDATE_INTERVAL = 500; // 2 Hz
+const DATA_FETCH_INTERVAL = 30000; // NASA TLE refresh every 30 s
+
+const MAX_ENERGY = 100;
+const CLEANUP_ENERGY_COST = 15;
+const ENERGY_REGEN_INTERVAL = 5000;
+const ENERGY_REGEN_AMOUNT = 2;
+const ENERGY_LOW_THRESHOLD = 15;
+
+const CLEANUP_SCORE_REWARD = 100;
+
+const KESSLER_CHECK_INTERVAL = 4000;
+// Tuned for hackathon difficulty: risk 7+ now collides (was 8+).
+const KESSLER_RISK_THRESHOLD = 7;
+const KESSLER_DEBRIS_COUNT = 3;
+const GAME_OVER_COLLISION_COUNT = 3;
+
+const STARTING_DEBRIS_COUNT = 5;
+const WAVE_SPAWN_THRESHOLD = 2; // spawn a new wave below 2 active debris
+
+const SIMULATED_DEBRIS_NAMES = [
+  'Cosmos Frag',
+  'Fengyun Debris',
+  'SL-16 Fragment',
+  'Iridium Debris',
+  'Rocket Body',
+  'Solar Panel Shard',
+  'Antenna Fragment',
+  'Adapter Ring',
+];
+
+// ---------------------------------------------------------------------------
+// Module state
+// ---------------------------------------------------------------------------
 
 let ioRef = null;
 let EV = null;
-let onMatchEnd = null;
-let timer = null;
-let roomSource = null; // () => iterable of rooms (injected; defaults to roomManager)
 
-export function ensureLoop(io, events, opts = {}) {
+let timer = null;
+let energyRegenTimer = null;
+let kesslerTimer = null;
+
+let cachedOrbitalData = null;
+let lastProcessedObjects = [];
+let lastDataFetch = 0;
+let isFetching = false;
+
+let globalEnergy = MAX_ENERGY;
+let globalScore = 0;
+let currentWave = 1;
+let collisionCount = 0;
+let cleanupActions = 0;
+let gameActive = true;
+
+/** Simulated gameplay debris (waves + cascade fragments). */
+let simulatedDebris = [];
+
+/** Removed ids never resurrect after a TLE refresh or wave spawn. */
+const removedDebrisIds = new Set();
+
+// ---------------------------------------------------------------------------
+// Boot / timers
+// ---------------------------------------------------------------------------
+
+export function ensureLoop(io, events) {
   ioRef = io;
   EV = events;
-  if (typeof opts.onMatchEnd === 'function') onMatchEnd = opts.onMatchEnd;
-  if (typeof opts.roomSource === 'function') roomSource = opts.roomSource;
+
   if (!timer) {
-    const hz = config.sim?.tickHz || 20;
-    timer = setInterval(tickAll, Math.round(1000 / hz));
-    timer.unref?.(); // CLI smoke tests must exit with pending matches alive
+    timer = setInterval(orbitalTick, ORBITAL_UPDATE_INTERVAL);
+    timer.unref?.();
+  }
+  startGameTimers();
+
+  if (simulatedDebris.length === 0) {
+    spawnSimulatedDebris(STARTING_DEBRIS_COUNT);
   }
   return timer;
 }
 
-/** Test hook: drive one manual tick without timers. */
 export function tickOnce(now = Date.now()) {
-  tickAll(now);
+  return orbitalTick(now);
 }
 
-function liveRooms() {
-  // Default source is the room registry (overridable for headless tests).
-  if (roomSource) return [...roomSource()];
-  return listRooms();
-}
-
-function tickAll(now = Date.now()) {
-  if (!ioRef || !EV) return;
-  const t0 = Date.now();
-  const dt = 1 / (config.sim?.tickHz || 20);
-  let roomsTicked = 0;
-  for (const room of liveRooms()) {
-    try {
-      if (room.phase === 'playing' && room.sim) {
-        tickRoom(room, dt, now);
-        roomsTicked += 1;
-      }
-    } catch (err) {
-      console.warn(`[Astral Zero] tick failed for ${room.id}: ${err.message}`);
-    }
+function startGameTimers() {
+  if (!energyRegenTimer) {
+    energyRegenTimer = setInterval(regenEnergy, ENERGY_REGEN_INTERVAL);
+    energyRegenTimer.unref?.();
   }
-  // Phase 4 perf watchdog: the 20 Hz budget is 50 ms; warn past half of it
-  // with room counts so full-room load problems are visible in plain logs.
-  const took = Date.now() - t0;
-  tickStats.samples += 1;
-  tickStats.totalMs += took;
-  if (took > 25) {
-    console.warn(`[Astral Zero] slow tick: ${took}ms across ${roomsTicked} room(s)`);
+  if (!kesslerTimer) {
+    kesslerTimer = setInterval(() => checkKesslerCascade(Date.now()), KESSLER_CHECK_INTERVAL);
+    kesslerTimer.unref?.();
   }
 }
 
-const tickStats = { samples: 0, totalMs: 0 };
+function stopGameTimers() {
+  if (energyRegenTimer) {
+    clearInterval(energyRegenTimer);
+    energyRegenTimer = null;
+  }
+  if (kesslerTimer) {
+    clearInterval(kesslerTimer);
+    kesslerTimer = null;
+  }
+}
+
+function regenEnergy() {
+  if (!gameActive) return;
+  if (globalEnergy < MAX_ENERGY) {
+    globalEnergy = Math.min(globalEnergy + ENERGY_REGEN_AMOUNT, MAX_ENERGY);
+    console.log(`[Solar Sentinel] ⚡ Energy regenerated → ${globalEnergy}/${MAX_ENERGY}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Debris bookkeeping
+// ---------------------------------------------------------------------------
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
 /**
- * Build room.sim from the spawn roster (called once at room boot, before
- * countdown ends — entities exist but don't move until phase === 'playing').
+ * Generate simulated gameplay debris.
+ * @param {number} count
+ * @param {{x?:number,y?:number,wave?:number}} [opts] fixed impact coordinates
+ * @returns {Array<object>} spawned objects
  */
-/**
- * Stamp a character onto an entity (server-authoritative).
- *
- * The client's `character` field is a REQUEST, validated here against the shared
- * roster. An unknown id silently becomes the starter rather than an error: a
- * typo should not brick a match, and the player still gets a playable body.
- * Every stat the character brings is written onto the entity so the rest of the
- * simulation (physics, combat, respawn) can read it without importing the roster.
- *
- * @param {object} e sim entity (mutated)
- * @param {string} requestedId client-requested character id
- * @param {object} room
- * @returns {object} the applied character row
- */
-function applyCharacter(e, requestedId, room) {
-  // Character identity is server-owned: the profile's saved selection is the
-  // source, and `requestedId` (only present on a queue that named one) can never
-  // override an unlocked, validated choice.
-  const id = isKnownCharacter(requestedId) ? requestedId : STARTER_CHARACTER;
-  const { character: c, variantId, stats } = resolveLoadout(id, e.loadoutVariant);
-  e.character = c.id;
-  e.tier = c.tier;
-  e.weaponId = c.weapon;
-  e.loadoutVariant = variantId;
-  // Stat carriers the rest of the sim reads. damageScale is MULTIPLIED later by
-  // the mode (practice halves it), so this stays the character-only component.
-  e.charDamageMul = stats.damageMul;
-  e.charCooldownMul = stats.fireRateMul;
-  e.charSpeedMul = stats.speedMul;
-  e.charJumpMul = stats.jumpMul;
-  e.charHp = stats.hp;
-  e.maxHp = stats.hp;
-  e.hp = stats.hp;
-  e.charSplashMul = stats.splashMul ?? 1;
-  return c;
+export function spawnSimulatedDebris(count, opts = {}) {
+  const total = Math.max(0, Math.floor(Number(count) || 0));
+  const fixedX = Number.isFinite(opts.x) ? clamp(opts.x, 0, MAP_WIDTH) : null;
+  const fixedY = Number.isFinite(opts.y) ? clamp(opts.y, 0, MAP_HEIGHT) : null;
+  const wave = Number.isFinite(opts.wave) ? opts.wave : currentWave;
+  const reservedIds = new Set(simulatedDebris.map((d) => String(d.id)));
+  const born = [];
+
+  for (let i = 0; i < total; i++) {
+    let id = '';
+    do {
+      id = `SIM-${Math.floor(Math.random() * 900000) + 100000}`;
+    } while (removedDebrisIds.has(id) || reservedIds.has(id));
+    reservedIds.add(id);
+
+    born.push({
+      id,
+      name: SIMULATED_DEBRIS_NAMES[Math.floor(Math.random() * SIMULATED_DEBRIS_NAMES.length)],
+      x: fixedX ?? Math.floor(Math.random() * MAP_WIDTH),
+      y: fixedY ?? Math.floor(Math.random() * MAP_HEIGHT),
+      riskLevel: 6 + Math.floor(Math.random() * 5), // 6–10
+      altitude: 250 + Math.random() * 500,
+      velocity: 5 + Math.random() * 15,
+      isSimulated: true,
+      wave,
+    });
+  }
+
+  simulatedDebris.push(...born);
+
+  const isImpact =
+    born.length > 0 && born.every((d) => d.x === fixedX && d.y === fixedY);
+  if (isImpact) {
+    console.log(
+      `[Solar Sentinel] ☄️ ${born.length} cascade fragments spawned at ` +
+        `(${fixedX.toFixed(1)}, ${fixedY.toFixed(1)})`
+    );
+  } else {
+    console.log(`[Solar Sentinel] 🌊 Wave ${wave} — spawned ${born.length} simulated debris`);
+  }
+  return born;
 }
 
-export function initSim(room) {
-  const entities = new Map();
-  for (const p of room.players || []) {
-    const e = createEntity(p, p.socketId || p.id);
-    e.cooldownScale = 1;
-    e.damageScale = 1;
-    // S14: the character is stamped SERVER-SIDE from the player's validated
-    // selection (room.players carries `character`, set at matchmaking). The
-    // client never dictates stats — it only names one, and a bad name falls
-    // back to the starter.
-    applyCharacter(e, p.character, room);
-    entities.set(e.id, e);
+function activeSimulatedDebris() {
+  return simulatedDebris.filter((d) => !removedDebrisIds.has(String(d.id)));
+}
+
+function getActiveObjects() {
+  const active = [];
+  for (const obj of lastProcessedObjects) {
+    if (!removedDebrisIds.has(String(obj.id))) active.push(obj);
   }
-  for (const b of room.bots || []) {
-    const e = createEntity(b, null);
-    // Phase 4: personality first (difficulty mix per mode), then the trigger
-    // cadence compounds mode temperament × personality (easy practice bots
-    // end up ~2.4× slower than aggressive ffa bots — by construction).
-    // A room may PIN a difficulty (validated server-side at matchmaking), in
-    // which case every bot rolls that tier instead of the per-mode mix.
-    const pers = ensurePersonality(e, room.mode, room.difficulty || null);
-    e.cooldownScale = fireCooldownScale(room.mode) * (pers.cooldownMul || 1);
-    // Friendly practice stays friendly: practice bots deal half damage so a
-    // first-timer gets a lesson, not a spawn-camp. (Real modes: full damage.)
-    e.damageScale = room.mode === 'bot_practice' ? 0.5 : 1;
-    applyCharacter(e, b.character, room);
-    entities.set(e.id, e);
+  for (const obj of activeSimulatedDebris()) active.push(obj);
+  return active;
+}
+
+function isObjectActive(id) {
+  const idStr = String(id);
+  return getActiveObjects().some((obj) => String(obj.id) === idStr);
+}
+
+function removeDebrisObject(id) {
+  const idStr = String(id);
+
+  const numericId = Number(idStr);
+  if (Number.isFinite(numericId)) removeTrackedObject(numericId);
+
+  removedDebrisIds.add(idStr);
+  simulatedDebris = simulatedDebris.filter((d) => String(d.id) !== idStr);
+}
+
+/**
+ * Advance to the next wave when fewer than two simulated debris remain.
+ * New wave size is the new wave number × 3.
+ */
+function maybeAdvanceWave() {
+  if (!gameActive) return false;
+  if (activeSimulatedDebris().length >= WAVE_SPAWN_THRESHOLD) return false;
+
+  currentWave += 1;
+  const count = currentWave * 3;
+  spawnSimulatedDebris(count);
+
+  if (ioRef && EV) {
+    ioRef.emit(EV.LEVEL_UP, {
+      level: currentWave,
+      wave: currentWave,
+      currentWave,
+      count,
+      energy: globalEnergy,
+      score: globalScore,
+    });
   }
-  room.sim = {
-    entities,
-    projectiles: [],
-    tokens: [], // Phase 5: live scrap tokens [{ id, x, y, value, ttl }]
-    tick: 0,
-    endsAt: 0,
-    clockStarted: false,
-    over: false,
-    winInfo: null,
-    teamScores: { red: 0, blue: 0 },
-    stats: { shots: 0, hits: 0, lagCompHits: 0 }, // Phase 5: telemetry counters
-    lastScorePush: 0,
+
+  console.log(
+    `[Solar Sentinel] ⬆️ LEVEL UP → wave ${currentWave} ` +
+      `(${count} simulated debris, energy=${globalEnergy})`
+  );
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Cleanup + scoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle a client AUTHORIZE CLEANUP request.
+ * @param {number|string} id
+ * @returns {Object} result consumed by sockets/index.js
+ */
+export function handlePlayerCleanup(id) {
+  if (!gameActive) {
+    return { success: false, reason: 'Game over — cleanup disabled' };
+  }
+  if (id === undefined || id === null) {
+    return { success: false, reason: 'Missing object id' };
+  }
+
+  const idStr = String(id);
+  if (!isObjectActive(idStr)) {
+    return { success: false, reason: 'Object not in active debris list' };
+  }
+
+  if (globalEnergy < ENERGY_LOW_THRESHOLD) {
+    return {
+      success: false,
+      reason: 'INSUFFICIENT ENERGY',
+      energy: globalEnergy,
+      cost: CLEANUP_ENERGY_COST,
+    };
+  }
+
+  globalEnergy = Math.max(0, globalEnergy - CLEANUP_ENERGY_COST);
+  globalScore += CLEANUP_SCORE_REWARD;
+  cleanupActions += 1;
+  removeDebrisObject(idStr);
+
+  console.log(
+    `[Solar Sentinel] ✅ Cleanup authorized: object ${idStr} removed, ` +
+      `-${CLEANUP_ENERGY_COST}% energy, +${CLEANUP_SCORE_REWARD} score ` +
+      `(energy=${globalEnergy}, score=${globalScore}, wave=${currentWave})`
+  );
+
+  maybeAdvanceWave();
+
+  return {
+    success: true,
+    id: idStr,
+    energy: globalEnergy,
+    score: globalScore,
+    cost: CLEANUP_ENERGY_COST,
+    level: currentWave,
+    wave: currentWave,
+    currentWave,
   };
-  // Phase 5: createRoom always stamps room.map (resolved def); unit-built
-  // rooms that skip createRoom get the legacy arena here as a backstop.
-  if (!room.map) room.map = resolveRoomMap(room.mapId);
-  // S14.3/S14.4: orbital shifts and scrap mimics each start disabled unless the
-  // mode opts in (server-config), so adding a mode never inherits a predator.
-  initShifts(room);
-  initMimics(room);
-  initControlPoint(room);
-  return room.sim;
 }
 
-function tickRoom(room, dt, now) {
-  const sim = room.sim;
-  sim.tick += 1;
+// ---------------------------------------------------------------------------
+// Kessler cascade
+// ---------------------------------------------------------------------------
 
-  // Match clock starts on the first PLAYING tick (countdown doesn't count).
-  if (!sim.clockStarted) {
-    sim.clockStarted = true;
-    initMatchClock(room, now);
-    pushScores(room, now);
-  }
-
-  // -- 1+2. Input + physics -----------------------------------------------------
-  for (const e of sim.entities.values()) {
-    if (e.disconnected || !e.alive) continue;
-    // Phase 4: refresh the shooter's-view latency (humans measured, bots 0)
-    // BEFORE firing, so spawned shells carry an honest rewind budget.
-    e.lastLatencyMs = e.isBot || !e.socketId ? 0 : latencyFor(e.socketId);
-    // Barrel cooling runs every tick whether or not we shoot this one.
-    const cool = config.sim?.heat?.coolPerTick ?? 0.06;
-    if (e.heat > 0) e.heat = Math.max(0, e.heat - cool);
-    let intent;
-    if (e.isBot) {
-      intent = think(e, room, room.mode, now);
-    } else {
-      intent = e.socketId ? intentFor(e.socketId) : neutralIntent();
-    }
-    // Remember aim for melee arcs + criminal-investigation replays.
-    e.lastAimX = intent.aimX;
-    e.lastAimY = intent.aimY;
-    e.lastInputSeq = intent.seq || e.lastInputSeq;
-    // Weapon switching (validated: unknown ids keep the current weapon).
-    if (typeof intent.weaponId === 'string' && WEAPONS[intent.weaponId]) {
-      e.weaponId = intent.weaponId;
-    } else if (Number.isInteger(intent.weaponSlot)) {
-      const ids = Object.keys(WEAPONS);
-      const pick = ids[intent.weaponSlot % ids.length];
-      if (pick) e.weaponId = pick;
-    }
-    stepEntity(e, intent, dt, now, activeGeometry(room));
-
-    // -- 3. Fire (level-based: held fire shoots at weapon cadence) ----------------
-    // Shared validated path with the socket bridge (triggers.js).
-    if (intent.fire) {
-      tryFire(room, e, intent.aimX, intent.aimY, ioRef, EV, now);
-    }
-
-    // -- 4. Melee (edge-based) ------------------------------------------------------
-    if (intent.melee) {
-      tryMelee(room, e, ioRef, EV, now);
-    }
-
-    if (!e.isBot && e.socketId) consumeEdges(e.socketId);
-  }
-
-  // Phase 4: position history AFTER integrating (rewind reads post-step
-  // truth). Dead entities record too — a corpse's trail is static, and one
-  // uniform path beats branchy special cases.
-  for (const e of sim.entities.values()) {
-    if (!e.disconnected) recordHistory(e.history, e.x, e.y, now);
-  }
-
-  // Phase 4 shell cap: oldest fizzle first (full-auto rooms stay bounded).
-  enforceCaps(sim);
-
-  // S14.3 orbital shifts: advance the warn → shift → settle machine. Returns a
-  // transition ONLY when the phase changes, so the emit below is once-per-event,
-  // never per frame. Telegraph first, geometry moves on commit (planShift has
-  // already guaranteed no player is inside a moving platform).
-  const shiftEvt = tickShifts(room, now);
-  if (shiftEvt) {
-    ioRef?.to(room.id)?.emit(EV.ORBITAL_SHIFT, { roomId: room.id, ...shiftEvt, timestamp: now });
-  }
-
-  // -- 5. Projectiles → damage ------------------------------------------------------
-  // Phase 5: shell clip bounds come from the MAP (arenas differ now).
-  const B = room.map?.bounds || {};
-  const hits = stepProjectiles(sim.projectiles, sim.entities, dt, now, {
-    minX: B.minX ?? 40,
-    maxX: B.maxX ?? 1240,
-    ceilingY: B.ceilingY ?? 40,
-    groundY: B.groundY ?? 650,
-  }, room.mimics?.enabled ? room.mimics.list : null);
-  let killsThisTick = 0;
-  const vmax = (config.sim?.maxSpeed || 260) * 1.5; // knockback may spike past run speed — cap it
-  for (const h of hits) {
-    // S14.4: a shot that struck an ARMED mimic pays out scrap instead of blood.
-    if (h.mimic) {
-      if (damageMimic(room, h.mimic, h.proj.damage, h.proj.ownerId, now)) {
-        const shooter = sim.entities.get(h.proj.ownerId);
-        if (h.mimic.state === 'stunned') {
-          ioRef?.to(room.id)?.emit(EV.MIMIC_EVENT, {
-            roomId: room.id, kind: 'kill', id: h.mimic.id,
-            byId: h.proj.ownerId, byName: shooter?.name || null,
-            x: Math.round(h.mimic.x), y: Math.round(h.mimic.y), timestamp: now,
-          });
-          if (shooter) { shooter.mimicsKilled = (shooter.mimicsKilled || 0) + 1; }
-        } else {
-          ioRef?.to(room.id)?.emit(EV.MIMIC_EVENT, {
-            roomId: room.id, kind: 'hit', id: h.mimic.id,
-            byId: h.proj.ownerId, byName: shooter?.name || null,
-            hp: Math.max(0, h.mimic.hp), timestamp: now,
-          });
-        }
-      }
-      continue;
-    }
-    // Knockback juice (applied even on lethal hits — corpses can slide).
-    h.victim.vx += Math.sign(h.victim.x - h.proj.x || 1) * (h.proj.knockback || 0) * 0.4;
-    h.victim.vx = Math.max(-vmax, Math.min(vmax, h.victim.vx));
-    // Phase 5 telemetry: rewound hits counted separately (fairness metric).
-    if (h.lagComp && sim.stats) sim.stats.lagCompHits = (sim.stats.lagCompHits || 0) + 1;
-    const killEvt = applyHit(room, h.victim, h.proj.damage * h.falloff, h.proj.ownerId, 'bullet', ioRef, EV, now);
-    if (killEvt) {
-      killsThisTick += 1;
-      if (killEvt.killerId) recordTeamKill(room, killEvt.killerTeam);
+function findHighestRisk(activeObjects) {
+  let highest = null;
+  for (const obj of activeObjects) {
+    if (!highest || (obj.riskLevel ?? 0) > (highest.riskLevel ?? 0)) {
+      highest = obj;
     }
   }
-  // S14.4 mimic AI: spawn / arm / chase / bite. Runs after projectiles so a
-  // mimic cannot bite in the same tick a player shot it. Returns events, and
-  // emits happen here — one emission site, never inside the module.
-  // S14.5 control point: presence → contested → capture → score. Runs with the
-  // rest of the objective tick; checkWin() reads its totals for the win check.
-  if (room.controlPoint?.enabled) tickControlPoint(room, dt, now, ioRef, EV);
+  return highest;
+}
 
-  if (room.mimics?.enabled) {
-    const mEvts = tickMimics(room, dt, now, ioRef, EV);
-    for (const me of mEvts) {
-      ioRef?.to(room.id)?.emit(EV.MIMIC_EVENT, { roomId: room.id, ...me, timestamp: now });
-      // A bite that lands for real is a death — it must reach the killfeed and
-      // refresh the scoreboard. `applyHit` already routed it through `kill()`
-      // with a null killer, so no opponent earns a kill or a streak from it.
-      if (me.kind === 'bite' && me.killed) pushScores(room, now);
+function checkKesslerCascade(now = Date.now()) {
+  if (!gameActive) return;
+  const activeObjects = getActiveObjects();
+  if (activeObjects.length === 0) return;
+
+  const highRisk = activeObjects.filter((o) => (o.riskLevel ?? 0) >= KESSLER_RISK_THRESHOLD);
+  if (highRisk.length === 0) return;
+
+  // Dynamic, tense pacing: probability scales with the number of high-risk
+  // objects, but only ONE collision may occur per 4-second tick.
+  let probability = 0;
+  if (highRisk.length === 1) probability = 0.3;
+  else if (highRisk.length === 2) probability = 0.6;
+  else probability = 1.0;
+
+  if (Math.random() > probability) return;
+
+  const highest = highRisk.reduce((a, b) =>
+    (b.riskLevel ?? 0) > (a.riskLevel ?? 0) ? b : a,
+  );
+  if (!highest) return;
+
+  triggerCollisionEvent(highest, now);
+}
+
+
+
+// ============================================================
+   MAXIMUM JUICE — collision effects
+   ============================================================
+
+/** GLITCH effect: shift UI left/right and turn background red */
+function applyGlitchEffect() {
+  const html = document.documentElement;
+  html.style.transform = 'translateX(-5px)';
+  html.style.transition = 'transform 100ms';
+  // Red background flash
+  const style = document.createElement('style');
+  style.textContent = `
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: rgba(255, 0, 60, 0.1);
+      pointer-events: none;
+      z-index: 999;
+      animation: glitch-red 100ms forwards;
     }
-  }
-
-  if (killsThisTick > 0) pushScores(room, now);
-
-  // -- 5b. Hazard volumes (Phase 5): fractional DoT, uncredited ------------------------
-  // dps × dt accumulates until a whole HP is owed (no rounding starvation).
-  // Spawn protection covers hazards too (no lava-spawn deaths, ever).
-  for (const e of sim.entities.values()) {
-    if (!e.alive || e.disconnected) continue;
-    const dps = hazardAt(room.map, e.x, e.y);
-    if (dps <= 0) continue;
-    e.hazardAcc = (e.hazardAcc || 0) + dps * dt;
-    if (e.hazardAcc >= 1) {
-      const owed = Math.floor(e.hazardAcc);
-      e.hazardAcc -= owed;
-      const killEvt = applyHit(room, e, owed, null, 'hazard', ioRef, EV, now);
-      if (killEvt) {
-        killsThisTick += 1;
-        pushScores(room, now);
-      }
+    @keyframes glitch-red {
+      0% { background: rgba(255, 0, 60, 0.1); }
+      100% { background: rgba(255, 0, 60, 0); }
     }
+  magic`;
+  document.head.appendChild(style);
+  // Reset after animation
+  setTimeout(() => {
+    html.style.transform = 'translateX(0)';
+    document.head.removeChild(style);
+  }, 100);
+}
+
+/** Show high-res cracked glass image overlay */
+function showCrashCracks() {
+  const cracks = document.getElementById('screen-cracks');
+  if (!cracks) return;
+  // Set a cracked glass background image
+  cracks.style.backgroundImage = 'url("/assets/cracked-glass.png")';
+  cracks.style.opacity = '1';
+  cracks.style.transition = 'opacity 2s ease-out';
+  // Reset after 2s
+  setTimeout(() => {
+    cracks.style.opacity = '0';
+    cracks.style.backgroundImage = '';
+  }, 2000);
+}
+
+/** Spawn debris with physics-style velocity */
+function spawnPhysicsDebris(x, y, objects) {
+  // 3 new debris objects flying out from impact site
+  const angles = [0, Math.PI / 2, Math.PI];
+  const speeds = [3, 4, 5];
+  for (let i = 0; i < 3; i++) {
+    const angle = angles[i];
+    const speed = speeds[i];
+    const id = "SIM-" + Math.floor(Math.random() * 900000) + 100000;
+    objects.push({
+      id,
+      name: "Debris-",
+      x: x,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      riskLevel: 6 + Math.floor(Math.random() * 5),
+      isSimulated: true,
+      life: 1,
+    });
   }
+}
+function triggerCollisionEvent(collided, now = Date.now) {
+  if (!gameActive) return;
 
-  // -- 5c. Scrap economy (Phase 5, scrap_collector only) ---------------------------------
-  if (room.mode === 'scrap_collector') {
-    tickScrap(room, dt, now);
-  }
+  // Strict contract: EVERY collision increments exactly once, unconditionally,
+  // and the new count is carried on both collision_alert and the next snapshot.
+  collisionCount += 1;
+  removeDebrisObject(collided.id);
 
-  // -- 6. Respawns --------------------------------------------------------------------
-  processRespawns(room, ioRef, EV, now);
+  const x = Number.isFinite(collided.x) ? collided.x : MAP_WIDTH / 2;
+  const y = Number.isFinite(collided.y) ? collided.y : MAP_HEIGHT / 2;
 
-  // -- 7. Win check ----------------------------------------------------------------------
-  const win = checkWin(room, now);
-  if (win && onMatchEnd) {
-    // Emit one final snapshot so clients render the deciding frame, then end.
-    ioRef.to(room.id).emit(EV.ENTITY_SNAPSHOT, buildSnapshot(room, now));
-    onMatchEnd(room.id, win.reason);
+  ioRef?.emit(EV.COLLISION_ALERT, {
+    type: 'COLLISION_EVENT',
+    objectId: String(collided.id),
+    objectName: collided.name,
+    x,
+    y,
+    riskLevel: collided.riskLevel,
+    collisionCount,
+    currentWave,
+    timestamp: now,
+  });
+
+  // Three fragments spawn at the exact impact coordinates.
+  const spawned = spawnSimulatedDebris(KESSLER_DEBRIS_COUNT, { x, y, wave: currentWave });
+
+  // Maximum Juice: apply all visual effects
+  applyGlitchEffect();
+  showCrashCracks();
+  spawnPhysicsDebris(x, y, simulatedDebris);
+
+  console.log(
+    `[Solar Sentinel] 💥 CASCADE COLLISION: ${collided.name ?? collided.id} ` +
+      `(risk ${collided.riskLevel}) → ${spawned.length} fragments at ` +
+      `(${x.toFixed(1)}, ${y.toFixed(1)}) — collision ${collisionCount}/` +
+      `${GAME_OVER_COLLISION_COUNT}`
+  );
+
+  if (collisionCount >= GAME_OVER_COLLISION_COUNT) {
+    triggerGameOver(now, 'CASCADE_UNSTOPPABLE');
     return;
   }
-  // Phase 4 overtime just started: push the flag NOW (scoreboard + horn
-  // notice) so HUDs flip to "OVERTIME" before the next kill lands.
-  if (room.sim.overtimeJustStarted) {
-    room.sim.overtimeJustStarted = false;
-    pushScores(room, now);
+
+  emitSnapshot(now);
+}
+
+function triggerGameOver(now = Date.now(), reason = 'CASCADE_UNSTOPPABLE') {
+  if (!gameActive) return;
+  gameActive = false;
+  stopGameTimers();
+
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
   }
 
-  // -- 8. Sync -----------------------------------------------------------------------------
-  ioRef.to(room.id).emit(EV.ENTITY_SNAPSHOT, buildSnapshot(room, now));
-  if (sim.tick % 2 === 0) {
-    ioRef.to(room.id).emit(EV.BOT_UPDATE, buildBotUpdate(room, now));
+  ioRef?.emit(EV.GAME_OVER, {
+    reason,
+    finalScore: globalScore,
+    globalEnergy,
+    collisionCount,
+    currentWave,
+    wave: currentWave,
+    level: currentWave,
+    timestamp: now,
+    finalStats: {
+      wave: currentWave,
+      totalCleanups: cleanupActions,
+      totalScore: globalScore,
+      finalEnergy: globalEnergy,
+      totalObjectsSpawned: simulatedDebris.length,
+    },
+  });
+
+  console.log(
+    `[Solar Sentinel] 🏁 GAME OVER (${reason}): score ${globalScore}, ` +
+      `collisions=${collisionCount}, energy=${globalEnergy}, wave=${currentWave}`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot + orbital tick
+// ---------------------------------------------------------------------------
+
+function kickOffDataFetch(now) {
+  if (isFetching || now - lastDataFetch <= DATA_FETCH_INTERVAL) return;
+  isFetching = true;
+
+  fetchOrbitalData()
+    .then((freshData) => {
+      if (Array.isArray(freshData) && freshData.length > 0) {
+        cachedOrbitalData = freshData;
+      }
+    })
+    .catch((error) => {
+      console.error('[Solar Sentinel] Orbital data fetch failed:', error.message);
+    })
+    .finally(() => {
+      isFetching = false;
+      lastDataFetch = now;
+    });
+}
+
+async function emitSnapshot(now = Date.now()) {
+  if (!ioRef || !EV || !gameActive) return;
+
+  try {
+    // The simulated wave must never wait on (or be blocked by) NASA I/O.
+    kickOffDataFetch(now);
+
+    if (cachedOrbitalData && cachedOrbitalData.length > 0) {
+      lastProcessedObjects = (await processOrbitalData(cachedOrbitalData, 0)) || [];
+    }
+
+    const activeObjects = getActiveObjects();
+
+
+    ioRef.emit(EV.ORBITAL_SNAPSHOT, {
+      timestamp: now,
+      tick: Math.floor(now / ORBITAL_UPDATE_INTERVAL),
+      objects: activeObjects,
+      // currentWave is the canonical name; level/wave stay for the frontend.
+      currentWave,
+      level: currentWave,
+      wave: currentWave,
+      globalEnergy,
+      globalScore,
+      collisionCount,
+      gameActive,
+      cleanupCost: CLEANUP_ENERGY_COST,
+      energyThreshold: ENERGY_LOW_THRESHOLD,
+    });
+  } catch (error) {
+    console.error('[Solar Sentinel] Snapshot emission failed:', error.message);
   }
+}
+
+async function orbitalTick(now = Date.now()) {
+  if (!ioRef || !EV || !gameActive) return;
+  maybeAdvanceWave();
+  await emitSnapshot(now);
+}
+
+// ---------------------------------------------------------------------------
+// Public state / test seams
+// ---------------------------------------------------------------------------
+
+export function resetGameState() {
+  gameActive = true;
+  globalEnergy = MAX_ENERGY;
+  globalScore = 0;
+  currentWave = 1;
+  collisionCount = 0;
+  cleanupActions = 0;
+
+  removedDebrisIds.clear();
+  simulatedDebris = [];
+
+  stopGameTimers();
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+
+  spawnSimulatedDebris(STARTING_DEBRIS_COUNT);
+  startGameTimers();
+
+  if (!timer) {
+    timer = setInterval(orbitalTick, ORBITAL_UPDATE_INTERVAL);
+    timer.unref?.();
+  }
+
+  if (ioRef && EV) {
+    ioRef.emit(EV.LEVEL_UP, {
+      level: 1,
+      wave: 1,
+      currentWave: 1,
+      count: STARTING_DEBRIS_COUNT,
+      energy: globalEnergy,
+      score: globalScore,
+    });
+  }
+
+  console.log('[Solar Sentinel] 🔄 Game state reset for a new run');
 }
 
 /**
- * Phase 5 scrap economy tick (scrap_collector rooms only):
- *  expiry → walk-over pickup (humans AND bots) → station deposit.
- * Deposit banks carried → banked, mirrors score, and pushes the table
- * (scores visibly climb on every bank, not just on kills).
+ * Test hook: force one authoritative Kessler cascade check immediately.
  */
-export function tickScrap(room, dt, now) {
-  void dt;
-  const sim = room.sim;
-  const cfg = config.sim?.scrap || {};
-  const carryCap = cfg.carryCap || 5;
-  const pickupR = cfg.pickupRadius || 34;
-
-  // Expired tokens rot away by TTL (the hard-count cap lives in enforceCaps,
-  // which runs for every room every tick — one cap, one place).
-  if (sim.tokens.length > 0) {
-    sim.tokens = sim.tokens.filter((t) => t.ttl > now);
+export function triggerKesslerCascadeNow() {
+  if (!gameActive) {
+    return { success: false, reason: 'Game over — cannot cascade' };
   }
 
-  let scoresDirty = false;
-  for (const e of sim.entities.values()) {
-    if (!e.alive || e.disconnected) continue;
-    // Pickup: nearest token in radius, satchel capped (full carriers walk past).
-    if ((e.carried || 0) < carryCap && sim.tokens.length > 0) {
-      let best = -1;
-      let bestD = pickupR;
-      for (let i = 0; i < sim.tokens.length; i += 1) {
-        const d = Math.hypot(sim.tokens[i].x - e.x, sim.tokens[i].y - (e.y - 20));
-        if (d <= bestD) {
-          bestD = d;
-          best = i;
-        }
-      }
-      if (best !== -1) {
-        const [tok] = sim.tokens.splice(best, 1);
-        e.carried = (e.carried || 0) + (tok.value || 1);
-        emitScrap(room, {
-          kind: 'pickup', id: tok.id, byId: e.id, byName: e.name,
-          amount: tok.value || 1, total: e.carried, x: tok.x, y: tok.y,
-        }, now);
-      }
-    }
-    // Deposit: inside a station dock with a non-empty satchel → bank it.
-    if ((e.carried || 0) > 0) {
-      const dock = stationAt(room.map, e.x, e.y);
-      if (dock) {
-        const amount = e.carried;
-        e.carried = 0;
-        e.banked = (e.banked || 0) + amount;
-        e.score = e.banked; // scrap score IS banked (table sorts itself)
-        scoresDirty = true;
-        emitScrap(room, {
-          kind: 'deposit', id: dock.id, byId: e.id, byName: e.name,
-          amount, total: e.banked, stationId: dock.id, x: Math.round(e.x), y: Math.round(e.y),
-        }, now);
-      }
-    }
+  const active = getActiveObjects();
+  const highest = findHighestRisk(active);
+  if (!highest || (highest.riskLevel ?? 0) < KESSLER_RISK_THRESHOLD) {
+    return { success: false, reason: 'No high-risk debris to cascade' };
   }
-  if (scoresDirty) pushScores(room, now);
+
+  triggerCollisionEvent(highest, Date.now());
+  return {
+    success: true,
+    collisionCount,
+    currentWave,
+    gameActive,
+  };
 }
 
-/** scrap_event fan-out (headless/unit-safe: no io, no name → silence). */
-function emitScrap(room, fields, now = Date.now()) {
-  if (!ioRef || !EV || !EV.SCRAP_EVENT) return;
-  ioRef.to(room.id).emit(EV.SCRAP_EVENT, {
-    roomId: room.id,
-    tick: room.sim?.tick || 0,
-    timestamp: now,
-    ...fields,
-  });
-}
-
-/**
- * Phase 5 memory hygiene: hard caps trim the oldest entries FIRST so a
- * full-auto 10-player room stays bounded no matter what. Called every tick;
- * exported for unit tests (pure over the sim object, no io).
- *  - projectiles → maxProjectiles (60): oldest fizzle, no event (janitorial).
- *  - tokens → scrap.tokenCap (40): oldest silently recycled (snapshot shrinks).
- * TTL expiry stays in tickScrap (scrap rooms only); this is the backstop.
- */
-export function enforceCaps(sim) {
-  if (!sim) return;
-  const maxProj = config.sim?.maxProjectiles || 60;
-  if (Array.isArray(sim.projectiles) && sim.projectiles.length > maxProj) {
-    sim.projectiles.splice(0, sim.projectiles.length - maxProj);
-  }
-  const tokenCap = config.sim?.scrap?.tokenCap || 40;
-  if (Array.isArray(sim.tokens) && sim.tokens.length > tokenCap) {
-    sim.tokens.splice(0, sim.tokens.length - tokenCap);
+export function stopGameLoop() {
+  gameActive = false;
+  stopGameTimers();
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
   }
 }
 
-/** Scoreboard push (on kills + match start + overtime + deposits; event-driven). */
-function pushScores(room, now = Date.now()) {
-  if (!ioRef || !EV) return; // headless/unit contexts fan out nothing
-  const scores = scoreboard(room);
-  ioRef.to(room.id).emit(EV.SCORE_UPDATE, {
-    roomId: room.id,
-    mode: room.mode,
-    scores,
-    teams: room.mode === 'tdm' ? { ...room.sim.teamScores } : null,
-    overtime: Boolean(room.sim?.overtime),
-    tick: room.sim?.tick || 0,
-    timestamp: now,
-  });
+export function getGameState() {
+  return {
+    globalEnergy,
+    globalScore,
+    currentWave,
+    collisionCount,
+    gameActive,
+    activeDebrisCount: getActiveObjects().length,
+  };
 }
 
-/** Debug helper (now includes tick health for the 20 Hz stability watch). */
 export function stats() {
   return {
     loopRunning: Boolean(timer),
-    tickHz: config.sim?.tickHz || 20,
-    avgTickMs:
-      tickStats.samples > 0 ? Math.round((tickStats.totalMs / tickStats.samples) * 100) / 100 : 0,
-    ticksMeasured: tickStats.samples,
+    updateIntervalMs: ORBITAL_UPDATE_INTERVAL,
+    dataFetchIntervalMs: DATA_FETCH_INTERVAL,
+    objectsTracked: cachedOrbitalData ? cachedOrbitalData.length : 0,
+    lastDataFetchAge: cachedOrbitalData ? Date.now() - lastDataFetch : 0,
+    globalEnergy,
+    globalScore,
+    currentWave,
+    collisionCount,
+    gameActive,
+    activeDebrisCount: getActiveObjects().length,
   };
+}
+
+export function getTrackedObjects() {
+  return cachedOrbitalData || [];
+}
+
+export function removeTrackedObject(id) {
+  if (!cachedOrbitalData) return false;
+  const beforeLength = cachedOrbitalData.length;
+  cachedOrbitalData = cachedOrbitalData.filter((obj) => obj.id !== id);
+  if (cachedOrbitalData.length < beforeLength) {
+    console.log(`[Solar Sentinel] 🗑️ Removed tracked object ${id} from orbital data`);
+    return true;
+  }
+  return false;
+}
+
+export async function refreshData() {
+  try {
+    const freshData = await fetchOrbitalData();
+    if (freshData && freshData.length > 0) {
+      cachedOrbitalData = freshData;
+      lastDataFetch = Date.now();
+      console.log('[Solar Sentinel] Orbital data refreshed successfully');
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('[Solar Sentinel] Failed to refresh orbital data:', error);
+    return false;
+  }
 }

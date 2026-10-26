@@ -1,5 +1,5 @@
 /**
- * Astral Zero — the coordinate boundary (client ⇄ server).
+ * Solar Sentinel — the coordinate boundary (client ⇄ server).
  * ============================================================
  * The authoritative simulation and the Phaser client use different vertical
  * origins for the SAME body, and this module is the ONLY place that is allowed

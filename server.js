@@ -1,21 +1,13 @@
 /**
- * Astral Zero — Backend entry point.
+ * Solar Sentinel — Backend entry point.
  * ============================================================
  * Starts the Express + Socket.io server.
  *
- * Responsibilities (Phase 1 only):
+ * Responsibilities:
  *  1. Load config (port, paths).
- *  2. Build the Express app (see src/app.js) — serves Phaser
- *     game from the `public/` folder.
- *  3. Attach Socket.io (see src/sockets/) — event skeleton only,
- *     no game logic / bot AI / rooms yet.
+ *  2. Build the Express app (see src/app.js).
+ *  3. Attach Socket.io (see src/sockets/) — NASA orbital monitoring.
  *  4. Listen on PORT.
- *
- * Frontend engineers: you only need `public/` + `websocket_events.md`.
- * Just open http://localhost:3000 after `npm run dev:server`.
- *
- * NOTE: this repo is `"type": "module"`, so the backend uses ESM
- * `import` syntax (same as the Phaser/Vite frontend).
  */
 
 import 'dotenv/config'; // loads .env — see .env.example
@@ -24,7 +16,6 @@ import { Server } from 'socket.io';
 import config from './src/server-config.js';
 import createApp from './src/app.js';
 import { initSockets } from './src/sockets/index.js';
-import { initPersistence, closePersistence } from './src/players/persistence.js';
 
 // --- 1. Express app (static hosting + REST stub) ---------------------------
 const app = createApp();
@@ -33,50 +24,36 @@ const app = createApp();
 const httpServer = http.createServer(app);
 
 // --- 3. Socket.io server ----------------------------------------------------
-// CORS is left open for local Phaser development (Vite / Live Server /
-// file:// testing). Lock `CORS_ORIGIN` down in production.
 const io = new Server(httpServer, {
   cors: {
-    origin: config.corsOrigin, // "*" by default in Phase 1
+    origin: config.corsOrigin,
     methods: ['GET', 'POST'],
   },
-  // NOTE: we keep all payloads as plain JSON objects (see websocket_events.md).
   maxHttpBufferSize: 1e6, // 1 MB — prevents accidental huge payloads
 });
 
-// Load durable player profiles BEFORE any socket handler can read one, so a
-// returning player is never briefly treated as a new one.
-if (config.persistence?.enabled !== false) initPersistence();
-
-// Register all Phase 1 event handlers (skeleton: log + acknowledge only).
+// Register all Socket.io event handlers
 initSockets(io);
 
 // --- 4. Listen ---------------------------------------------------------------
 httpServer.listen(config.port, () => {
   console.log('');
-  console.log('  ★ Astral Zero backend online ★');
+  console.log('  ★ Solar Sentinel backend online ★');
   console.log(`  → HTTP + Socket.io : http://localhost:${config.port}`);
-  console.log(`  → Phaser root      : http://localhost:${config.port}/  (serves public/)`);
+  console.log(`  → Dashboard root   : http://localhost:${config.port}/`);
   console.log(`  → Health check     : http://localhost:${config.port}/api/health`);
+  console.log(`  → Orbital stats    : http://localhost:${config.port}/api/stats`);
   console.log(`  → Contract         : see websocket_events.md`);
   console.log('');
 });
 
 // Graceful shutdown so nodemon / Ctrl+C doesn't leave the port hanging.
 let shuttingDown = false;
-/**
- * Close the listener, flush pending profile writes, then exit.
- * The flush MUST happen before exit: a debounced write that never lands is a
- * silently lost ranked rating.
- * @param {string} signal
- */
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[Astral Zero] ${signal} received, closing server...`);
-  closePersistence();
+  console.log(`[Solar Sentinel] ${signal} received, closing server...`);
   httpServer.close(() => process.exit(0));
-  // Do not hang forever on a stuck keep-alive socket.
   setTimeout(() => process.exit(0), 3000).unref();
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));

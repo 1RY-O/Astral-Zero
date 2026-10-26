@@ -1,5 +1,5 @@
 /**
- * Astral Zero — loadout VARIANTS (shared client + server).
+ * Solar Sentinel — loadout VARIANTS (shared client + server).
  * ============================================================
  * S14.2. A character keeps its identity; variants tune HOW it plays without
  * breaking the promise that the character is recognisable.

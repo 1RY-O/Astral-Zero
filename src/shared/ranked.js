@@ -1,5 +1,5 @@
 /**
- * Astral Zero — RANKED ratings (shared client + server).
+ * Solar Sentinel — RANKED ratings (shared client + server).
  * ============================================================
  * S14.6. Ratings are the one subsystem where a wrong number is worse than no
  * number: a rating computed from unverifiable client state, or one that resets
@@ -94,7 +94,7 @@ export function eloDelta(rating, won, opponentRating) {
  *
  * `opponentRating` is the average rating of the room's other ranked humans
  * (0 / unknown → treated as the neutral 1200, so a bot-only farm does not farm
- * rating). This is the ONLY entry point; matchmaking, the client and the HUD
+ * rating). This is the ONLY entry point; operator coordination, the client and the HUD
  * all read the result, none of them compute one.
  *
  * @param {object} ranked current `profile.ranked`

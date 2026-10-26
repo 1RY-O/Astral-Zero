@@ -1,7 +1,7 @@
 {
-  "name": "astral-zero",
+  "name": "solar-sentinel",
   "version": "0.1.0",
-  "description": "Astral Zero - a chaotic 2D arena platformer-shooter where a space janitor cleans low-Earth orbit junk. Built for the NASA Space Apps Challenge 2026: Astro Sweepers.",
+  "description": "Solar Sentinel - A real-time, server-authoritative orbital debris threat simulation that ingests live Celestrak/NORAD TLE data, propagates objects with satellite.js at 2 Hz, runs the Kessler Cascade, and streams live collision-risk visuals to a Vanilla Canvas dashboard.",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -15,68 +15,32 @@
     "url": "https://github.com/1RY-O/Astral-Zero/issues"
   },
   "keywords": [
-    "phaser",
-    "phaser3",
-    "game",
-    "platformer",
-    "shooter",
-    "nasa-space-apps"
+    "nasa-space-apps",
+    "orbital-debris",
+    "dashboard",
+    "socket-io"
   ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "dev:server": "nodemon server.js",
-    "start": "node server.js",
-    "test": "node tests/lobby-ui.test.mjs",
-    "test:camera": "node --import ./tests/register-phaser-stub.mjs tests/camera.test.mjs",
-    "test:bots": "node tests/matchmaking-bots.test.mjs",
-    "test:practice": "node tests/practice.test.mjs",
-    "test:ui-ray": "node --import ./tests/register-phaser-stub.mjs tests/ui-ray.test.mjs",
-    "test:aim": "node tests/aim-conversion.test.mjs",
-    "test:input": "node --import ./tests/register-phaser-stub.mjs tests/input-jump.test.mjs",
-    "test:lifecycle": "node tests/queue-lifecycle.test.mjs",
-    "test:arena-restart": "node --import ./tests/register-phaser-stub.mjs tests/arena-restart.test.mjs",
-    "test:map": "node tests/arena-map.test.mjs",
-    "test:bridge": "node tests/legacy-bridge.test.mjs",
-    "test:tuning": "node tests/shared-tuning.test.mjs",
-    "test:coords": "node tests/coords.test.mjs",
-    "test:responsive": "node tests/responsive.test.mjs",
-    "test:all": "npm run test:sockets && npm run test && npm run test:uiux && npm run test:lobby && npm run test:home && npm run test:hud && npm run test:net && npm run test:netdebug && npm run test:combat && npm run test:feedback && npm run test:transport && npm run test:audio && npm run test:fx && npm run test:progression && npm run test:world && npm run test:wiring && npm run test:bots && npm run test:practice && npm run test:ui-ray && npm run test:camera && npm run test:aim && npm run test:input && npm run test:lifecycle && npm run test:arena-restart && npm run test:map && npm run test:bridge && npm run test:tuning && npm run test:coords && npm run test:responsive && npm run test:security && npm run test:tokens && npm run test:persist && npm run test:chars && npm run test:shifts && npm run test:mimics && npm run test:control && npm run test:ranked",
-    "test:net": "node tests/net-integration.test.mjs",
-    "test:netdebug": "node tests/netdebug.test.mjs",
-    "test:combat": "node tests/combat-model.test.mjs",
-    "test:feedback": "node tests/feedback.test.mjs",
-    "test:transport": "node tests/transport.test.mjs",
-    "test:audio": "node tests/audio.test.mjs",
-    "test:fx": "node tests/fxpool.test.mjs",
-    "test:progression": "node tests/progression.test.mjs",
-    "test:wiring": "node tests/phase5-wiring.test.mjs",
-    "test:world": "node tests/world.test.mjs",
-    "test:uiux": "node tests/uiux.test.mjs",
-    "test:lobby": "node --import ./tests/register-phaser-stub.mjs tests/lobby-scene.test.mjs",
-    "test:home": "node --import ./tests/register-phaser-stub.mjs tests/home-scene.test.mjs",
-    "test:hud": "node --import ./tests/register-phaser-stub.mjs tests/hud.test.mjs",
-    "test:security": "node tests/security.test.mjs",
-    "test:sockets": "node tests/sockets-registration.test.mjs",
-    "test:tokens": "node --import ./tests/register-phaser-stub.mjs tests/design-tokens.test.mjs",
-    "test:persist": "node tests/persistence.test.mjs",
-    "test:chars": "node tests/characters.test.mjs",
-    "test:shifts": "node tests/shifts.test.mjs",
-    "test:mimics": "node tests/mimics.test.mjs",
-    "test:control": "node tests/control.test.mjs",
-    "test:ranked": "node tests/ranked-flow.test.mjs"
+    "start": "node server.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
-    "phaser": "^3.90.0",
+    "satellite.js": "^7.1.0",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",
+    "playwright": "^1.64.1",
     "socket.io-client": "^4.8.4",
     "vite": "^7.3.6"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }

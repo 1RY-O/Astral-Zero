@@ -1,5 +1,5 @@
 /**
- * Astral Zero — the LAUNCH ROSTER (shared client + server).
+ * Solar Sentinel — the LAUNCH ROSTER (shared client + server).
  * ============================================================
  * Five original janitors, one per tier band. This module is the single source
  * of truth for who exists, what they do, and — critically — the server reads it
@@ -54,7 +54,7 @@ export const CHARACTERS = Object.freeze({
     // Lore 
     lore: 'Last of the Deep-Range Salvagers. Keeps the scope from a ship that no longer flies.',
     personality: 'Calm, clipped, faintly contemptuous of anyone who rushes.',
-    // Combat identity 
+    // Operational identity 
     weapon: 'scrap-rifle',      // the scope: precise, single-target, long reads
     stats: Object.freeze({ hp: 88, speedMul: 1.05, jumpMul: 1.05, fireRateMul: 1.25, damageMul: 1.35, reloadMul: 1.0 }),
     // Movement skill 
@@ -132,7 +132,7 @@ export const CHARACTERS = Object.freeze({
       desc: 'Erects a field that slows and chips anything standing in it.',
     }),
     strengths: 'Toughest health bar in the roster and by far the biggest splash — she clears rooms rather than duels.',
-    weaknesses: 'Slowest and weakest per-shot; a one-on-one with a precise shooter is a loss.',
+    weaknesses: 'Slowest and weakest per-shot; a one-on-one with a precise operator is a loss.',
   }),
   nettle: Object.freeze({
     id: 'nettle',

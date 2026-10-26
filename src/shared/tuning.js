@@ -1,5 +1,5 @@
 /**
- * Astral Zero — SHARED tuning (client + server).
+ * Solar Sentinel — SHARED tuning (client + server).
  * ============================================================
  * ONE importable, dependency-free module that owns every number the client
  * predicts with AND the authoritative server simulates with. It is imported by

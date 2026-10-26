@@ -1,5 +1,5 @@
 /**
- * Astral Zero — Friends manager (Phase 2).
+ * Solar Sentinel — Operator presence manager (Phase 2).
  * ============================================================
  * LOCKED REQUIREMENTS:
  *  - Add friend by player ID (socket id) OR username (case-insensitive)

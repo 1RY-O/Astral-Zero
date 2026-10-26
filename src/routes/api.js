@@ -1,5 +1,5 @@
 /**
- * Astral Zero — Tiny REST router (status / info only).
+ * Solar Sentinel — Tiny REST router (status / info only).
  * ============================================================
  * Phase 1 exposes:
  *  - GET /api/health → "is the server up?" (load balancers, uptime bots)
@@ -22,10 +22,6 @@
 import express from 'express';
 import config from '../server-config.js';
 import { SOCKET_EVENTS, SOCKET_EVENTS_VERSION, GAME_MODE_LIST } from '../sockets/events.js';
-import { stats as playerStats } from '../players/playerStore.js';
-import { stats as partyStats } from '../parties/partyManager.js';
-import { stats as roomStats } from '../rooms/roomManager.js';
-import { stats as queueStats } from '../matchmaking/matchmakingManager.js';
 
 const router = express.Router();
 
@@ -42,17 +38,8 @@ router.get('/health', (_req, res) => {
 
 // GET /api/info — what can a client expect from this server?
 router.get('/info', (_req, res) => {
-  // Live counts are best-effort (all in-memory maps). Never throws —
-  // /api/info must stay up even if a manager has an odd day.
-  let counts = { online: 0, parties: 0, rooms: 0, queues: null };
-  try {
-    counts.online = playerStats().onlineSessions || 0;
-    counts.parties = partyStats().partyCount || 0;
-    counts.rooms = roomStats().roomCount || 0;
-    counts.queues = queueStats();
-  } catch {
-    /* keep defaults */
-  }
+  // Orbital monitoring stats — no player/party/room queues in Solar Sentinel
+  const counts = { online: 0, parties: 0, rooms: 0, queues: null };
   res.json({
     game: config.gameName,
     version: config.gameVersion,
@@ -60,71 +47,99 @@ router.get('/info', (_req, res) => {
     socketEventsVersion: SOCKET_EVENTS_VERSION,
     transport: 'socket.io (JSON payloads, see websocket_events.md)',
     supportedSocketEvents: Object.values(SOCKET_EVENTS),
-    // -- Phase 2: locked design surface (mirrors websocket_events.md §7) --
-    // Derived from the shared mode registry (GAME_MODES) rather than a
-    // hand-written list, so a mode the server actually accepts — S14.5's
-    // `control_point` included — is never missing from the advertised surface.
+    // Solar Sentinel orbital monitoring surface
+    orbital: {
+      trackedObjects: 0,
+      updateIntervalMs: 500,
+      dataFetchIntervalMs: 30000,
+      nasaApiEndpoint: 'https://api.nasa.gov/api/tle/{norad_id}',
+    },
+    // Mode info (kept for frontend compatibility)
     gameModes: GAME_MODE_LIST,
     maps: [
-      { id: 'orbital_junkyard', name: 'Orbital Junkyard' },
-      { id: 'reactor_core', name: 'Reactor Core' },
-      { id: 'biodome', name: 'Biodome' },
+      { id: 'earth_orbit', name: 'Earth Orbit Monitoring' },
     ],
     limits: {
-      partyMaxSize: config.party?.maxSize || 4,
-      partyCodeLength: config.party?.codeLength || 6,
-      ffaMaxPlayers: config.gameModes?.ffa?.maxPlayers || 10,
-      tdmTeamSize: config.gameModes?.tdm?.teamSize || 4,
-      scrapMaxPlayers: config.gameModes?.scrap_collector?.maxPlayers || 8,
-      maxSpectators: config.rooms?.maxSpectators || 8,
+      maxTrackedObjects: 100,
     },
     counts,
-    // -- Phase 3: sim surface (mirrors websocket_events.md §13) --
-    sim: {
-      tickHz: config.sim?.tickHz || 20,
-      arena: {
-        width: config.sim?.arena?.width || 1280,
-        height: config.sim?.arena?.height || 720,
-      },
-      scoring: {
-        ffa: { killLimit: config.gameModes?.ffa?.killLimit || 10, durationSec: config.gameModes?.ffa?.durationSec || 180 },
-        tdm: { scoreLimit: config.gameModes?.tdm?.scoreLimit || 25, durationSec: config.gameModes?.tdm?.durationSec || 240 },
-        bot_practice: { durationSec: config.gameModes?.bot_practice?.durationSec || 180 },
-        scrap_collector: { bankLimit: config.gameModes?.scrap_collector?.bankLimit || 20, durationSec: config.gameModes?.scrap_collector?.durationSec || 180 },
-      },
-      // -- Phase 4: fairness + feel surface (mirrors §18–§20) --
-      lagComp: {
-        historySamples: config.sim?.lagComp?.historySamples || 40,
-        gracePx: config.sim?.lagComp?.gracePx ?? 26,
-      },
-      reconnectGraceSec: config.sim?.reconnectGraceSec || 60,
-      overtimeSec: config.sim?.overtimeSec || 60,
-    },
     roadmap: {
       implemented: [
-        'static hosting (public/)',
-        'socket skeleton (echo only)',
-        'party system (create/join/leave/invite, leader start)',
-        'friends system (add/remove/list, persistent in-memory)',
-        'matchmaking (solo queue + party start + bot fill + first-match protection)',
-        'rooms (roster + match_state lifecycle + match_end → lobby)',
-        'authoritative sim (20 Hz tick, server physics, entity snapshots)',
-        'bot AI (chase/strafe/flee, team-aware, per-mode temperament)',
-        'server combat (projectiles, melee arcs, death/respawn)',
-        'scoring + win conditions (ffa/tdm limits, practice timer)',
-        'lag compensation (rewind grace-band hit tests)',
-        'bot personalities (easy/normal/aggressive, reaction, cohesion)',
-        'killfeed medals (first blood + streak tiers)',
-        'reconnect grace + late join + tdm overtime',
+        'NASA TLE data fetching',
+        'satellite.js orbital propagation',
+        '2 Hz simulation loop',
+        'Socket.io orbital_snapshot events',
+        'GET /api/stats endpoint',
       ],
       notYet: [
-        'lag compensation / server-side prediction reconciliation',
-        'raycast line-of-sight (distance + height check for now)',
-        'puzzles, jumpscares, rocket-jump validation',
-        'persistent DB (all state is still in-memory)',
+        'Historical trajectory analysis',
+        'Machine learning collision prediction',
+        'Automated mitigation strategy suggestions',
       ],
     },
   });
 });
+
+// GET /api/stats — orbital debris monitoring statistics
+router.get('/stats', async (_req, res) => {
+  try {
+    const loopModule = await import('../game/loop.js');
+    const stats = loopModule.stats ? loopModule.stats() : {};
+  } catch (_e) {
+    // Loop module not initialized yet — return zero stats
+  }
+  
+  const defaultStats = {
+    objectsTracked: 0,
+    globalThreatLevel: 'Low',
+    updateIntervalMs: 500,
+    dataFetchIntervalMs: 30000,
+    lastDataFetchAge: 0,
+  };
+  
+  // Try to get actual stats from loop module
+  let actualStats = defaultStats;
+  try {
+    const loopModule = await import('../game/loop.js');
+    if (loopModule && loopModule.stats) {
+      actualStats = loopModule.stats();
+    }
+  } catch (_e) {
+    // Use defaults
+  }
+  
+  res.json({
+    game: config.gameName,
+    version: config.gameVersion,
+    trackedObjects: actualStats.objectsTracked || 0,
+    globalThreatLevel: actualStats.globalThreatLevel || 'Low',
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    orbital: {
+      updateIntervalMs: actualStats.updateIntervalMs || 500,
+      dataFetchIntervalMs: actualStats.dataFetchIntervalMs || 30000,
+      lastDataFetchAge: actualStats.lastDataFetchAge || 0,
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — server-authoritative game-layer test seams (dev only, not public)
+// ---------------------------------------------------------------------------
+if (process.env.NODE_ENV !== 'production') {
+  router.post('/dev/force-cascade', async (_req, res) => {
+    try {
+      const loopModule = await import('../game/loop.js');
+      const result =
+        loopModule?.triggerKesslerCascadeNow?.() ?? {
+          success: false,
+          reason: 'trigger_kessler_cascade_not_found',
+        };
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ success: false, reason: error.message });
+    }
+  });
+}
 
 export default router;

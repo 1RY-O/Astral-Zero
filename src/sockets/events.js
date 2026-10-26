@@ -1,5 +1,5 @@
 /**
- * Astral Zero — Socket.io event name registry (single source of truth).
+ * Solar Sentinel — Socket.io event name registry (single source of truth).
  * ============================================================
  * Import this file from BOTH:
  *  - src/sockets/index.js (server handlers), and
@@ -19,12 +19,12 @@
  * FULL JSON SHAPES live in websocket_events.md (repo root).
  * This file holds NAMES ONLY — intentionally no game logic.
  *
- * Phase 2 adds: parties, friends, matchmaking queues, rooms.
+ * Phase 2 adds: operator presence, debris tracking, cleanup queues, rooms.
  * All Phase 1 names are UNCHANGED (backward compatible).
  *
  * Phase 3 adds: authoritative sim (player_input, entity_snapshot),
- * combat lifecycle (entity_death, entity_respawn, score_update).
- * Legacy movement/combat events KEEP their names; in-room semantics become
+ * orbital lifecycle (entity (debris) spawn, cleanup, cascade resolution).
+ * Legacy movement/debris events KEEP their names; in-room semantics become
  * server-authoritative (see websocket_events.md §13). Out-of-room (lobby)
  * behavior is byte-identical to Phase 2.
  *
@@ -67,10 +67,6 @@ export const SOCKET_EVENTS = Object.freeze({
   PLAYER_HEALTH_UPDATE: 'player_health_update', // S->C ONLY (server is truth)
 
   // --- Bots (Phase 1: shape defined, Phase 2: spawned per-room) ---
-  BOT_SPAWN: 'bot_spawn', // S->C (per-bot; also batched inside match_state/room_joined)
-  BOT_UPDATE: 'bot_update', // S->C (bulk snapshot)
-  BOT_DEATH: 'bot_death', // S->C
-
   // --- Reserved for future features (defined early, implemented later) ---
   // Keeping names stable NOW avoids breaking the Phaser client later.
   PUZZLE_SOLVED: 'puzzle_solved', // C->S (mid-fight puzzle completion)
@@ -107,7 +103,7 @@ export const SOCKET_EVENTS = Object.freeze({
   ROOM_UPDATE: 'room_update', // S->C { room } membership delta (join/leave)
   MATCH_END: 'match_end', // S->C { roomId, results, reason } + C->S request (stub)
 
-  // --- Phase 3: authoritative sim + combat lifecycle ---
+  // --- Phase 3: authoritative sim + debris lifecycle ---
   PLAYER_INPUT: 'player_input', // C->S intent { moveX, jump, aim, fire, melee, seq } → ack
   ENTITY_SNAPSHOT: 'entity_snapshot', // S->C { roomId, tick, serverTime, entities } 20 Hz
   ENTITY_DEATH: 'entity_death', // S->C { victim, killer, cause, respawnInMs }
@@ -129,6 +125,21 @@ export const SOCKET_EVENTS = Object.freeze({
   ORBITAL_SHIFT: 'orbital_shift', // S->C { type: warning|shift|settled, platforms, geometry } arena shift
   MIMIC_EVENT: 'mimic_event', // S->C { kind: spawn|arm|lunge|bite|hit|kill } decoy token
   OBJECTIVE_EVENT: 'objective_event', // S->C { kind: capture|decay|unlock, team, from } control point
+
+  // --- NEW: Orbital Debris Monitoring (Solar Sentinel) ---
+  ORBITAL_SNAPSHOT: 'orbital_snapshot', // S->C { timestamp, tick, objects } 2 Hz live tracking
+  GLOBAL_THREAT_LEVEL: 'global_threat_level', // S->C { level: "Low/Medium/High", timestamp } aggregate threat assessment
+
+  // --- NEW: Object cleanup (Solar Sentinel) ---
+  PLAYER_CLEANUP: 'player_cleanup', // C->S { id } remove tracked object
+  CLEANUP_SUCCESS: 'cleanup_success', // S->C { id, success, energy, score } confirmation of removal
+  CLEANUP_FAILED: 'cleanup_failed', // S->C { id, reason } cleanup rejected by the server
+
+  // --- NEW: Kessler cascade + game over (Solar Sentinel) ---
+  COLLISION_ALERT: 'collision_alert', // S->C { type, objectId, x, y, riskLevel, collisionCount } high-risk collision
+  GAME_OVER: 'game_over', // S->C { finalScore, globalEnergy, collisionCount } simulation ended
+  LEVEL_UP: 'level_up', // S->C { level } new wave of simulated debris spawned
+  MISSION_ACCOMPLISHED: 'mission_accomplished', // S->C { wave, finalScore, globalEnergy, collisionCount, globalThreatLevel, issRiskLevel, finalStats } orbit secured
 });
 
 /**

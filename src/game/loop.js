@@ -357,8 +357,8 @@ function checkKesslerCascade(now = Date.now()) {
 
 
 // ============================================================
-   MAXIMUM JUICE — collision effects
-   ============================================================
+//MAXIMUM JUICE — collision effects
+//============================================================
 
 /** GLITCH effect: shift UI left/right and turn background red */
 function applyGlitchEffect() {

@@ -30,6 +30,7 @@
  * UI is always demonstrable — badged as SIM FEED, never faked as live.
  */
 
+import './styles.css';
 import { io } from 'socket.io-client';
 import { OrbitalMap, riskTier, normalizePoint, MAP_W, MAP_H, ACQUIRE_MS } from './orbitalMap.js';
 import { startDemoFeed } from './demoFeed.js';
@@ -243,7 +244,7 @@ function typeBootSequence() {
   }
 
   // Click the briefing to skip the decryption.
-  el.howto.querySelector('.howto__card')?.addEventListener('click', () => {
+  el.howto.querySelector('.modal-card, .howto__card')?.addEventListener('click', () => {
     if (!typingDone) finishTyping();
   });
 
@@ -459,6 +460,13 @@ function updateRedAlert(active) {
 
 function violentShake() {
   if (uiShakeTimer) window.clearTimeout(uiShakeTimer);
+
+  // The task spec calls for a 400 ms shake on <body>. Transform the whole
+  // document, not just a panel, so the collision reads as a physical hit.
+  document.body.classList.remove('screen-shake--violent');
+  void document.body.offsetWidth;
+  document.body.classList.add('screen-shake--violent');
+
   if (el.command) {
     el.command.classList.remove('screen-shake', 'screen-shake--violent');
     void el.command.offsetWidth;
@@ -466,6 +474,7 @@ function violentShake() {
   }
   el.canvasWrap?.classList.add('is-shaking');
   uiShakeTimer = window.setTimeout(() => {
+    document.body.classList.remove('screen-shake--violent');
     el.command?.classList.remove('screen-shake--violent');
     el.canvasWrap?.classList.remove('is-shaking');
     uiShakeTimer = 0;
@@ -479,12 +488,22 @@ function violentShake() {
 function showScreenCracks() {
   if (!el.screenCracks) return;
   if (cracksTimer) window.clearTimeout(cracksTimer);
+
+  // Hard-set inline opacity so the overlay appears even if a stylesheet is
+  // still loading; the CSS transition supplies the actual glass fade.
   el.screenCracks.classList.remove('is-fading', 'is-shattered');
+  el.screenCracks.style.transition = 'none';
+  el.screenCracks.style.opacity = '1';
   void el.screenCracks.offsetWidth;
+  el.screenCracks.style.transition = '';
   el.screenCracks.classList.add('is-shattered');
+
   cracksTimer = window.setTimeout(() => {
     el.screenCracks.classList.add('is-fading');
-    window.setTimeout(() => el.screenCracks?.classList.remove('is-shattered', 'is-fading'), 600);
+    el.screenCracks.style.opacity = '0';
+    window.setTimeout(() => {
+      el.screenCracks?.classList.remove('is-shattered', 'is-fading');
+    }, 600);
     cracksTimer = 0;
   }, 1500);
 }
@@ -678,17 +697,17 @@ function computeThreat(objects) {
 function renderThreat(label, pct) {
   const tier = label === 'HIGH' ? 'high' : label === 'MEDIUM' ? 'medium' : 'low';
   el.threatValue.textContent = label;
-  el.threatValue.className = `stat-card__value stat-card__value--threat ${tier}`;
+  el.threatValue.className = `stat-value stat-value--threat ${tier}`;
   el.threatBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-  el.threatBar.className = `meter__fill meter__fill--threat ${tier}`;
+  el.threatBar.className = `meter-fill meter-fill--threat ${tier}`;
 }
 
 /** Pre-snapshot state: no color, no bar fill, no fake numbers. */
 function renderThreatStandby() {
   el.threatValue.textContent = 'STANDBY';
-  el.threatValue.className = 'stat-card__value stat-card__value--threat standby';
+  el.threatValue.className = 'stat-value stat-value--threat standby';
   el.threatBar.style.width = '0%';
-  el.threatBar.className = 'meter__fill meter__fill--threat';
+  el.threatBar.className = 'meter-fill meter-fill--threat';
 }
 
 /**
@@ -835,7 +854,7 @@ function updateIntegrityUI() {
   if (el.threatMeterFill) {
     el.threatMeterFill.style.width = `${pct}%`;
     el.threatMeterFill.className =
-      'meter__fill meter__fill--collision' +
+      'meter-fill meter-fill--collision' +
       (collisions >= MAX_COLLISIONS ? ' is-critical' : collisions >= 1 ? ' is-warning' : '');
   }
   el.threatMeter?.setAttribute('aria-valuenow', String(collisions));
@@ -930,15 +949,17 @@ function handleCollisionAlert(alert) {
 
   setCollisionCount(count);
 
+  // Juice: solid red impact frame, deep harsh rumble, violent 400 ms body
+  // shake, and shattered-glass overlay — these fire for every server alert,
+  // even if the payload omits impact coordinates.
+  flashImpact();
+  violentShake();
+  showScreenCracks();
+  playCollision();
+
   const x = Number(alert?.x);
   const y = Number(alert?.y);
   if (Number.isFinite(x) && Number.isFinite(y)) {
-    // Juice: solid red impact frame, deep harsh rumble, violent 400 ms
-    // shake, shattered-glass overlay, red burst at the impact point.
-    flashImpact();
-    violentShake();
-    showScreenCracks();
-    playCollision();
     map.screenShake(400, 22);
     map.collisionBurst(x, y);
   }

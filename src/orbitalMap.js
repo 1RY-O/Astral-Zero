@@ -710,9 +710,18 @@ export class OrbitalMap {
   /** Map a click/tap in CSS pixels → logical map coordinates. */
   _toLocal(ev) {
     const rect = this.canvas.getBoundingClientRect();
+
+    // The canvas is letterboxed by `object-fit: contain`; account for the
+    // rendered bitmap box so clicks land on the dot the operator sees.
+    const scale = Math.min(rect.width / MAP_W, rect.height / MAP_H) || 1;
+    const renderW = MAP_W * scale;
+    const renderH = MAP_H * scale;
+    const offsetX = (rect.width - renderW) / 2;
+    const offsetY = (rect.height - renderH) / 2;
+
     return {
-      x: ((ev.clientX - rect.left) / rect.width) * MAP_W,
-      y: ((ev.clientY - rect.top) / rect.height) * MAP_H,
+      x: (ev.clientX - rect.left - offsetX) / scale,
+      y: (ev.clientY - rect.top - offsetY) / scale,
     };
   }
 

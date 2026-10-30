@@ -1,28 +1,38 @@
 /**
  * Debris Derby — NASA International Space Apps Challenge 2026.
  *
- * Architecture:
- * - React mounts <canvas> once in a ref.
- * - rAF loop runs entirely outside React's render cycle (zero per-frame setState).
- * - React manages UI chrome: MainMenu, HUD, and custom Cursor.
- * - WebGL physics canvas in src/lib/physicsRenderer.ts.
+ * Full Production Architecture:
+ * - Single WebGL canvas mounted in ref, driven by rAF outside React's render cycle.
+ * - React handles UI chrome: MainMenu, HUD, LevelModal, Tutorial, and TouchControls.
+ * - Real-time zero-g tether pendulum physics with rigid constraint and tangential swing.
+ * - Socket.io live ambient catalog and server-authoritative leaderboard run submission.
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { io } from 'socket.io-client';
 import { World, FIXED_DT } from './physics/world.js';
 import { WebGLPhysicsRenderer } from './lib/physicsRenderer.ts';
 import { initAudio } from './game/audio.js';
+import { getLevelDef, LEVEL_DEFS } from './game/levels.js';
+
 import Cursor from './components/Cursor.jsx';
 import MainMenu from './components/MainMenu.jsx';
 import HUD from './components/HUD.jsx';
+import TutorialOverlay from './components/TutorialOverlay.jsx';
+import LevelModal from './components/LevelModal.jsx';
+import TouchControls from './components/TouchControls.jsx';
+import SplitText from './components/SplitText.jsx';
 
 const MAX_SUBSTEPS = 5;
 const DEFAULT_SEED = 2026;
 
-function parseSeed() {
-  if (typeof window === 'undefined') return DEFAULT_SEED;
-  const match = location.search.match(/[?&]seed=(\d+)/);
-  return match ? Number(match[1]) : DEFAULT_SEED;
+function parseParams() {
+  if (typeof window === 'undefined') return { seed: DEFAULT_SEED, level: 1 };
+  const params = new URLSearchParams(window.location.search);
+  const seed = params.has('seed') ? Number(params.get('seed')) : DEFAULT_SEED;
+  const level = params.has('level') ? Number(params.get('level')) : 1;
+  const autoplay = params.get('autoplay') === '1' || params.get('mode') === 'game';
+  return { seed, level, autoplay };
 }
 
 export default function App() {
@@ -33,9 +43,10 @@ export default function App() {
   const activeRef = useRef(false);
   const accRef = useRef(0);
   const keysRef = useRef(new Set());
+  const socketRef = useRef(null);
   const startTimeRef = useRef(0);
 
-  // HUD DOM refs for zero-overhead direct updates
+  // HUD DOM refs for zero-overhead direct DOM updates
   const scoreRef = useRef(null);
   const fuelBarRef = useRef(null);
   const targetPanelRef = useRef(null);
@@ -43,30 +54,123 @@ export default function App() {
   const massRef = useRef(null);
   const lifetimeRef = useRef(null);
 
-  // Check URL param or default to showing Main Menu
+  // High-level game state
   const [inGame, setInGame] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('autoplay') === '1' || params.get('mode') === 'game';
+    const { autoplay } = parseParams();
+    return autoplay;
+  });
+  const inGameRef = useRef(inGame);
+
+  const [currentLevel, setCurrentLevel] = useState(1);
+  const [levelModalOpen, setLevelModalOpen] = useState(false);
+  const [modalState, setModalState] = useState(null); // 'cleared' | 'failed' | null
+  const [endScore, setEndScore] = useState(0);
+  const [endFuel, setEndFuel] = useState(1);
+  const [levelIntroTitle, setLevelIntroTitle] = useState('FIRST CONTACT');
+  const [showIntro, setShowIntro] = useState(true);
+  const [tutorialStep, setTutorialStep] = useState(1); // 1: Grab, 2: Thrust, 3: Release
+  const [isTouchDevice] = useState(() => {
+    return (
+      typeof window !== 'undefined' &&
+      (Boolean(window.matchMedia?.('(pointer: coarse)').matches) || 'ontouchstart' in window)
+    );
   });
 
-  const inGameRef = useRef(inGame);
+  const levelDef = getLevelDef(currentLevel) || LEVEL_DEFS[0];
 
   useEffect(() => {
     inGameRef.current = inGame;
   }, [inGame]);
 
+  // Level introduction banner timeout
+  useEffect(() => {
+    if (!showIntro) return;
+    const t = setTimeout(() => setShowIntro(false), 2200);
+    return () => clearTimeout(t);
+  }, [showIntro]);
+
+  // Switch or reload level
+  const loadLevel = useCallback((lvlId) => {
+    const target = Math.max(1, Math.min(8, lvlId));
+    setCurrentLevel(target);
+    const def = getLevelDef(target);
+    setLevelIntroTitle(def.name);
+    setShowIntro(true);
+    setModalState(null);
+    setLevelModalOpen(false);
+    setTutorialStep(1);
+
+    if (worldRef.current) {
+      worldRef.current.loadLevel(target);
+    }
+  }, []);
+
   const handleStartMission = useCallback(() => {
     initAudio();
     inGameRef.current = true;
     setInGame(true);
+    setShowIntro(true);
+    loadLevel(1);
+  }, [loadLevel]);
+
+  const handleNextLevel = useCallback(() => {
+    loadLevel(currentLevel + 1);
+  }, [currentLevel, loadLevel]);
+
+  const handleRetry = useCallback(() => {
+    loadLevel(currentLevel);
+  }, [currentLevel, loadLevel]);
+
+  // Mobile virtual joystick thrust callback
+  const handleThrustChange = useCallback((thrusting, dir = null) => {
+    if (worldRef.current) {
+      worldRef.current.setThrusting(thrusting, dir);
+    }
   }, []);
 
+  const handleGrabNearest = useCallback(() => {
+    initAudio();
+    if (worldRef.current) {
+      worldRef.current.grabNearest();
+    }
+  }, []);
+
+  const handleRelease = useCallback(() => {
+    if (worldRef.current) {
+      worldRef.current.release();
+    }
+  }, []);
+
+  // Socket.io initialization
+  useEffect(() => {
+    const socket = io({
+      autoConnect: true,
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 3,
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      // connected to server
+    });
+
+    socket.on('ambient_catalog', (payload) => {
+      if (worldRef.current && payload?.debris) {
+        worldRef.current.ambientDebris = payload.debris;
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  // Main canvas and physics loop mount
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const seed = parseSeed();
+    const { seed, level } = parseParams();
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
 
@@ -78,7 +182,9 @@ export default function App() {
       height: rect.height || 600,
       devicePixelRatio: dpr,
       seed,
+      levelId: level,
     });
+    world.loadLevel(level);
     worldRef.current = world;
 
     const renderer = new WebGLPhysicsRenderer(canvas);
@@ -97,6 +203,8 @@ export default function App() {
       world.setSize(r.width, r.height);
     }
 
+    let reportedOutcome = false;
+
     function loop(now) {
       if (!activeRef.current) return;
       rafRef.current = requestAnimationFrame(loop);
@@ -112,12 +220,44 @@ export default function App() {
         substeps += 1;
       }
 
+      // Check win / lose condition
+      if (world.state === 'cleared' && !reportedOutcome) {
+        reportedOutcome = true;
+        setEndScore(world.score);
+        setEndFuel(world.fuel);
+        setModalState('cleared');
+        setLevelModalOpen(true);
+
+        // Submit run to server
+        if (socketRef.current) {
+          const runPayload = {
+            levelId: world.levelId,
+            callsign: 'Mission Commander',
+            seed: world.seed,
+            durationMs: Math.round(world.gameTime * 1000),
+            fuelUsed: Math.round((1 - world.fuel) * world.fuelMax),
+            deorbits: world.deorbits,
+            lingers: world.lingers,
+            clientScore: world.score,
+          };
+          socketRef.current.emit('run_submit', runPayload);
+        }
+      } else if (world.state === 'failed' && !reportedOutcome) {
+        reportedOutcome = true;
+        setEndScore(world.score);
+        setEndFuel(0);
+        setModalState('failed');
+        setLevelModalOpen(true);
+      } else if (world.state === 'playing') {
+        reportedOutcome = false;
+      }
+
       // Render WebGL frame
       const r = canvas.getBoundingClientRect();
       const timeSec = (now - startTimeRef.current) / 1000;
       renderer.render(world, r.width, r.height, timeSec);
 
-      // Direct DOM HUD updates (bypassing React render cycle)
+      // Direct DOM HUD updates
       if (scoreRef.current) {
         scoreRef.current.textContent = String(world.score || 0);
       }
@@ -126,13 +266,24 @@ export default function App() {
         fuelBarRef.current.style.width = `${pct}%`;
       }
 
+      // Update Level 1 tutorial step
+      if (world.levelId === 1) {
+        if (!world.grabbed) {
+          setTutorialStep(1);
+        } else if (!world.thrusting) {
+          setTutorialStep(2);
+        } else {
+          setTutorialStep(3);
+        }
+      }
+
       // Target Data Panel: Visible only when grabbed == true
       if (targetPanelRef.current) {
         const grabbed = world.grabbed;
         if (grabbed) {
           targetPanelRef.current.style.display = 'flex';
           if (noradRef.current) {
-            noradRef.current.textContent = grabbed.id || 'DEBRIS-01';
+            noradRef.current.textContent = grabbed.id || 'SAT-01';
           }
           if (massRef.current) {
             massRef.current.textContent = `${grabbed.mass.toFixed(0)} kg`;
@@ -167,6 +318,7 @@ export default function App() {
       const pt = canvasCoords(e);
       if (e.button === 0) {
         if (!inGameRef.current) {
+          inGameRef.current = true;
           setInGame(true);
         }
         world.grab(pt.x, pt.y);
@@ -189,9 +341,10 @@ export default function App() {
       if (keysRef.current.has(e.code)) return;
       keysRef.current.add(e.code);
 
-      // Auto-initiate mission on gameplay keypress
+      // Auto-start on game controls
       if (!inGameRef.current && (e.code === 'KeyE' || e.code === 'Space' || e.code === 'KeyQ' || e.code === 'Enter')) {
         initAudio();
+        inGameRef.current = true;
         setInGame(true);
       }
 
@@ -206,7 +359,7 @@ export default function App() {
         world.release();
         e.preventDefault();
       } else if (e.code === 'Escape') {
-        setInGame((prev) => !prev);
+        setLevelModalOpen((prev) => !prev);
       }
     }
 
@@ -249,7 +402,7 @@ export default function App() {
         userSelect: 'none',
       }}
     >
-      {/* Mandatory Custom Cursor */}
+      {/* Custom Cursor */}
       <Cursor />
 
       {/* Main Menu with MicroSlats Background */}
@@ -263,10 +416,71 @@ export default function App() {
         noradRef={noradRef}
         massRef={massRef}
         lifetimeRef={lifetimeRef}
+        currentLevel={currentLevel}
+        levelName={levelDef.name}
+        onOpenLevelModal={() => setLevelModalOpen(true)}
         visible={inGame}
       />
 
-      {/* WebGL Canvas */}
+      {/* Level 1 Step-by-Step Tutorial Overlay */}
+      <TutorialOverlay
+        levelId={currentLevel}
+        step={tutorialStep}
+        visible={inGame && currentLevel === 1}
+      />
+
+      {/* Level Intro Typography Banner */}
+      {inGame && showIntro && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '84px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 45,
+            pointerEvents: 'none',
+            textAlign: 'center',
+          }}
+        >
+          <SplitText
+            text={`MISSION 0${currentLevel}: ${levelIntroTitle.toUpperCase()}`}
+            className="level-intro-text"
+            effect="wave"
+            style={{
+              fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+              fontSize: '18px',
+              fontWeight: 700,
+              color: 'var(--sky)',
+              letterSpacing: '0.12em',
+              textShadow: '0 4px 16px rgba(0, 0, 0, 0.9)',
+            }}
+          />
+        </div>
+      )}
+
+      {/* Level Select / Cleared / Aborted Modal */}
+      <LevelModal
+        currentLevel={currentLevel}
+        state={modalState}
+        score={endScore}
+        fuel={endFuel}
+        onSelectLevel={loadLevel}
+        onNextLevel={handleNextLevel}
+        onRetry={handleRetry}
+        onClose={() => setLevelModalOpen(false)}
+        visible={levelModalOpen}
+      />
+
+      {/* Mobile Touch Controls */}
+      {inGame && isTouchDevice && (
+        <TouchControls
+          onThrustChange={handleThrustChange}
+          onGrabNearest={handleGrabNearest}
+          onRelease={handleRelease}
+        />
+      )}
+
+      {/* WebGL Physics Canvas */}
       <canvas
         ref={canvasRef}
         style={{

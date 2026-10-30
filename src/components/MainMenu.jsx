@@ -94,19 +94,17 @@ export default function MainMenu({ onStart, visible = true }) {
           Orbital Operations.
         </h2>
 
-        {/* Glass Card */}
+        {/* Solid Dark Navy Card with Sky Blue Borders */}
         <div
           style={{
             width: '400px',
             maxWidth: 'calc(100vw - 40px)',
             padding: '32px',
-            background: 'rgba(255, 255, 255, 0.05)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            border: '1px solid rgba(255, 255, 255, 0.25)',
+            background: 'var(--night)',
+            border: '2px solid var(--sky)',
             borderRadius: '28px',
             boxSizing: 'border-box',
-            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5)',
+            boxShadow: '0 24px 64px rgba(0, 0, 0, 0.8), 0 0 24px rgba(56, 189, 248, 0.25)',
           }}
         >
           <p

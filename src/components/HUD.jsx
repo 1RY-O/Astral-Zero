@@ -8,6 +8,9 @@ const HUD = forwardRef(function HUD(
     noradRef,
     massRef,
     lifetimeRef,
+    currentLevel = 1,
+    levelName = 'First Contact',
+    onOpenLevelModal,
     visible = true,
   },
   _ref,
@@ -24,21 +27,54 @@ const HUD = forwardRef(function HUD(
         userSelect: 'none',
       }}
     >
-      {/* Top-Left: Score */}
+      {/* Top-Left: Score and Mission Selector */}
       <div
         style={{
           position: 'fixed',
           top: '32px',
           left: '36px',
-          fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-          fontSize: '24px',
-          fontWeight: 700,
-          color: 'var(--white)',
-          letterSpacing: '-0.02em',
-          textShadow: '0 2px 10px rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
         }}
       >
-        SCORE: <span ref={scoreRef}>0</span>
+        <div
+          style={{
+            fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+            fontSize: '24px',
+            fontWeight: 700,
+            color: 'var(--white)',
+            letterSpacing: '-0.02em',
+            textShadow: '0 2px 10px rgba(0, 0, 0, 0.8)',
+          }}
+        >
+          SCORE: <span ref={scoreRef}>0</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpenLevelModal}
+          style={{
+            pointerEvents: 'auto',
+            background: 'rgba(6, 13, 31, 0.75)',
+            border: '1px solid var(--sky)',
+            borderRadius: '99px',
+            padding: '4px 12px',
+            color: 'var(--sky)',
+            fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+            fontSize: '11px',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            cursor: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+          }}
+        >
+          <span>MISSION 0{currentLevel}: {levelName.toUpperCase()}</span>
+          <span style={{ fontSize: '9px' }}>▼</span>
+        </button>
       </div>
 
       {/* Center-Screen: Subtle Compass UI */}
@@ -52,7 +88,7 @@ const HUD = forwardRef(function HUD(
           alignItems: 'center',
           gap: '16px',
           padding: '8px 20px',
-          background: 'rgba(6, 13, 31, 0.65)',
+          background: 'rgba(6, 13, 31, 0.75)',
           backdropFilter: 'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
           border: '1px solid rgba(255, 255, 255, 0.15)',
@@ -131,13 +167,11 @@ const HUD = forwardRef(function HUD(
           left: '36px',
           width: '290px',
           padding: '20px 24px',
-          background: 'rgba(255, 255, 255, 0.05)',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255, 255, 255, 0.25)',
+          background: 'var(--night)',
+          border: '2px solid var(--sky)',
           borderRadius: '24px',
           boxSizing: 'border-box',
-          boxShadow: '0 16px 36px rgba(0, 0, 0, 0.5)',
+          boxShadow: '0 16px 36px rgba(0, 0, 0, 0.6), 0 0 16px rgba(56, 189, 248, 0.2)',
           display: 'none',
           flexDirection: 'column',
           gap: '12px',
@@ -171,7 +205,7 @@ const HUD = forwardRef(function HUD(
         <div
           style={{
             height: '1px',
-            background: 'rgba(255, 255, 255, 0.12)',
+            background: 'rgba(56, 189, 248, 0.25)',
           }}
         />
 

@@ -137,6 +137,7 @@ export const SOCKET_EVENTS = Object.freeze({
 
   // --- NEW: Kessler cascade + game over (Solar Sentinel) ---
   COLLISION_ALERT: 'collision_alert', // S->C { type, objectId, x, y, riskLevel, collisionCount } high-risk collision
+  PROXIMITY_TIMER: 'proximity_timer', // S->C { timers: { id: { remainingMs, riskLevel } }, timestamp } countdown for high-risk debris
   GAME_OVER: 'game_over', // S->C { finalScore, globalEnergy, collisionCount } simulation ended
   LEVEL_UP: 'level_up', // S->C { level } new wave of simulated debris spawned
   MISSION_ACCOMPLISHED: 'mission_accomplished', // S->C { wave, finalScore, globalEnergy, collisionCount, globalThreatLevel, issRiskLevel, finalStats } orbit secured

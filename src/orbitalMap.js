@@ -34,7 +34,7 @@ const SWEEP_TRAIL = 1.0; // radians of fading trail behind the sweep head
 export const ACQUIRE_MS = 720;
 
 const COLORS = {
-  bg: '#010409',
+  bg: '#000000',
   land: '#121a24',
   landDeep: '#0c1119',
   landEdge: '#46536b',
@@ -415,11 +415,11 @@ export class OrbitalMap {
     off.height = MAP_H;
     const c = off.getContext('2d');
 
-    // Faint deep-space floor so landmasses never float on pure void.
+    // Keep the deep-space floor pure black so the neon geometry reads as light.
     const floor = c.createLinearGradient(0, 0, 0, MAP_H);
-    floor.addColorStop(0, 'rgba(8, 14, 24, 0.35)');
-    floor.addColorStop(0.5, 'rgba(6, 10, 18, 0.16)');
-    floor.addColorStop(1, 'rgba(10, 16, 26, 0.32)');
+    floor.addColorStop(0, 'rgba(0, 0, 0, 0.22)');
+    floor.addColorStop(0.5, 'rgba(0, 0, 0, 0.08)');
+    floor.addColorStop(1, 'rgba(0, 0, 0, 0.2)');
     c.fillStyle = floor;
     c.fillRect(0, 0, MAP_W, MAP_H);
 
@@ -870,8 +870,11 @@ export class OrbitalMap {
       const tipY = L.y * beamProgress;
 
       ctx.save();
-      // Thick glowing beam (outer glow).
-      ctx.strokeStyle = 'rgba(0, 243, 255, 0.35)';
+      // Use 'lighter' composite for glow layers so they additively bloom.
+      ctx.globalCompositeOperation = 'lighter';
+
+      // Outer bloom (18px cyan).
+      ctx.strokeStyle = 'rgba(0, 243, 255, 0.25)';
       ctx.lineWidth = 18;
       ctx.lineCap = 'round';
       ctx.beginPath();
@@ -879,17 +882,17 @@ export class OrbitalMap {
       ctx.lineTo(L.x, tipY);
       ctx.stroke();
 
-      // Mid glow.
-      ctx.strokeStyle = 'rgba(0, 243, 255, 0.7)';
-      ctx.lineWidth = 8;
+      // Mid glow (6px cyan).
+      ctx.strokeStyle = 'rgba(0, 243, 255, 0.55)';
+      ctx.lineWidth = 6;
       ctx.beginPath();
       ctx.moveTo(L.x, 0);
       ctx.lineTo(L.x, tipY);
       ctx.stroke();
 
-      // Bright white core.
+      // White core (2px).
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(L.x, 0);
       ctx.lineTo(L.x, tipY);
@@ -912,6 +915,27 @@ export class OrbitalMap {
         const ringProgress = Math.min(1, ringAge / L.lingerMs);
         const r = 12 + ringProgress * 150;
         const alpha = 1 - ringProgress;
+
+        // DOM shockwave: expands 12px → 132px over 400ms, then fades.
+        if (ringAge < 400 && !L._shockwaveCreated) {
+          L._shockwaveCreated = true;
+          const shockwave = document.createElement('div');
+          shockwave.className = 'shockwave-dom';
+          shockwave.style.left = `${L.x}px`;
+          shockwave.style.top = `${L.y}px`;
+          shockwave.style.transform = 'translate(-50%, -50%) scale(0.1)';
+          shockwave.style.opacity = '0.9';
+          const wrap = document.getElementById('canvas-wrap') || document.body;
+          wrap.appendChild(shockwave);
+          window.setTimeout(() => {
+            shockwave.style.transition = 'transform 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 400ms linear';
+            shockwave.style.transform = 'translate(-50%, -50%) scale(1)';
+            shockwave.style.opacity = '0';
+          }, 10);
+          window.setTimeout(() => {
+            shockwave.remove();
+          }, 420);
+        }
         ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.9})`;
         ctx.lineWidth = 4 * alpha + 1;
         ctx.beginPath();

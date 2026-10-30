@@ -67,6 +67,11 @@ const MAX_COLLISIONS = 3;
 const HIGH_RISK = 7;
 // Orbital laser travel time: the strike lands 500 ms after authorization.
 const ORBITAL_STRIKE_MS = 500;
+// Tutorial: first-run guided onboarding.
+const TUTORIAL_STORAGE_KEY = 'solarSentinel.tutorial.v1';
+const TUTORIAL_TARGET_MIN_RISK = 7;
+const TUTORIAL_SUCCESS_HOLD_MS = 2300;
+const TUTORIAL_WARNING_HOLD_MS = 3600;
 
 const RECONNECT_OPTIONS = {
   reconnection: true,
@@ -75,6 +80,187 @@ const RECONNECT_OPTIONS = {
   reconnectionDelayMax: 5000,
   timeout: 8000,
 };
+
+// ---------------------------------------------------------------------------
+// UI_AUDIO — local AudioContext for hum/hover/click/laser/impact cues.
+// Leaves src/audio.js untouched.
+// ---------------------------------------------------------------------------
+
+const UI_AUDIO = (() => {
+  let ctx = null;
+  let started = false;
+
+  function ensure() {
+    if (ctx) return ctx;
+    try {
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) return null;
+      ctx = new AudioCtor();
+    } catch {
+      return null;
+    }
+    return ctx;
+  }
+
+  function start() {
+    if (started || !ctx) return;
+    try {
+      if (ctx.state === 'suspended') ctx.resume();
+    } catch {}
+    started = true;
+  }
+
+  function osc(type, freq, when, dur, gainVal, filterFreq) {
+    const c = ctx;
+    if (!c) return;
+    const g = c.createGain();
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = filterFreq || 4400;
+    const o = c.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, c.currentTime + (when || 0));
+    o.connect(f);
+    f.connect(g);
+    g.connect(c.destination);
+    g.gain.setValueAtTime(gainVal || 0.02, c.currentTime + (when || 0));
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + (when || 0) + (dur || 0.3));
+    o.start(c.currentTime + (when || 0));
+    o.stop(c.currentTime + (when || 0) + (dur || 0.3));
+  }
+
+  return {
+    init() {
+      const c = ensure();
+      if (c) start();
+      return !!c;
+    },
+
+    hum() {
+      const c = ensure();
+      if (!c) return;
+      const g = c.createGain();
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 220;
+      const o1 = c.createOscillator();
+      const o2 = c.createOscillator();
+      o1.type = 'sine';
+      o1.frequency.value = 55;
+      o2.type = 'sine';
+      o2.frequency.value = 55.4;
+      o1.connect(f);
+      o2.connect(f);
+      f.connect(g);
+      g.connect(c.destination);
+      g.gain.setValueAtTime(0.015, c.currentTime);
+      o1.start();
+      o2.start();
+      this._humNodes = { o1, o2, f, g };
+    },
+
+    stopHum() {
+      const n = this._humNodes;
+      if (!n) return;
+      try {
+        n.g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 1);
+        n.o1.stop(c.currentTime + 1);
+        n.o2.stop(c.currentTime + 1);
+      } catch {}
+      this._humNodes = null;
+    },
+
+    laser() {
+      const c = ensure();
+      if (!c) return;
+      const g = c.createGain();
+      g.connect(c.destination);
+      g.gain.setValueAtTime(0.04, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.35);
+      const o = c.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(1800, c.currentTime);
+      o.frequency.exponentialRampToValueAtTime(300, c.currentTime + 0.35);
+      o.connect(g);
+      o.start();
+      o.stop(c.currentTime + 0.35);
+    },
+
+    impact() {
+      const c = ensure();
+      if (!c) return;
+      const g = c.createGain();
+      g.connect(c.destination);
+      g.gain.setValueAtTime(0.06, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.4);
+
+      const o1 = c.createOscillator();
+      o1.type = 'square';
+      o1.frequency.setValueAtTime(60, c.currentTime);
+      o1.frequency.exponentialRampToValueAtTime(30, c.currentTime + 0.4);
+      o1.connect(g);
+      o1.start();
+      o1.stop(c.currentTime + 0.4);
+
+      const o2 = c.createOscillator();
+      o2.type = 'sawtooth';
+      o2.frequency.setValueAtTime(240, c.currentTime);
+      o2.frequency.exponentialRampToValueAtTime(60, c.currentTime + 0.12);
+      o2.connect(g);
+      o2.start();
+      o2.stop(c.currentTime + 0.12);
+    },
+
+    hover() {
+      osc('sine', 880, 0, 0.08, 0.008, 5000);
+    },
+
+    click() {
+      osc('sine', 660, 0, 0.08, 0.008, 6000);
+    },
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Loading screen animation
+// ---------------------------------------------------------------------------
+
+function simulateLoading() {
+  const screen = document.getElementById('loading-screen');
+  const barTrack = document.getElementById('loading-progress');
+  if (!screen || !barTrack) return;
+
+  // Ensure the screen is visible before animating
+  screen.removeAttribute('hidden');
+  screen.style.display = 'flex';
+  screen.style.opacity = '1';
+
+  const duration = 2000; // 2 seconds as specified
+  const start = performance.now();
+
+  function frame(now) {
+    const elapsed = now - start;
+    let t = elapsed / duration;
+    if (t > 1) t = 1;
+
+    // Ease-out cubic
+    const eased = 1 - Math.pow(1 - t, 3);
+    barTrack.style.width = `${eased * 100}%`;
+    barTrack.setAttribute('data-progress', Math.round(eased * 100));
+
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      // Hit 100%, wait 400ms, then fade out
+      window.setTimeout(() => {
+        screen.classList.add('hidden');
+        screen.classList.add('loaded');
+      }, 400);
+    }
+  }
+
+  requestAnimationFrame(frame);
+}
 
 /** Resolve the backend origin (dev: :3000, prod: same origin). */
 function resolveServerUrl() {
@@ -136,12 +322,182 @@ const el = {
   canvasWrap: document.getElementById('canvas-wrap'),
   canvas: document.getElementById('orbital-map'),
   impactFlash: document.getElementById('impact-flash'),
+  impactFrame: document.getElementById('impact-frame'),
   cleanupFlash: document.getElementById('cleanup-flash'),
   screenCracks: document.getElementById('screen-cracks'),
+  crackedGlass: document.getElementById('cracked-glass'),
   gameOver: document.getElementById('game-over'),
   finalScore: document.getElementById('final-score'),
   restartBtn: document.getElementById('restart-btn'),
+  tutorialLayer: document.getElementById('tutorial-layer'),
+  tutorialTargetRing: document.getElementById('tutorial-target-ring'),
+  tutorialButtonHalo: document.getElementById('tutorial-button-halo'),
+  tutorialPrompt: document.getElementById('tutorial-prompt'),
+  tutorialStep: document.getElementById('tutorial-step'),
+  tutorialPromptText: document.getElementById('tutorial-prompt-text'),
 };
+
+// ---------------------------------------------------------------------------
+// Liquid cursor + magnetic CTA (Active Theory / Resn-style pointer physics)
+// ---------------------------------------------------------------------------
+
+const FINE_POINTER = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? false;
+
+function initLiquidCursor() {
+  if (!FINE_POINTER) return;
+  const dot = document.getElementById('cursor-dot');
+  const ring = document.getElementById('cursor-ring');
+  if (!dot || !ring) return;
+
+  document.documentElement.classList.add('liquid-cursor-ready');
+
+  const INTERACTIVE = 'button, a, .target, canvas, [data-cursor-hover]';
+  const root = document.documentElement;
+  let mouseX = window.innerWidth / 2;
+  let mouseY = window.innerHeight / 2;
+  let ringX = mouseX;
+  let ringY = mouseY;
+  let raf = 0;
+
+  const render = () => {
+    raf = 0;
+    ringX += (mouseX - ringX) * 0.2;
+    ringY += (mouseY - ringY) * 0.2;
+    dot.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0)`;
+    ring.style.transform = `translate3d(${ringX}px, ${ringY}px, 0)`;
+    if (Math.hypot(mouseX - ringX, mouseY - ringY) > 0.15) {
+      raf = requestAnimationFrame(render);
+    }
+  };
+
+  const wake = () => {
+    if (!raf) raf = requestAnimationFrame(render);
+  };
+
+  window.addEventListener(
+    'pointermove',
+    (ev) => {
+      if (ev.pointerType !== 'mouse' && ev.pointerType !== 'pen') return;
+      mouseX = ev.clientX;
+      mouseY = ev.clientY;
+      root.classList.add('is-pointer-active');
+      wake();
+    },
+    { passive: true },
+  );
+
+  document.addEventListener('pointerover', (ev) => {
+    const interactive = ev.target.closest?.(INTERACTIVE);
+    root.classList.toggle('is-cursor-hover', Boolean(interactive));
+    if (interactive) UI_AUDIO.hover();
+  });
+
+  document.addEventListener('pointerout', (ev) => {
+    if (!ev.relatedTarget) root.classList.remove('is-cursor-hover');
+  });
+
+  document.addEventListener('pointerdown', () => root.classList.add('is-cursor-down'));
+  document.addEventListener('pointerup', () => root.classList.remove('is-cursor-down'));
+  window.addEventListener('blur', () => {
+    root.classList.remove('is-pointer-active', 'is-cursor-down', 'is-cursor-hover');
+  });
+  window.addEventListener('pointerleave', () => {
+    root.classList.remove('is-pointer-active', 'is-cursor-down', 'is-cursor-hover');
+  });
+}
+
+function initMagneticCta() {
+  if (!FINE_POINTER || !el.startBtn) return;
+
+  const btn = el.startBtn;
+  const state = { x: 0, y: 0, rx: 0, ry: 0, s: 1, gx: 50, gy: 50 };
+  const target = { x: 0, y: 0, rx: 0, ry: 0, s: 1, gx: 50, gy: 50 };
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  let raf = 0;
+
+  const apply = () => {
+    btn.style.setProperty('--mag-x', `${state.x.toFixed(2)}px`);
+    btn.style.setProperty('--mag-y', `${state.y.toFixed(2)}px`);
+    btn.style.setProperty('--mag-rx', `${state.rx.toFixed(2)}deg`);
+    btn.style.setProperty('--mag-ry', `${state.ry.toFixed(2)}deg`);
+    btn.style.setProperty('--mag-scale', state.s.toFixed(3));
+    btn.style.setProperty('--mag-glow-x', `${state.gx.toFixed(1)}%`);
+    btn.style.setProperty('--mag-glow-y', `${state.gy.toFixed(1)}%`);
+  };
+
+  const tick = () => {
+    raf = 0;
+    state.x += (target.x - state.x) * 0.24;
+    state.y += (target.y - state.y) * 0.24;
+    state.rx += (target.rx - state.rx) * 0.2;
+    state.ry += (target.ry - state.ry) * 0.2;
+    state.s += (target.s - state.s) * 0.2;
+    state.gx += (target.gx - state.gx) * 0.3;
+    state.gy += (target.gy - state.gy) * 0.3;
+    apply();
+
+    const moving =
+      Math.abs(target.x - state.x) > 0.03 ||
+      Math.abs(target.y - state.y) > 0.03 ||
+      Math.abs(target.rx - state.rx) > 0.03 ||
+      Math.abs(target.ry - state.ry) > 0.03 ||
+      Math.abs(target.s - state.s) > 0.0005;
+    if (moving) raf = requestAnimationFrame(tick);
+  };
+
+  const wake = () => {
+    if (!raf) raf = requestAnimationFrame(tick);
+  };
+
+  const reset = () => {
+    target.x = 0;
+    target.y = 0;
+    target.rx = 0;
+    target.ry = 0;
+    target.s = 1;
+    target.gx = 50;
+    target.gy = 50;
+    btn.classList.remove('is-magnetic');
+    wake();
+  };
+
+  window.addEventListener(
+    'pointermove',
+    (ev) => {
+      if (ev.pointerType !== 'mouse' && ev.pointerType !== 'pen') return;
+      if (el.landing.hidden || el.landing.classList.contains('landing--out')) return;
+
+      const rect = btn.getBoundingClientRect();
+      const dx = ev.clientX - (rect.left + rect.width / 2);
+      const dy = ev.clientY - (rect.top + rect.height / 2);
+      const px = Math.max(0, Math.abs(dx) - rect.width / 2);
+      const py = Math.max(0, Math.abs(dy) - rect.height / 2);
+      const distance = Math.hypot(px, py);
+      const radius = 150;
+
+      if (distance >= radius) {
+        reset();
+        return;
+      }
+
+      const pull = 1 - distance / radius;
+      target.x = clamp(dx * 0.2, -16, 16) * pull;
+      target.y = clamp(dy * 0.24, -13, 13) * pull;
+      target.rx = clamp(-dy / (rect.height / 2), -1, 1) * 7 * pull;
+      target.ry = clamp(dx / (rect.width / 2), -1, 1) * 10 * pull;
+      target.s = 1 + 0.055 * pull;
+      target.gx = clamp(((ev.clientX - rect.left) / rect.width) * 100, 0, 100);
+      target.gy = clamp(((ev.clientY - rect.top) / rect.height) * 100, 0, 100);
+      btn.classList.add('is-magnetic');
+      wake();
+    },
+    { passive: true },
+  );
+
+  btn.addEventListener('pointerenter', () => btn.classList.add('is-magnetic'));
+  btn.addEventListener('pointerleave', reset);
+  btn.addEventListener('blur', reset);
+}
 
 // ---------------------------------------------------------------------------
 // App state
@@ -189,6 +545,34 @@ let cascadeSeq = 0;
 
 let uptimeSeconds = null;
 let uptimeAnchor = 0;
+
+// First-run tutorial state.
+const readTutorialSeen = () => {
+  try {
+    return localStorage.getItem(TUTORIAL_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+let tutorialHasCompleted = readTutorialSeen();
+const FORCE_TUTORIAL = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get('tutorial') === '1';
+  } catch {
+    return false;
+  }
+})();
+let tutorialActive = false;
+let tutorialPending = false;
+let tutorialStep = 0;
+let tutorialTargetId = null;
+let tutorialButtonEl = null;
+let tutorialAwaitingLock = null;
+let tutorialRaf = 0;
+let tutorialStartTimer = 0;
+let tutorialLockTimer = 0;
+let tutorialStrikeTimer = 0;
+let tutorialHoldTimer = 0;
 
 // ---------------------------------------------------------------------------
 // Boot briefing — typewriter with skip
@@ -307,17 +691,467 @@ map.onPick = (id) => {
   playBeep();
   selectTrack(id, { scroll: true, acquire: true });
   armTarget(id);
+  handleTutorialPick(id);
 };
 
 map.onLock = (id) => {
-  if (armingId !== String(id)) return;
-  armingId = null;
-  if (armTimer) {
-    window.clearTimeout(armTimer);
-    armTimer = 0;
+  const key = String(id);
+  if (armingId === key) {
+    armingId = null;
+    if (armTimer) {
+      window.clearTimeout(armTimer);
+      armTimer = 0;
+    }
   }
   updateCleanupButtons();
+  if (tutorialActive && tutorialStep === 1 && tutorialAwaitingLock === key) {
+    tutorialAwaitingLock = null;
+    if (tutorialLockTimer) {
+      window.clearTimeout(tutorialLockTimer);
+      tutorialLockTimer = 0;
+    }
+    enterTutorialAuthorize();
+  }
 };
+
+// ---------------------------------------------------------------------------
+// Guided first-run tutorial
+// ---------------------------------------------------------------------------
+
+/** Convert an 800×600 map point to viewport pixels (letterbox-aware). */
+function mapPointToScreen(x, y) {
+  const rect = el.canvas.getBoundingClientRect();
+  const scale = Math.min(rect.width / MAP_W, rect.height / MAP_H) || 1;
+  const renderW = MAP_W * scale;
+  const renderH = MAP_H * scale;
+  return {
+    x: rect.left + (rect.width - renderW) / 2 + x * scale,
+    y: rect.top + (rect.height - renderH) / 2 + y * scale,
+  };
+}
+
+function tutorialPromptTone(tone) {
+  return tone ? ` tutorial-prompt--${tone}` : '';
+}
+
+function showTutorialPrompt(text, label, tone = '') {
+  if (!tutorialActive) return;
+  el.tutorialLayer.hidden = false;
+  el.tutorialPrompt.hidden = false;
+  el.tutorialPrompt.className = `tutorial-prompt${tutorialPromptTone(tone)}`;
+  el.tutorialStep.textContent = label;
+  el.tutorialPromptText.textContent = text;
+  // Force the entrance animation to replay when the copy changes.
+  el.tutorialPrompt.style.animation = 'none';
+  void el.tutorialPrompt.offsetWidth;
+  el.tutorialPrompt.style.animation = '';
+}
+
+function positionTutorialPrompt(anchor = 'map') {
+  window.requestAnimationFrame(() => {
+    if (el.tutorialPrompt.hidden) return;
+    const w = el.tutorialPrompt.offsetWidth;
+    const h = el.tutorialPrompt.offsetHeight;
+    let cx = window.innerWidth / 2;
+    let cy = window.innerHeight / 2;
+
+    if (anchor === 'button' && tutorialButtonEl) {
+      const r = tutorialButtonEl.getBoundingClientRect();
+      cx = r.left + r.width / 2;
+      cy = r.top - h / 2 - 13;
+      if (cy - h / 2 < 74) cy = r.bottom + h / 2 + 13;
+    } else if (anchor === 'center') {
+      cy = window.innerHeight * 0.58;
+    } else {
+      const rect = el.canvas.getBoundingClientRect();
+      cx = rect.left + rect.width / 2;
+      cy = rect.bottom - Math.min(h / 2 + 52, rect.height * 0.22);
+    }
+
+    cx = Math.max(w / 2 + 14, Math.min(window.innerWidth - w / 2 - 14, cx));
+    cy = Math.max(h / 2 + 14, Math.min(window.innerHeight - h / 2 - 14, cy));
+    el.tutorialPrompt.style.left = `${cx}px`;
+    el.tutorialPrompt.style.top = `${cy}px`;
+  });
+}
+
+function updateTutorialRingPosition() {
+  if (!tutorialActive || tutorialStep !== 1 || !tutorialTargetId) return;
+  const track = map.tracks.get(tutorialTargetId);
+  if (!track) return;
+  const p = mapPointToScreen(track.x, track.y);
+  el.tutorialTargetRing.style.left = `${p.x}px`;
+  el.tutorialTargetRing.style.top = `${p.y}px`;
+}
+
+function updateTutorialHaloPosition() {
+  if (!tutorialActive || tutorialStep !== 2 || !tutorialButtonEl) return;
+  const r = tutorialButtonEl.getBoundingClientRect();
+  const padX = 7;
+  const padY = 5;
+  el.tutorialButtonHalo.style.left = `${r.left - padX}px`;
+  el.tutorialButtonHalo.style.top = `${r.top - padY}px`;
+  el.tutorialButtonHalo.style.width = `${r.width + padX * 2}px`;
+  el.tutorialButtonHalo.style.height = `${r.height + padY * 2}px`;
+}
+
+function tutorialTicker() {
+  tutorialRaf = 0;
+  if (!tutorialActive) return;
+  if (tutorialStep === 1) updateTutorialRingPosition();
+  else if (tutorialStep === 2) updateTutorialHaloPosition();
+  tutorialRaf = window.requestAnimationFrame(tutorialTicker);
+}
+
+function startTutorialTicker() {
+  if (tutorialRaf) return;
+  tutorialRaf = window.requestAnimationFrame(tutorialTicker);
+}
+
+function pickTutorialTarget() {
+  const candidates = lastObjects.length
+    ? lastObjects
+    : map.list().map((t) => ({ id: t.id, name: t.name, riskLevel: t.riskLevel }));
+  if (!candidates.length) {
+    tutorialTargetId = null;
+    return null;
+  }
+  const highRisk = candidates.filter((o) => (Number(o.riskLevel) || 0) >= TUTORIAL_TARGET_MIN_RISK);
+  const pool = (highRisk.length ? highRisk : candidates)
+    .slice()
+    .sort((a, b) => (Number(b.riskLevel) || 0) - (Number(a.riskLevel) || 0));
+  const target = pool[0];
+  tutorialTargetId = String(target.id ?? target.name);
+  return target;
+}
+
+function clearTutorialButtonHighlight() {
+  if (tutorialButtonEl) {
+    tutorialButtonEl.classList.remove('btn-cleanup--tutorial');
+    tutorialButtonEl.closest('.target')?.classList.remove('target--tutorial');
+  }
+  tutorialButtonEl = null;
+  el.tutorialButtonHalo.hidden = true;
+}
+
+/**
+ * Simplified first-run tutorial using localStorage key 'tutorialDone'.
+ * Highlights the highest-risk red dot, guides the player to lock on,
+ * then authorizes cleanup, then marks tutorial as complete.
+ */
+function runTutorial() {
+  try {
+    if (localStorage.getItem('tutorialDone') === 'true') return;
+  } catch {
+    return;
+  }
+
+  if (tutorialActive || gameOver) return;
+
+  // Find highest-risk object from lastObjects or map tracks
+  const candidates = lastObjects.length
+    ? lastObjects
+    : map.list().map((t) => ({ id: t.id, name: t.name, riskLevel: t.riskLevel }));
+
+  if (!candidates.length) return;
+
+  const highRisk = candidates.filter((o) => (Number(o.riskLevel) || 0) >= TUTORIAL_TARGET_MIN_RISK);
+  const pool = (highRisk.length ? highRisk : candidates)
+    .slice()
+    .sort((a, b) => (Number(b.riskLevel) || 0) - (Number(a.riskLevel) || 0));
+  const target = pool[0];
+  const targetId = String(target.id ?? target.name);
+
+  tutorialActive = true;
+  tutorialStep = 1;
+  tutorialTargetId = targetId;
+  document.body.classList.add('tutorial-mode');
+  el.tutorialLayer.hidden = false;
+  el.tutorialTargetRing.hidden = false;
+  clearTutorialButtonHighlight();
+
+  showTutorialPrompt('[ CLICK THE RED TARGET TO LOCK ON ]', 'TRAINING PROTOCOL // 01 · LOCK ON');
+  positionTutorialPrompt('map');
+  updateTutorialRingPosition();
+  startTutorialTicker();
+
+  // Step 1: wait for the player to click the target
+  const onPick = (id) => {
+    if (!tutorialActive || tutorialStep !== 1) return;
+    const track = map.tracks.get(String(id));
+    const risk = Number(track?.riskLevel) || 0;
+    if (risk < TUTORIAL_TARGET_MIN_RISK) {
+      showTutorialPrompt('[ TARGET NOT PRIORITY · FOLLOW THE RED PULSE ]', 'TRAINING PROTOCOL // 01 · LOCK ON');
+      positionTutorialPrompt('map');
+      return;
+    }
+    if (String(id) !== targetId) return;
+    map.offPick?.(onPick); // remove listener after first use
+    tutorialStep = 2;
+    el.tutorialTargetRing.hidden = true;
+
+    const li = listItems.get(targetId);
+    const btn = li?.querySelector('.btn-cleanup');
+    if (li && btn) {
+      li.classList.add('target--tutorial');
+      btn.classList.add('btn-cleanup--tutorial');
+      tutorialButtonEl = btn;
+      el.tutorialButtonHalo.hidden = false;
+      updateTutorialHaloPosition();
+      showTutorialPrompt('[ AUTHORIZE ORBITAL STRIKE ]', 'TRAINING PROTOCOL // 02 · STRIKE');
+      positionTutorialPrompt('button');
+    }
+
+    // Step 2: wait for the cleanup button click
+    const onBtnClick = (ev) => {
+      ev.stopPropagation();
+      if (!tutorialActive || tutorialStep !== 2) return;
+      btn.removeEventListener('click', onBtnClick);
+      completeTutorial();
+    };
+    btn.addEventListener('click', onBtnClick);
+  };
+
+  map.onPick = onPick;
+}
+
+function completeTutorial() {
+  tutorialActive = false;
+  tutorialStep = 0;
+  tutorialTargetId = null;
+  tutorialButtonEl = null;
+  clearTutorialButtonHighlight();
+  el.tutorialLayer.hidden = true;
+  el.tutorialTargetRing.hidden = true;
+  el.tutorialButtonHalo.hidden = true;
+  document.body.classList.remove('tutorial-mode');
+
+  try {
+    localStorage.setItem('tutorialDone', 'true');
+  } catch {
+    /* ignore quota errors */
+  }
+
+  // Restore the original map.onPick handler
+  map.onPick = (id) => {
+    if (gameOver) return;
+    if (!id) {
+      clearArming();
+      selectTrack(null);
+      return;
+    }
+    playBeep();
+    selectTrack(id, { scroll: true, acquire: true });
+    armTarget(id);
+    handleTutorialPick(id);
+  };
+}
+
+function startTutorial() {
+  if (tutorialActive || gameOver) return false;
+  if (!lastObjects.length && !map.tracks.size) {
+    tutorialPending = true;
+    return false;
+  }
+
+  const target = pickTutorialTarget();
+  if (!target) {
+    tutorialPending = true;
+    return false;
+  }
+
+  tutorialActive = true;
+  tutorialPending = false;
+  tutorialStep = 1;
+  tutorialAwaitingLock = null;
+  document.body.classList.add('tutorial-mode');
+  el.tutorialLayer.hidden = false;
+  el.tutorialTargetRing.hidden = false;
+  clearTutorialButtonHighlight();
+  showTutorialPrompt('[ CLICK THE RED TARGET TO LOCK ON ]', 'TRAINING PROTOCOL // 01 · LOCK ON');
+  positionTutorialPrompt('map');
+  updateTutorialRingPosition();
+  startTutorialTicker();
+  return true;
+}
+
+function queueTutorialStart(delay = 850) {
+  if (tutorialActive || !tutorialPending || tutorialStartTimer) return;
+  tutorialStartTimer = window.setTimeout(() => {
+    tutorialStartTimer = 0;
+    startTutorial();
+  }, delay);
+}
+
+function handleTutorialPick(id) {
+  if (!tutorialActive || tutorialStep !== 1 || !id) return;
+  const track = map.tracks.get(String(id));
+  const risk = Number(track?.riskLevel) || 0;
+  if (risk < TUTORIAL_TARGET_MIN_RISK) {
+    showTutorialPrompt('[ TARGET NOT PRIORITY · FOLLOW THE RED PULSE ]', 'TRAINING PROTOCOL // 01 · LOCK ON');
+    positionTutorialPrompt('map');
+    return;
+  }
+  tutorialTargetId = String(id);
+  tutorialAwaitingLock = String(id);
+  updateTutorialRingPosition();
+
+  // The acquire animation lasts ACQUIRE_MS; advance even if the arm timer and
+  // the canvas lock callback land on the same frame and clear `armingId` first.
+  if (tutorialLockTimer) window.clearTimeout(tutorialLockTimer);
+  tutorialLockTimer = window.setTimeout(() => {
+    tutorialLockTimer = 0;
+    if (!tutorialActive || tutorialStep !== 1) return;
+    if (tutorialAwaitingLock !== String(id)) return;
+    tutorialAwaitingLock = null;
+    enterTutorialAuthorize();
+  }, ACQUIRE_MS + 40);
+}
+
+function enterTutorialAuthorize() {
+  if (!tutorialActive || gameOver) return;
+  tutorialStep = 2;
+  el.tutorialTargetRing.hidden = true;
+
+  const li = listItems.get(tutorialTargetId);
+  const btn = li?.querySelector('.btn-cleanup');
+  if (!li || !btn) {
+    // Snapshot/list still settling: retry on the next frame.
+    tutorialStep = 1;
+    tutorialAwaitingLock = tutorialTargetId;
+    window.requestAnimationFrame(enterTutorialAuthorize);
+    return;
+  }
+
+  clearTutorialButtonHighlight();
+  tutorialButtonEl = btn;
+  li.classList.add('target--tutorial');
+  btn.classList.add('btn-cleanup--tutorial');
+  selectTrack(tutorialTargetId, { scroll: true });
+
+  showTutorialPrompt('[ AUTHORIZE ORBITAL STRIKE ]', 'TRAINING PROTOCOL // 02 · STRIKE');
+  updateTutorialHaloPosition();
+  el.tutorialButtonHalo.hidden = false;
+  positionTutorialPrompt('button');
+}
+
+function beginTutorialConsequence() {
+  if (!tutorialActive) return;
+  tutorialStep = 3;
+  tutorialButtonEl = null;
+  el.tutorialButtonHalo.hidden = true;
+  el.tutorialTargetRing.hidden = true;
+  el.tutorialPrompt.hidden = true;
+  document.body.classList.add('tutorial-impact');
+
+  tutorialStrikeTimer = window.setTimeout(() => {
+    tutorialStrikeTimer = 0;
+    if (!tutorialActive) return;
+    showTutorialPrompt(
+      '[ DEBRIS DESTROYED. ENERGY CONSUMED. ]',
+      'TRAINING PROTOCOL // 03 · IMPACT',
+      'success',
+    );
+    positionTutorialPrompt('center');
+
+    tutorialHoldTimer = window.setTimeout(() => {
+      tutorialHoldTimer = 0;
+      if (!tutorialActive) return;
+      showTutorialPrompt(
+        '[ WARNING: UNADDRESSED DEBRIS TRIGGERS CASCADES. ]',
+        'TRAINING PROTOCOL // 04 · THREAT',
+        'warning',
+      );
+      positionTutorialPrompt('center');
+
+      tutorialHoldTimer = window.setTimeout(() => {
+        tutorialHoldTimer = 0;
+        finishTutorial();
+      }, TUTORIAL_WARNING_HOLD_MS);
+    }, TUTORIAL_SUCCESS_HOLD_MS);
+  }, ORBITAL_STRIKE_MS);
+}
+
+function syncTutorialWithObjects() {
+  if (!tutorialActive) return;
+  if (tutorialStep === 1) {
+    if (!tutorialTargetId || !map.tracks.has(tutorialTargetId)) {
+      const target = pickTutorialTarget();
+      if (!target) {
+        abortTutorial();
+        return;
+      }
+      updateTutorialRingPosition();
+    }
+  } else if (tutorialStep === 2) {
+    if (!listItems.has(tutorialTargetId) || !tutorialButtonEl?.isConnected) {
+      clearTutorialButtonHighlight();
+      tutorialStep = 1;
+      tutorialTargetId = null;
+      const target = pickTutorialTarget();
+      if (!target) {
+        abortTutorial();
+        return;
+      }
+      el.tutorialTargetRing.hidden = false;
+      showTutorialPrompt('[ CLICK THE RED TARGET TO LOCK ON ]', 'TRAINING PROTOCOL // 01 · LOCK ON');
+      positionTutorialPrompt('map');
+      updateTutorialRingPosition();
+    } else {
+      updateTutorialHaloPosition();
+    }
+  }
+}
+
+function finishTutorial() {
+  if (!tutorialActive) return;
+  tutorialActive = false;
+  tutorialStep = 0;
+  tutorialTargetId = null;
+  tutorialAwaitingLock = null;
+  tutorialHasCompleted = true;
+  if (tutorialLockTimer) {
+    window.clearTimeout(tutorialLockTimer);
+    tutorialLockTimer = 0;
+  }
+  try {
+    localStorage.setItem(TUTORIAL_STORAGE_KEY, '1');
+  } catch {
+    /* storage can be blocked */
+  }
+  document.body.classList.remove('tutorial-mode', 'tutorial-impact');
+  el.tutorialLayer.hidden = true;
+  el.tutorialPrompt.hidden = true;
+  el.tutorialTargetRing.hidden = true;
+  el.tutorialButtonHalo.hidden = true;
+  clearTutorialButtonHighlight();
+  if (tutorialRaf) {
+    window.cancelAnimationFrame(tutorialRaf);
+    tutorialRaf = 0;
+  }
+}
+
+function abortTutorial() {
+  if (!tutorialActive) return;
+  tutorialActive = false;
+  tutorialStep = 0;
+  tutorialTargetId = null;
+  tutorialAwaitingLock = null;
+  if (tutorialLockTimer) {
+    window.clearTimeout(tutorialLockTimer);
+    tutorialLockTimer = 0;
+  }
+  document.body.classList.remove('tutorial-mode', 'tutorial-impact');
+  el.tutorialLayer.hidden = true;
+  el.tutorialPrompt.hidden = true;
+  el.tutorialTargetRing.hidden = true;
+  el.tutorialButtonHalo.hidden = true;
+  clearTutorialButtonHighlight();
+  if (tutorialRaf) {
+    window.cancelAnimationFrame(tutorialRaf);
+    tutorialRaf = 0;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Wave + score HUD
@@ -530,6 +1364,7 @@ function authorizeCleanup(id) {
 
   // 🚀 1. IMPACT FRAME — solid white, rips through the next ~50 ms.
   triggerCleanupFlash();
+  flashImpact();
 
   // 🛰 2. LASER BEAM — thick glowing cyan/white column from the top of the
   //       map down to the target, shockwave on arrival.
@@ -538,6 +1373,7 @@ function authorizeCleanup(id) {
     track?.x ?? MAP_W / 2,
     track?.y ?? MAP_H / 2,
   );
+  UI_AUDIO.laser();
 
   // ☄ 3. TRAVEL TIME — the strike arrives 500 ms after the trigger pull.
   window.setTimeout(() => {
@@ -556,6 +1392,10 @@ function authorizeCleanup(id) {
       completeCleanup(key);
     }
   }, ORBITAL_STRIKE_MS);
+
+  if (tutorialActive && tutorialStep === 2 && String(tutorialTargetId) === key) {
+    beginTutorialConsequence();
+  }
 
   return true;
 }
@@ -832,19 +1672,48 @@ function shakeConsole() {
 }
 
 /** Solid red at 0.8 for exactly 50 ms, then fade out. */
-function flashImpact() {
-  if (!el.impactFlash) return;
-  el.impactFlash.hidden = false;
-  el.impactFlash.classList.remove('is-active');
-  void el.impactFlash.offsetWidth;
-  el.impactFlash.classList.add('is-active');
+/** Violent 300 ms screen shake using a RAF loop translating <html> by random ±10px, decaying to 0. */
+function shakeScreen() {
+  const root = document.documentElement;
+  const duration = 300;
+  const start = performance.now();
+  let rafId = 0;
 
-  if (impactTimer) window.clearTimeout(impactTimer);
-  impactTimer = window.setTimeout(() => {
-    el.impactFlash.classList.remove('is-active');
-    el.impactFlash.hidden = true;
-    impactTimer = 0;
-  }, 240);
+  function frame(now) {
+    const elapsed = now - start;
+    const t = Math.min(elapsed / duration, 1);
+    const decay = 1 - t; // 1 → 0 over the duration
+
+    if (t < 1) {
+      const rx = (Math.random() - 0.5) * 20 * decay;
+      const ry = (Math.random() - 0.5) * 20 * decay;
+      root.style.transform = `translate(${rx}px, ${ry}px)`;
+      rafId = requestAnimationFrame(frame);
+    } else {
+      root.style.transform = '';
+    }
+  }
+
+  rafId = requestAnimationFrame(frame);
+}
+
+function flashImpact() {
+  // 50 ms inverted impact frame (#ff0033, mix-blend-mode: difference).
+  if (el.impactFrame) {
+    el.impactFrame.classList.add('active');
+    window.setTimeout(() => {
+      el.impactFrame.classList.remove('active');
+      // After the 50 ms impact frame, show cracked glass overlay.
+      if (el.crackedGlass) {
+        el.crackedGlass.classList.add('active');
+        window.setTimeout(() => {
+          el.crackedGlass.classList.remove('active');
+        }, 500);
+      }
+    }, 50);
+  }
+  UI_AUDIO.impact();
+  shakeScreen();
 }
 
 function updateIntegrityUI() {
@@ -917,6 +1786,8 @@ function endGame() {
     demoStop = null;
   }
 
+  tutorialPending = false;
+  abortTutorial();
   map.stop();
   el.canvasWrap.classList.add('is-dead');
   setLowEnergyWarning(false);
@@ -1027,6 +1898,9 @@ function applyObjects() {
   el.trackedSub.textContent = highCount
     ? `${merged.length} objects · 2 Hz · ${highCount} HIGH RISK`
     : `${merged.length} objects · 2 Hz telemetry`;
+
+  syncTutorialWithObjects();
+  if (tutorialPending && gameLoopStarted) queueTutorialStart(650);
 }
 
 function onSnapshot(snapshot) {
@@ -1171,6 +2045,9 @@ function initiateCommand() {
   initAudio();
   el.howto.hidden = true;
 
+  // Run the simplified first-run tutorial (checks localStorage 'tutorialDone').
+  runTutorial();
+
   // Data may already be in (streamed behind the modal). If not, show the
   // loading overlay until the first orbital snapshot lands.
   if (!booted) el.overlay.hidden = false;
@@ -1197,9 +2074,26 @@ function initiateCommand() {
 // First user click anywhere unlocks the Web Audio context (autoplay policy).
 window.addEventListener('pointerdown', initAudio, { once: true, capture: true });
 
-el.startBtn.addEventListener('click', startMission);
-el.howtoStart.addEventListener('click', initiateCommand);
-el.restartBtn.addEventListener('click', () => window.location.reload());
+el.startBtn.addEventListener('click', () => { UI_AUDIO.click(); startMission(); });
+el.howtoStart.addEventListener('click', () => { UI_AUDIO.click(); initiateCommand(); });
+el.restartBtn.addEventListener('click', () => { UI_AUDIO.click(); window.location.reload(); });
+
+window.addEventListener('resize', () => {
+  if (!tutorialActive) return;
+  updateTutorialRingPosition();
+  updateTutorialHaloPosition();
+  if (tutorialStep === 1) positionTutorialPrompt('map');
+  else if (tutorialStep === 2) positionTutorialPrompt('button');
+  else positionTutorialPrompt('center');
+});
+
+el.targetList.addEventListener(
+  'scroll',
+  () => {
+    if (tutorialActive && tutorialStep === 2) positionTutorialPrompt('button');
+  },
+  { passive: true },
+);
 
 // Debug seam (no secrets exposed).
 window.__solarSentinel = {
@@ -1216,6 +2110,33 @@ window.__solarSentinel = {
   triggerCollision,
   clearedIds,
   cascadeObjects,
+  startTutorial,
+  finishTutorial,
+  abortTutorial,
+  resetTutorial: () => {
+    tutorialHasCompleted = false;
+    tutorialActive = false;
+    tutorialStep = 0;
+    tutorialPending = false;
+    try {
+      localStorage.removeItem(TUTORIAL_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    document.body.classList.remove('tutorial-mode', 'tutorial-impact');
+    el.tutorialLayer.hidden = true;
+  },
+  getTutorialState: () => ({
+    active: tutorialActive,
+    pending: tutorialPending,
+    step: tutorialStep,
+    targetId: tutorialTargetId,
+    completed: tutorialHasCompleted,
+    prompt: el.tutorialPrompt.hidden ? null : el.tutorialPromptText.textContent,
+    promptVisible: !el.tutorialPrompt.hidden,
+    targetRingVisible: !el.tutorialTargetRing.hidden,
+    buttonHaloVisible: !el.tutorialButtonHalo.hidden,
+  }),
   getState: () => ({
     energy,
     collisions,
@@ -1229,7 +2150,13 @@ window.__solarSentinel = {
 
 /** Boot the full command center: telemetry feed, socket relay, HUD, canvas. */
 function initApp() {
-  // Wiring is attached above; mission starts on user gesture (startMission).
+  // Pre-game loading animation first, then pointer-first polish.
+  simulateLoading();
+  initLiquidCursor();
+  initMagneticCta();
+  // Initialize UI audio on first user gesture (autoplay policy).
+  window.addEventListener('pointerdown', () => UI_AUDIO.init(), { once: true, capture: true });
+  window.addEventListener('keydown', () => UI_AUDIO.init(), { once: true, capture: true });
 }
 
 initApp();

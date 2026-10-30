@@ -84,6 +84,10 @@ let collisionCount = 0;
 let cleanupActions = 0;
 let gameActive = true;
 
+/** Proximity timers: Map<debrisId, { startTime, durationMs, deadlineMs }> */
+const proximityTimers = new Map();
+const PROXIMITY_DURATION_MS = 5000; // 5-second countdown
+
 /** Simulated gameplay debris (waves + cascade fragments). */
 let simulatedDebris = [];
 
@@ -227,6 +231,9 @@ function removeDebrisObject(id) {
 
   removedDebrisIds.add(idStr);
   simulatedDebris = simulatedDebris.filter((d) => String(d.id) !== idStr);
+
+  // Clear the proximity timer when debris is cleaned up (race against clock won)
+  proximityTimers.delete(idStr);
 }
 
 /**
@@ -335,23 +342,63 @@ function checkKesslerCascade(now = Date.now()) {
   if (activeObjects.length === 0) return;
 
   const highRisk = activeObjects.filter((o) => (o.riskLevel ?? 0) >= KESSLER_RISK_THRESHOLD);
-  if (highRisk.length === 0) return;
+  if (highRisk.length === 0) {
+    // No high-risk objects — clear any lingering timers
+    proximityTimers.clear();
+    return;
+  }
 
-  // Dynamic, tense pacing: probability scales with the number of high-risk
-  // objects, but only ONE collision may occur per 4-second tick.
-  let probability = 0;
-  if (highRisk.length === 1) probability = 0.3;
-  else if (highRisk.length === 2) probability = 0.6;
-  else probability = 1.0;
+  // Start or update proximity timers for each high-risk object
+  for (const obj of highRisk) {
+    const idStr = String(obj.id);
+    if (!proximityTimers.has(idStr)) {
+      proximityTimers.set(idStr, {
+        startTime: now,
+        durationMs: PROXIMITY_DURATION_MS,
+        deadlineMs: now + PROXIMITY_DURATION_MS,
+      });
+    }
+  }
 
-  if (Math.random() > probability) return;
+  // Check if any timer has expired
+  const expired = [];
+  for (const [idStr, timer] of proximityTimers) {
+    if (now >= timer.deadlineMs) {
+      expired.push(idStr);
+    }
+  }
 
-  const highest = highRisk.reduce((a, b) =>
-    (b.riskLevel ?? 0) > (a.riskLevel ?? 0) ? b : a,
-  );
-  if (!highest) return;
+  if (expired.length > 0) {
+    // Collide with the highest-risk expired object
+    const expiredObjs = expired.map((id) => {
+      const o = activeObjects.find((obj) => String(obj.id) === id);
+      return o;
+    }).filter(Boolean);
 
-  triggerCollisionEvent(highest, now);
+    if (expiredObjs.length > 0) {
+      const highest = expiredObjs.reduce((a, b) =>
+        (b.riskLevel ?? 0) > (a.riskLevel ?? 0) ? b : a,
+      );
+      if (highest) {
+        // Clear all proximity timers since a collision is happening
+        proximityTimers.clear();
+        triggerCollisionEvent(highest, now);
+      }
+    }
+    return;
+  }
+
+  // Emit proximity timer data for the frontend to show countdowns
+  const timerData = {};
+  for (const [idStr, timer] of proximityTimers) {
+    const remaining = Math.max(0, timer.deadlineMs - now);
+    timerData[idStr] = { remainingMs: remaining, riskLevel: highRisk.find((o) => String(o.id) === idStr)?.riskLevel ?? 0 };
+  }
+
+  // Broadcast proximity timers via socket for frontend countdown UI
+  if (ioRef && EV && gameActive) {
+    ioRef.emit(EV.PROXIMITY_TIMER, { timers: timerData, timestamp: now });
+  }
 }
 
 
@@ -361,50 +408,7 @@ function checkKesslerCascade(now = Date.now()) {
 //============================================================
 
 /** GLITCH effect: shift UI left/right and turn background red */
-function applyGlitchEffect() {
-  const html = document.documentElement;
-  html.style.transform = 'translateX(-5px)';
-  html.style.transition = 'transform 100ms';
-  // Red background flash
-  const style = document.createElement('style');
-  style.textContent = `
-    body::after {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background: rgba(255, 0, 60, 0.1);
-      pointer-events: none;
-      z-index: 999;
-      animation: glitch-red 100ms forwards;
-    }
-    @keyframes glitch-red {
-      0% { background: rgba(255, 0, 60, 0.1); }
-      100% { background: rgba(255, 0, 60, 0); }
-    }
-  magic`;
-  document.head.appendChild(style);
-  // Reset after animation
-  setTimeout(() => {
-    html.style.transform = 'translateX(0)';
-    document.head.removeChild(style);
-  }, 100);
-}
-
 /** Show high-res cracked glass image overlay */
-function showCrashCracks() {
-  const cracks = document.getElementById('screen-cracks');
-  if (!cracks) return;
-  // Set a cracked glass background image
-  cracks.style.backgroundImage = 'url("/assets/cracked-glass.png")';
-  cracks.style.opacity = '1';
-  cracks.style.transition = 'opacity 2s ease-out';
-  // Reset after 2s
-  setTimeout(() => {
-    cracks.style.opacity = '0';
-    cracks.style.backgroundImage = '';
-  }, 2000);
-}
-
 /** Spawn debris with physics-style velocity */
 function spawnPhysicsDebris(x, y, objects) {
   // 3 new debris objects flying out from impact site
@@ -454,8 +458,6 @@ function triggerCollisionEvent(collided, now = Date.now) {
   const spawned = spawnSimulatedDebris(KESSLER_DEBRIS_COUNT, { x, y, wave: currentWave });
 
   // Maximum Juice: apply all visual effects
-  applyGlitchEffect();
-  showCrashCracks();
   spawnPhysicsDebris(x, y, simulatedDebris);
 
   console.log(
@@ -582,6 +584,7 @@ export function resetGameState() {
   collisionCount = 0;
   cleanupActions = 0;
 
+  proximityTimers.clear();
   removedDebrisIds.clear();
   simulatedDebris = [];
 

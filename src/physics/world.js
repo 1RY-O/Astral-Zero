@@ -1,40 +1,34 @@
 /**
- * Debris Derby — Phase 3 physics world.
+ * Debris Derby — Phase 4 physics world and game loop.
  *
- * Fixed-step (60 Hz) Verlet integration with position-based distance
- * constraints (12 iterations per fixed step). Zero-g environment: no
- * downward gravity. Atmospheric kill-zone (planet limb) deletes debris
- * on contact (burn up). Circle-circle collision with destructible impact
- * fragmentation.
+ * Verlet integration with position-based distance constraints (12 iterations).
+ * Zero-g space, atmospheric kill-zone, circle-circle collision with destructible
+ * fragmentation, 900ms cascade chain multiplier, retrograde/prograde scoring,
+ * slow-mo, screen shake, and level progression.
  */
+
+import { getLevelDef } from '../game/levels.js';
+import { playGrab, playWhip, playThrust, playImpact, playDeorbit, playCascade } from '../game/audio.js';
 
 const FIXED_DT = 1 / 60;
 const MAX_SUBSTEPS = 5;
 const CONSTRAINT_ITERATIONS = 12;
-const DT2 = FIXED_DT * FIXED_DT;
 const DAMPING = 0.9995;
 
 // Tether
-const TETHER_REST = 160; // px: slack below this length
-const TETHER_MAX = 300; // px: hard reach cap
-const GRAB_RADIUS = 32; // px: pointer radius test for GRAB
-const ANCHOR_RADIUS = 7;
-
-// Debris swarm
-const PARTICLE_COUNT = 7;
-const SPAWN_MIN_R = 70;
-const SPAWN_MAX_R = 210;
+const TETHER_REST = 160; // px
+const TETHER_MAX = 300; // px
+const GRAB_RADIUS = 36; // px
+const ANCHOR_RADIUS = 8;
 
 // Thrust / fuel
-const THRUST_ACC = 960; // px / s^2 along the tether normal, outward
-const FUEL_DRAIN = 0.22; // fuel per second of thrust
+const THRUST_ACC = 980; // px / s^2
+const FUEL_DRAIN = 0.22; // fuel fraction per second
 
 const DEFAULT_SEED = 2026;
 const TAU = Math.PI * 2;
+const CHAIN_WINDOW_MS = 900;
 
-/**
- * Seeded PRNG (mulberry32). Same seed => same scenario => same trace.
- */
 function mulberry32(seed) {
   return () => {
     let t = (seed += 0x6d2b79f5);
@@ -42,6 +36,10 @@ function mulberry32(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function dist2(ax, ay, bx, by) {
@@ -54,16 +52,19 @@ function makeParticle(id, x, y, vx, vy, radius, mass, color) {
   return {
     id,
     x,
-    y, // current position
+    y,
     px: x - vx * FIXED_DT,
-    py: y - vy * FIXED_DT, // previous position (implicit velocity)
+    py: y - vy * FIXED_DT,
     ax: 0,
-    ay: 0, // acceleration accumulator
+    ay: 0,
     invMass: mass > 0 ? 1 / mass : 0,
     radius,
     mass,
     fixed: false,
     color,
+    releaseDot: -1, // default retrograde
+    releasedAt: 0,
+    chainedFrom: null,
   };
 }
 
@@ -75,35 +76,59 @@ function makeFixedParticle(x, y, radius) {
 }
 
 function debrisColor(mass) {
-  const t = Math.min(1, Math.max(0, (mass - 6) / 12));
-  const a = 0.35 + 0.65 * t;
+  const t = Math.min(1, Math.max(0, (mass - 6) / 16));
+  const a = 0.4 + 0.6 * t;
   return `rgba(255, 255, 255, ${a.toFixed(3)})`;
 }
 
 export class World {
-  constructor({ width = 800, height = 600, devicePixelRatio = 1, seed = DEFAULT_SEED } = {}) {
+  constructor({ width = 800, height = 600, devicePixelRatio = 1, seed = DEFAULT_SEED, levelId = null } = {}) {
     this.width = width;
     this.height = height;
     this.dpr = devicePixelRatio;
     this.seed = seed;
     this.rng = mulberry32(seed);
 
+    this.levelId = levelId;
     this.particles = [];
-    this.tether = null; // { rest, max } while a body is grabbed
+    this.tether = null;
     this.grabbed = null;
     this.anchor = null;
 
-    this.fuel = 1;
+    this.fuelMax = 100;
+    this.fuel = 1; // 0..1 ratio of fuelMax
     this.thrusting = false;
-    this.thrustDir = null; // optional directional vector { x, y }
+    this.thrustDir = null;
     this.tension = 0;
     this.substeps = 0;
-    this.burnedCount = 0;
 
-    // Last pointer position in world (CSS pixel) space.
+    // Juice & Effects
+    this.timeScale = 1.0;
+    this.slowMoTimer = 0;
+    this.freezeFrames = 0;
+    this.screenShake = 0;
+    this.shakeX = 0;
+    this.shakeY = 0;
+
+    // Scoring & Cascades
+    this.score = 0;
+    this.chain = 0;
+    this.maxChain = 0;
+    this.lastDeorbitTime = null;
+    this.deorbits = [];
+    this.lingers = 0;
+    this.burnedCount = 0;
+    this.gameTime = 0;
+    this.state = 'playing'; // 'playing' | 'cleared' | 'failed'
+    this.floatingTexts = [];
+
     this.pointer = { x: 0, y: 0 };
 
-    this.spawnScenario();
+    if (levelId !== null) {
+      this.loadLevel(levelId);
+    } else {
+      this.spawnScenario();
+    }
   }
 
   getPlanetLimb() {
@@ -124,16 +149,14 @@ export class World {
   spawnScenario() {
     const cx = this.width * 0.5;
     const anchorY = this.height * 0.22;
-
     this.anchor = makeFixedParticle(cx, anchorY, ANCHOR_RADIUS);
-
     this.particles = [];
-    for (let i = 0; i < PARTICLE_COUNT; i += 1) {
+
+    for (let i = 0; i < 7; i += 1) {
       const angle = this.rng() * TAU;
-      const reach = SPAWN_MIN_R + this.rng() * (SPAWN_MAX_R - SPAWN_MIN_R);
+      const reach = 70 + this.rng() * 140;
       let x = cx + Math.cos(angle) * reach;
       let y = anchorY + Math.sin(angle) * reach;
-      // Keep debris on screen at spawn.
       x = Math.min(Math.max(x, 40), this.width - 40);
       y = Math.min(Math.max(y, 40), this.height * 0.5);
 
@@ -149,6 +172,41 @@ export class World {
     }
   }
 
+  loadLevel(levelId) {
+    this.levelId = levelId;
+    const def = getLevelDef(levelId);
+    this.fuelMax = def.fuelMax;
+    this.fuel = 1;
+    this.score = 0;
+    this.chain = 0;
+    this.maxChain = 0;
+    this.deorbits = [];
+    this.lingers = 0;
+    this.burnedCount = 0;
+    this.gameTime = 0;
+    this.state = 'playing';
+    this.floatingTexts = [];
+    this.lastDeorbitTime = null;
+
+    const cx = this.width * 0.5;
+    const anchorY = this.height * 0.22;
+    this.anchor = makeFixedParticle(cx, anchorY, ANCHOR_RADIUS);
+
+    const spawned = def.spawn(this.rng, this.width, this.height);
+    this.particles = spawned.map((item) =>
+      makeParticle(
+        item.id,
+        item.x,
+        item.y,
+        item.vx,
+        item.vy,
+        item.radius,
+        item.mass,
+        debrisColor(item.mass),
+      ),
+    );
+  }
+
   setSize(width, height) {
     this.width = width;
     this.height = height;
@@ -158,16 +216,30 @@ export class World {
     }
   }
 
+  addFloatingText(text, x, y, color = '#38BDF8') {
+    this.floatingTexts.push({
+      text,
+      x,
+      y,
+      color,
+      vy: -30,
+      life: 1.0,
+      maxLife: 1.0,
+    });
+  }
+
   /* ------------------------------------------------------------------ */
-  // Input
+  // Input Verbs
 
   grab(worldX, worldY) {
     this.pointer.x = worldX;
     this.pointer.y = worldY;
 
-    // If clicking on already grabbed body, release it
     if (this.grabbed) {
-      if (dist2(worldX, worldY, this.grabbed.x, this.grabbed.y) <= Math.max(GRAB_RADIUS * GRAB_RADIUS, this.grabbed.radius * this.grabbed.radius * 4)) {
+      if (
+        dist2(worldX, worldY, this.grabbed.x, this.grabbed.y) <=
+        Math.max(GRAB_RADIUS * GRAB_RADIUS, this.grabbed.radius * this.grabbed.radius * 4)
+      ) {
         this.release();
         return false;
       }
@@ -180,7 +252,7 @@ export class World {
     let best = null;
     let bestD2 = GRAB_RADIUS * GRAB_RADIUS;
     for (const p of this.particles) {
-      const pHitRadius = Math.max(GRAB_RADIUS, p.radius + 12);
+      const pHitRadius = Math.max(GRAB_RADIUS, p.radius + 14);
       const d2p = dist2(worldX, worldY, p.x, p.y);
       if (d2p > pHitRadius * pHitRadius) continue;
       if (dist2(ax, ay, p.x, p.y) > reach2) continue;
@@ -194,6 +266,7 @@ export class World {
     this.grabbed = best;
     this.tether = { rest: TETHER_REST, max: TETHER_MAX };
     this.tension = 0;
+    playGrab();
     return true;
   }
 
@@ -216,11 +289,21 @@ export class World {
     this.grabbed = best;
     this.tether = { rest: TETHER_REST, max: TETHER_MAX };
     this.tension = 0;
+    playGrab();
     return true;
   }
 
   release() {
     const released = this.grabbed;
+    if (released) {
+      const vx = (released.x - released.px) / FIXED_DT;
+      const vy = (released.y - released.py) / FIXED_DT;
+      const speed = Math.hypot(vx, vy);
+      // Horizontal component defines retrograde vs prograde
+      released.releaseDot = speed > 0 ? -vx / speed : -1;
+      released.releasedAt = this.gameTime;
+      playWhip();
+    }
     this.tether = null;
     this.grabbed = null;
     this.tension = 0;
@@ -228,19 +311,56 @@ export class World {
   }
 
   setThrusting(thrusting, dir = null) {
+    if (thrusting && !this.thrusting && this.fuel > 0) {
+      playThrust();
+    }
     this.thrusting = !!thrusting;
     this.thrustDir = dir;
   }
 
   /* ------------------------------------------------------------------ */
-  // Fixed step
+  // Step Loop
 
   step() {
-    const particles = this.particles;
-    const dt = FIXED_DT;
-    const dt2 = DT2;
+    if (this.freezeFrames > 0) {
+      this.freezeFrames -= 1;
+      return;
+    }
 
-    // 1. Forces: thrust along tether normal (or manual direction)
+    // Screen shake decay
+    if (this.screenShake > 0.05) {
+      this.screenShake *= 0.88;
+      this.shakeX = (this.rng() * 2 - 1) * this.screenShake;
+      this.shakeY = (this.rng() * 2 - 1) * this.screenShake;
+    } else {
+      this.screenShake = 0;
+      this.shakeX = 0;
+      this.shakeY = 0;
+    }
+
+    // Slow-motion timer
+    if (this.slowMoTimer > 0) {
+      this.slowMoTimer -= FIXED_DT;
+      if (this.slowMoTimer <= 0) {
+        this.timeScale = 1.0;
+      }
+    }
+
+    const dt = FIXED_DT * this.timeScale;
+    const dt2 = dt * dt;
+    this.gameTime += dt;
+
+    // Update floating texts
+    for (let i = this.floatingTexts.length - 1; i >= 0; i -= 1) {
+      const ft = this.floatingTexts[i];
+      ft.life -= dt;
+      ft.y += ft.vy * dt;
+      if (ft.life <= 0) {
+        this.floatingTexts.splice(i, 1);
+      }
+    }
+
+    // 1. Forces: thrust along tether normal
     if (this.thrusting && this.grabbed && this.fuel > 0) {
       const g = this.grabbed;
       const a = this.anchor;
@@ -258,8 +378,8 @@ export class World {
       this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * dt);
     }
 
-    // 2. Verlet integration: zero-g (no downward gravity)
-    for (const p of particles) {
+    // 2. Verlet integration: zero-g
+    for (const p of this.particles) {
       if (p.fixed) continue;
       const vx = (p.x - p.px) * DAMPING;
       const vy = (p.y - p.py) * DAMPING;
@@ -271,7 +391,7 @@ export class World {
       p.ay = 0;
     }
 
-    // 3. Position-based tether constraint (12 iterations per step)
+    // 3. Position-based distance constraints (12 iterations)
     for (let it = 0; it < CONSTRAINT_ITERATIONS; it += 1) {
       if (this.tether && this.grabbed) this.solveTether();
     }
@@ -279,16 +399,75 @@ export class World {
     // 4. Circle-circle collisions and destructible fragmentation
     this.solveCollisions();
 
-    // 5. Atmospheric kill-zone (planet limb) - burn up on contact, NO bounce/slide
-    for (let i = particles.length - 1; i >= 0; i -= 1) {
-      const p = particles[i];
+    // 5. Atmospheric kill-zone (burn up on contact)
+    const atMs = Math.round(this.gameTime * 1000);
+    for (let i = this.particles.length - 1; i >= 0; i -= 1) {
+      const p = this.particles[i];
       if (p.fixed) continue;
       if (this.isInsideAtmosphere(p.x, p.y, p.radius)) {
         if (this.grabbed === p) {
           this.release();
         }
-        particles.splice(i, 1);
+        this.particles.splice(i, 1);
         this.burnedCount += 1;
+
+        // Cascade window check (900ms)
+        if (this.lastDeorbitTime !== null && atMs - this.lastDeorbitTime <= CHAIN_WINDOW_MS) {
+          this.chain += 1;
+        } else {
+          this.chain = 1;
+        }
+        this.lastDeorbitTime = atMs;
+        if (this.chain > this.maxChain) this.maxChain = this.chain;
+
+        // Scoring: Retrograde (+80) vs Prograde (-150)
+        const isRetrograde = p.releaseDot < 0;
+        const objectValue = 50 * clamp(p.mass / 10, 0.5, 4);
+        const multiplier = (this.chain * (this.chain + 1)) / 2;
+        const gainedScore = Math.round(objectValue * multiplier + (isRetrograde ? 80 : -150));
+        this.score = Math.max(0, this.score + gainedScore);
+
+        this.deorbits.push({
+          objectId: p.id,
+          massKg: p.mass,
+          releaseDot: isRetrograde ? -1 : 1,
+          atMs,
+        });
+
+        if (isRetrograde) {
+          playDeorbit();
+          this.addFloatingText(`+${gainedScore} CLEAN (${this.chain}x)`, p.x, p.y - 10, '#38BDF8');
+        } else {
+          this.addFloatingText(`-${Math.abs(gainedScore)} PROGRADE`, p.x, p.y - 10, '#FF2D95');
+        }
+
+        // Trigger slow-motion on cascade
+        if (this.chain >= 2) {
+          this.timeScale = 0.25;
+          this.slowMoTimer = 0.7;
+          playCascade(this.chain);
+          this.screenShake = Math.min(18, 5 + this.chain * 3);
+        }
+        if (this.chain >= 5) {
+          this.freezeFrames = 6; // 100ms freeze
+        }
+      }
+    }
+
+    // Win condition check
+    if (this.levelId !== null && this.state === 'playing') {
+      if (this.particles.length === 0) {
+        this.state = 'cleared';
+        // Fuel bonus on level clear
+        const fuelBonus = Math.round(500 * this.fuel);
+        this.score += fuelBonus;
+        this.addFloatingText(`LEVEL CLEARED! +${fuelBonus} FUEL`, this.width * 0.5, this.height * 0.4, '#38BDF8');
+      } else if (this.fuel <= 0 && !this.grabbed) {
+        // Check if any remaining debris is moving toward atmospheric entry
+        const hasMoving = this.particles.some((p) => Math.hypot(p.x - p.px, p.y - p.py) > 0.5);
+        if (!hasMoving) {
+          this.state = 'failed';
+        }
       }
     }
   }
@@ -345,6 +524,8 @@ export class World {
 
           // Destructible fragmentation on fast impact
           if (relSpeed > 75 && (p1.radius >= 8 || p2.radius >= 8)) {
+            playImpact();
+            this.screenShake = Math.min(22, 6 + relSpeed * 0.08);
             const targetIdx = p1.radius >= p2.radius ? i : j;
             this.fragmentParticle(targetIdx, relSpeed, nx, ny);
             return;
@@ -407,6 +588,8 @@ export class World {
       );
       this.particles.push(frag);
     }
+
+    this.addFloatingText('CASCADE SHATTER', p.x, p.y, '#FF2D95');
   }
 
   getTrajectory(steps = 90) {
@@ -441,4 +624,5 @@ export {
   TETHER_MAX,
   GRAB_RADIUS,
   DEFAULT_SEED,
+  CHAIN_WINDOW_MS,
 };

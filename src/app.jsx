@@ -1,23 +1,25 @@
 /**
- * Debris Derby — Phase 3 React shell.
+ * Debris Derby — Phase 4 Core loop and React shell.
  *
- * React mounts a single <canvas> in a ref once. The requestAnimationFrame
- * loop is started in an effect and never touches React's render cycle:
- * no per-frame setState, no React state for physics.
- * Fixed-step 60 Hz accumulator, max 5 substeps per frame.
- * Pointer events (down/up/click) and keyboard (E, Q, Space, WASD) are bound.
+ * Fixed-step 60 Hz accumulator, rAF loop outside React render cycle.
+ * Full game loop with Levels 1–3, scoring formulas, cascades,
+ * and audio effects.
  */
 
 import { useEffect, useRef } from 'react';
 import { World, FIXED_DT } from './physics/world.js';
 import { drawWorld } from './physics/render.js';
+import { getLevelDef } from './game/levels.js';
+import { initAudio } from './game/audio.js';
 
 const MAX_SUBSTEPS = 5;
 const DEFAULT_SEED = 2026;
 
-function parseSeed() {
-  const match = location.search.match(/[?&]seed=(\d+)/);
-  return match ? Number(match[1]) : DEFAULT_SEED;
+function parseParams() {
+  const params = new URLSearchParams(window.location.search);
+  const seed = params.has('seed') ? Number(params.get('seed')) : DEFAULT_SEED;
+  const level = params.has('level') ? Number(params.get('level')) : 1;
+  return { seed, level };
 }
 
 const shellStyle = {
@@ -43,19 +45,18 @@ const canvasStyle = {
 const debugStyle = {
   position: 'fixed',
   left: '12px',
-  top: '12px',
+  bottom: '12px',
   zIndex: 10,
-  padding: '10px 14px',
+  padding: '8px 12px',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-  fontSize: '12px',
-  lineHeight: '1.55',
-  color: 'var(--white)',
-  background: 'rgba(6, 13, 31, 0.75)',
+  fontSize: '11px',
+  lineHeight: '1.45',
+  color: 'rgba(255, 255, 255, 0.75)',
+  background: 'rgba(6, 13, 31, 0.8)',
   border: '1px solid var(--border)',
-  borderRadius: '6px',
+  borderRadius: '4px',
   pointerEvents: 'none',
   whiteSpace: 'pre',
-  maxWidth: '38vw',
 };
 
 function resize(canvas, ctx, world) {
@@ -78,17 +79,11 @@ function paintDebug(debug, world, fpsRef, now, loopError) {
     state.t = now;
   }
 
+  const def = getLevelDef(world.levelId || 1);
   const lines = [
-    `seed: ${world.seed}`,
-    `fps: ${state.fps}`,
-    `substeps: ${world.substeps}/${MAX_SUBSTEPS}`,
-    `fuel: ${(world.fuel * 100).toFixed(0)}%`,
-    `tension: ${world.tension.toFixed(1)} px`,
-    `grabbed: ${world.grabbed ? world.grabbed.id : 'none'}`,
-    `objects: ${world.particles.length} (burned: ${world.burnedCount})`,
-    '',
-    loopError ? `ERROR: ${loopError}` : 'Click/E: Grab  ·  Space/WASD: Thrust  ·  Q/Click payload: Release',
-    'Trajectory preview: 90-step dashed line  ·  Atmosphere: kill-zone',
+    `Level ${world.levelId || 1}: ${def.name}  ·  FPS: ${state.fps}`,
+    `Hint: ${def.hint}`,
+    loopError ? `ERROR: ${loopError}` : 'Click/E: Grab  ·  Space/WASD: Thrust  ·  Q/Click: Release  ·  R: Retry  ·  N: Next',
   ];
   debug.textContent = lines.join('\n');
 }
@@ -101,7 +96,6 @@ export default function App() {
   const activeRef = useRef(false);
   const accRef = useRef(0);
   const pausedRef = useRef(false);
-  // Initialize with 60 fps to eliminate initial "fps: 0" display
   const fpsRef = useRef({ frames: 0, t: 0, fps: 60 });
   const keysRef = useRef(new Set());
 
@@ -110,11 +104,14 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    const { seed, level } = parseParams();
+
     const world = new World({
       width: canvas.clientWidth || 800,
       height: canvas.clientHeight || 600,
       devicePixelRatio: window.devicePixelRatio || 1,
-      seed: parseSeed(),
+      seed,
+      levelId: level,
     });
     worldRef.current = world;
 
@@ -179,6 +176,7 @@ export default function App() {
     };
 
     const onPointerDown = (event) => {
+      initAudio();
       try {
         const rect = canvas.getBoundingClientRect();
         const clientX = event.clientX - rect.left;
@@ -189,11 +187,10 @@ export default function App() {
       }
     };
 
-    const onPointerUp = () => {
-      // Optional: keep tether attached on click, or release on pointerup if desired
-    };
+    const onPointerUp = () => {};
 
     const onKeyDown = (event) => {
+      initAudio();
       try {
         keysRef.current.add(event.key);
         if (event.key === ' ' || event.key.startsWith('Arrow')) {
@@ -203,6 +200,11 @@ export default function App() {
           world.grabNearest();
         } else if (event.key === 'q' || event.key === 'Q') {
           world.release();
+        } else if (event.key === 'r' || event.key === 'R') {
+          world.loadLevel(world.levelId || 1);
+        } else if (event.key === 'n' || event.key === 'N') {
+          const nextLevel = Math.min(8, (world.levelId || 1) + 1);
+          world.loadLevel(nextLevel);
         }
         updateKeyboardThrust();
       } catch (err) {

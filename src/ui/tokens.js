@@ -21,6 +21,9 @@ export const PALETTE = Object.freeze({
   canvasDark: '#060D1F',
   canvasLight: '#F8FAFC',
   ink: '#0B1220',
+  // Phase 3 debug scenario (canvas renderer). Raw literals stay in this file.
+  planetFill: 'rgba(255, 255, 255, 0.05)',
+  planetStroke: 'rgba(255, 255, 255, 0.12)',
   muted: 'rgba(255, 255, 255, 0.62)',
   mutedLight: 'rgba(11, 18, 32, 0.62)',
 });

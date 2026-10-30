@@ -1,38 +1,28 @@
 /**
- * Debris Derby — React UI Chrome and Physics Mount.
+ * Debris Derby — Phase 3 Zero-G Physics Sandbox.
  *
- * Architecture rules:
- * - React mounts <canvas> once in a ref.
- * - rAF loop runs entirely outside React's render cycle (zero per-frame setState).
- * - React manages UI chrome: menus, HUD, level select, reports, theme.
- * - ReactBits integration:
- *   - Main menu: SpotlightCard, Magnet
- *   - Score/Fuel: CountUp
- *   - Level Intro: SplitText
+ * Bare canvas testbed for verifying zero-g tether physics:
+ * - GRAB (Click / E)
+ * - SWING (Hold Space / WASD)
+ * - RELEASE (Q / Mouse-Up)
+ * - 7 floating debris objects in zero-g Low Earth Orbit
+ * - Clean plain-DOM debug text overlay (strictly tokens: #38BDF8, #FF2D95, #FFFFFF)
+ * - NO mouse trail / cursor follower
+ * - NO top HUD bar
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { io } from 'socket.io-client';
+import { useEffect, useRef } from 'react';
 import { World, FIXED_DT } from './physics/world.js';
 import { drawWorld } from './physics/render.js';
-import { getLevelDef, LEVEL_DEFS } from './game/levels.js';
-import { initAudio, isMuted, toggleMute } from './game/audio.js';
-
-import SpotlightCard from './components/SpotlightCard.jsx';
-import Magnet from './components/Magnet.jsx';
-import CountUp from './components/CountUp.jsx';
-import SplitText from './components/SplitText.jsx';
-import TouchControls from './components/TouchControls.jsx';
+import { initAudio } from './game/audio.js';
 
 const MAX_SUBSTEPS = 5;
 const DEFAULT_SEED = 2026;
 
-function parseParams() {
-  if (typeof window === 'undefined') return { seed: DEFAULT_SEED, level: 1 };
-  const params = new URLSearchParams(window.location.search);
-  const seed = params.has('seed') ? Number(params.get('seed')) : DEFAULT_SEED;
-  const level = params.has('level') ? Number(params.get('level')) : 1;
-  return { seed, level };
+function parseSeed() {
+  if (typeof window === 'undefined') return DEFAULT_SEED;
+  const match = location.search.match(/[?&]seed=(\d+)/);
+  return match ? Number(match[1]) : DEFAULT_SEED;
 }
 
 function resize(canvas, ctx, world) {
@@ -47,6 +37,7 @@ function resize(canvas, ctx, world) {
 
 export default function App() {
   const canvasRef = useRef(null);
+  const debugRef = useRef(null);
   const worldRef = useRef(null);
   const rafRef = useRef(0);
   const activeRef = useRef(false);
@@ -55,87 +46,97 @@ export default function App() {
   const fpsRef = useRef({ frames: 0, t: 0, fps: 60 });
   const keysRef = useRef(new Set());
 
-  // React Chrome State (low-frequency updates only)
-  const [levelId, setLevelId] = useState(1);
-  const [theme, setTheme] = useState('dark');
-  const [muted, setMutedState] = useState(() => isMuted());
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [levelSelectOpen, setLevelSelectOpen] = useState(false);
-  const [levelIntro, setLevelIntro] = useState(true);
-  const [report, setReport] = useState(null); // { state, score, deorbits, fuelBonus }
-  const [hudState, setHudState] = useState({ score: 0, fuel: 100, chain: 0 });
-  const [catalogStatus, setCatalogStatus] = useState('live');
-  const [isTouch] = useState(
-    () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window)
-  );
-
-  const currentLevelDef = getLevelDef(levelId);
-
-  // Toggle dark/light theme
-  const toggleTheme = useCallback(() => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    document.documentElement.setAttribute('data-theme', next);
-  }, [theme]);
-
-  // Audio toggle
-  const handleToggleMute = useCallback(() => {
-    const m = toggleMute();
-    setMutedState(m);
-  }, []);
-
-  // Level switch
-  const switchLevel = useCallback((id) => {
-    const target = Math.max(1, Math.min(8, id));
-    setLevelId(target);
-    setLevelIntro(true);
-    setReport(null);
-    setLevelSelectOpen(false);
-    setMenuOpen(false);
-    if (worldRef.current) {
-      worldRef.current.loadLevel(target);
-    }
-  }, []);
-
   useEffect(() => {
     fpsRef.current.t = performance.now();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const { seed, level } = parseParams();
-    setLevelId(level);
 
-    const socket = io({
-      autoConnect: true,
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 3,
-    });
-
-    socket.on('connected', (payload) => {
-      if (payload?.catalog?.catalogStatus) {
-        setCatalogStatus(payload.catalog.catalogStatus);
-      }
-    });
-
-    socket.on('ambient_catalog', (payload) => {
-      if (payload?.catalogStatus) {
-        setCatalogStatus(payload.catalogStatus);
-      }
-    });
-
+    const seed = parseSeed();
     const world = new World({
       width: canvas.clientWidth || 800,
       height: canvas.clientHeight || 600,
       devicePixelRatio: window.devicePixelRatio || 1,
       seed,
-      levelId: level,
     });
     worldRef.current = world;
 
     resize(canvas, ctx, world);
 
     let last = performance.now();
-    let hudTimer = 0;
+    let loopError = null;
+
+    function paintDebugOverlay(now) {
+      const debug = debugRef.current;
+      if (!debug) return;
+
+      const state = fpsRef.current;
+      state.frames += 1;
+      const elapsed = now - state.t;
+      if (elapsed >= 500) {
+        state.fps = Math.round((state.frames * 1000) / elapsed);
+        state.frames = 0;
+        state.t = now;
+      }
+
+      const fuelPct = Math.round(world.fuel * 100);
+      const fuelBarLen = 12;
+      const filledBars = Math.round((fuelPct / 100) * fuelBarLen);
+      const fuelBar = '█'.repeat(filledBars) + '░'.repeat(fuelBarLen - filledBars);
+
+      const grabbedText = world.grabbed
+        ? `${world.grabbed.id} (${world.grabbed.mass.toFixed(0)} kg)`
+        : 'NONE';
+
+      debug.innerHTML = `
+        <div style="color: var(--sky-400); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; margin-bottom: 2px;">
+          DEBRIS DERBY // ZERO-G PHYSICS TESTBED
+        </div>
+        <div style="color: rgba(255, 255, 255, 0.55); font-size: 10px; margin-bottom: 10px;">
+          built for the NASA International Space Apps Challenge 2026
+        </div>
+        <div style="height: 1px; background: rgba(56, 189, 248, 0.25); margin-bottom: 10px;"></div>
+
+        <div style="display: grid; grid-template-columns: 88px 1fr; gap: 4px; font-size: 11px; line-height: 1.5;">
+          <span style="color: rgba(255, 255, 255, 0.6);">FPS:</span>
+          <span style="color: var(--sky-400); font-weight: 700;">${state.fps}</span>
+
+          <span style="color: rgba(255, 255, 255, 0.6);">OBJECTS:</span>
+          <span style="color: var(--white); font-weight: 700;">${world.particles.length} floating in zero-g</span>
+
+          <span style="color: rgba(255, 255, 255, 0.6);">FUEL:</span>
+          <span style="color: ${fuelPct > 25 ? 'var(--sky-400)' : 'var(--pink-500)'}; font-weight: 700;">
+            ${fuelPct}% <span style="font-size: 9px; opacity: 0.85;">[${fuelBar}]</span>
+          </span>
+
+          <span style="color: rgba(255, 255, 255, 0.6);">GRABBED:</span>
+          <span style="color: ${world.grabbed ? 'var(--pink-500)' : 'rgba(255, 255, 255, 0.4)'}; font-weight: 700;">
+            ${grabbedText}
+          </span>
+
+          <span style="color: rgba(255, 255, 255, 0.6);">TENSION:</span>
+          <span style="color: ${world.tension > 20 ? 'var(--pink-500)' : 'var(--sky-400)'};">
+            ${world.tension.toFixed(1)} px
+          </span>
+
+          <span style="color: rgba(255, 255, 255, 0.6);">DEORBITS:</span>
+          <span style="color: var(--sky-400);">${world.burnedCount}</span>
+        </div>
+
+        <div style="height: 1px; background: rgba(56, 189, 248, 0.25); margin: 10px 0;"></div>
+
+        <div style="font-size: 11px; line-height: 1.6;">
+          <div style="color: var(--sky-400); font-weight: 700; margin-bottom: 2px;">CONTROLS:</div>
+          <div><b style="color: var(--white);">Click</b> debris / <b style="color: var(--white);">E</b> &nbsp;— Grab nearest</div>
+          <div><b style="color: var(--white);">Hold Space</b> &nbsp;— Thrust & swing along normal</div>
+          <div><b style="color: var(--white);">WASD</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Directional thrust vector</div>
+          <div><b style="color: var(--white);">Q / Mouse-Up</b> — Release payload</div>
+          <div><b style="color: var(--white);">R</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— Reset & respawn swarm</div>
+        </div>
+
+        ${loopError ? `<div style="color: var(--pink-500); font-weight: 700; margin-top: 8px;">ERROR: ${loopError}</div>` : ''}
+      `;
+    }
 
     function loop(now) {
       if (!activeRef.current) return;
@@ -156,48 +157,10 @@ export default function App() {
         }
 
         drawWorld(ctx, world, canvas.clientWidth, canvas.clientHeight);
-
-        // Check if level ended
-        if (world.state === 'cleared' || world.state === 'failed') {
-          if (!report) {
-            setReport({
-              state: world.state,
-              score: world.score,
-              deorbits: world.deorbits.length,
-              fuelPct: Math.round(world.fuel * 100),
-            });
-            if (world.state === 'cleared' && socket && world.deorbits.length > 0) {
-              const payload = {
-                levelId: world.levelId || 1,
-                callsign: 'TUG PILOT',
-                seed: world.seed,
-                durationMs: Math.min(3600000, Math.round(world.gameTime * 1000)),
-                fuelUsed: Math.max(0, Math.min(1000000, Math.round((1 - world.fuel) * world.fuelMax))),
-                lingers: world.lingers,
-                deorbits: world.deorbits,
-                clientScore: world.score,
-              };
-              socket.emit('run_submit', payload, (res) => {
-                if (res?.ok) {
-                  console.log('[Run Submitted to Leaderboard]', res);
-                }
-              });
-            }
-          }
-        }
-
-        // Throttle React HUD updates to 4 Hz
-        hudTimer += dt;
-        if (hudTimer >= 0.25) {
-          hudTimer = 0;
-          setHudState({
-            score: world.score,
-            fuel: Math.round(world.fuel * 100),
-            chain: world.chain,
-          });
-        }
+        paintDebugOverlay(now);
       } catch (err) {
-        console.error('[Debris Derby Render Loop Error]', err);
+        loopError = err.message;
+        console.error('[Debris Derby Loop Error]', err);
       }
 
       rafRef.current = requestAnimationFrame(loop);
@@ -210,22 +173,21 @@ export default function App() {
       const keys = keysRef.current;
       let dx = 0;
       let dy = 0;
-      let hasThrustKey = false;
+      let hasDirectionKey = false;
+      let hasThrust = false;
 
-      if (keys.has(' ') || keys.has('Space')) hasThrustKey = true;
-      if (keys.has('w') || keys.has('W') || keys.has('ArrowUp')) { dy -= 1; hasThrustKey = true; }
-      if (keys.has('s') || keys.has('S') || keys.has('ArrowDown')) { dy += 1; hasThrustKey = true; }
-      if (keys.has('a') || keys.has('A') || keys.has('ArrowLeft')) { dx -= 1; hasThrustKey = true; }
-      if (keys.has('d') || keys.has('D') || keys.has('ArrowRight')) { dx += 1; hasThrustKey = true; }
+      if (keys.has(' ') || keys.has('Space')) hasThrust = true;
+      if (keys.has('w') || keys.has('W') || keys.has('ArrowUp')) { dy -= 1; hasDirectionKey = true; }
+      if (keys.has('s') || keys.has('S') || keys.has('ArrowDown')) { dy += 1; hasDirectionKey = true; }
+      if (keys.has('a') || keys.has('A') || keys.has('ArrowLeft')) { dx -= 1; hasDirectionKey = true; }
+      if (keys.has('d') || keys.has('D') || keys.has('ArrowRight')) { dx += 1; hasDirectionKey = true; }
 
-      if (hasThrustKey) {
-        world.setThrusting(true, (dx !== 0 || dy !== 0) ? { x: dx, y: dy } : null);
+      if (hasThrust || hasDirectionKey) {
+        world.setThrusting(true, hasDirectionKey ? { x: dx, y: dy } : null);
       } else {
         world.setThrusting(false, null);
       }
     };
-
-    let isTouchingPayload = false;
 
     const onPointerDown = (event) => {
       initAudio();
@@ -233,30 +195,20 @@ export default function App() {
         const rect = canvas.getBoundingClientRect();
         const clientX = event.clientX - rect.left;
         const clientY = event.clientY - rect.top;
-        const grabbed = world.grab(clientX, clientY);
-        if (grabbed) {
-          isTouchingPayload = true;
-        }
+        world.grab(clientX, clientY);
       } catch (err) {
-        console.error(err);
+        loopError = err.message;
       }
     };
 
-    const onPointerMove = (event) => {
-      if (isTouchingPayload && world.grabbed) {
-        const rect = canvas.getBoundingClientRect();
-        world.pointer.x = event.clientX - rect.left;
-        world.pointer.y = event.clientY - rect.top;
-      }
-    };
-
-    const onPointerUp = (event) => {
-      if (isTouchingPayload && world.grabbed) {
-        if (event.pointerType === 'touch' || isTouch) {
+    const onPointerUp = () => {
+      try {
+        if (world.grabbed) {
           world.release();
         }
+      } catch (err) {
+        loopError = err.message;
       }
-      isTouchingPayload = false;
     };
 
     const onKeyDown = (event) => {
@@ -270,10 +222,7 @@ export default function App() {
       } else if (event.key === 'q' || event.key === 'Q') {
         world.release();
       } else if (event.key === 'r' || event.key === 'R') {
-        world.loadLevel(world.levelId || 1);
-        setReport(null);
-      } else if (event.key === 'Escape') {
-        setMenuOpen((prev) => !prev);
+        world.resetSwarm();
       }
       updateKeyboardThrust();
     };
@@ -290,7 +239,6 @@ export default function App() {
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('mousedown', onPointerDown);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('mouseup', onPointerUp);
@@ -303,7 +251,6 @@ export default function App() {
       activeRef.current = false;
       cancelAnimationFrame(rafRef.current);
       canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('mousedown', onPointerDown);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('mouseup', onPointerUp);
@@ -311,9 +258,8 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('visibilitychange', onVisibilityChange);
-      socket.disconnect();
     };
-  }, [report, isTouch]);
+  }, []);
 
   return (
     <div
@@ -323,567 +269,40 @@ export default function App() {
         width: '100vw',
         height: '100vh',
         overflow: 'hidden',
-        background: 'var(--bg)',
-        color: 'var(--text)',
-        fontFamily: 'var(--font-body)',
+        background: 'var(--canvas-dark)',
+        color: 'var(--white)',
         touchAction: 'none',
         userSelect: 'none',
       }}
     >
-      {/* 60Hz Physics Canvas */}
       <canvas
         ref={canvasRef}
         style={{
           display: 'block',
           width: '100vw',
           height: '100vh',
+          cursor: 'crosshair',
         }}
       />
 
-      {/* Top React Navigation Chrome */}
-      <header
+      <div
+        ref={debugRef}
         style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '16px 24px',
+          top: '16px',
+          left: '16px',
+          zIndex: 10,
+          background: 'rgba(6, 13, 31, 0.88)',
+          border: '1px solid var(--sky-400)',
+          borderRadius: '8px',
+          padding: '14px 18px',
+          color: 'var(--white)',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.65), 0 0 12px rgba(56, 189, 248, 0.15)',
           pointerEvents: 'none',
-          zIndex: 'var(--z-hud)',
+          maxWidth: '420px',
         }}
-      >
-        <div style={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <Magnet padding={40}>
-            <button
-              onClick={() => setMenuOpen(true)}
-              style={{
-                minHeight: 'var(--touch-target-min)',
-                padding: '8px 18px',
-                background: 'var(--surface-strong)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-pill)',
-                color: 'var(--text)',
-                fontFamily: 'var(--font-display)',
-                fontWeight: 700,
-                fontSize: 'var(--text-sm)',
-                letterSpacing: '0.04em',
-                cursor: 'pointer',
-              }}
-              aria-label="Open mission control menu"
-            >
-              MENU
-            </button>
-          </Magnet>
-
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', letterSpacing: 'var(--tracking-eyebrow)' }}>
-              MISSION {levelId} / 8
-            </div>
-            <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--text)' }}>
-              {currentLevelDef.name}
-            </div>
-          </div>
-        </div>
-
-        {/* Live Counters with CountUp */}
-        <div
-          style={{
-            pointerEvents: 'auto',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '24px',
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            padding: '8px 20px',
-            borderRadius: 'var(--radius-pill)',
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <div>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginRight: '8px' }}>SCORE</span>
-            <span style={{ fontSize: 'var(--text-base)', fontWeight: 700, fontFamily: 'var(--font-numeric)', color: 'var(--sky-400)' }}>
-              <CountUp to={hudState.score} />
-            </span>
-          </div>
-
-          <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
-
-          <div>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginRight: '8px' }}>FUEL</span>
-            <span
-              style={{
-                fontSize: 'var(--text-base)',
-                fontWeight: 700,
-                fontFamily: 'var(--font-numeric)',
-                color: hudState.fuel > 25 ? 'var(--sky-400)' : 'var(--pink-500)',
-              }}
-            >
-              <CountUp to={hudState.fuel} />%
-            </span>
-          </div>
-
-          <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Celestrak live ambient TLE feed (2 Hz)">
-            <span
-              style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: catalogStatus === 'live' ? 'var(--sky-400)' : 'var(--pink-500)',
-                display: 'inline-block',
-              }}
-            />
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-numeric)' }}>
-              CELESTRAK {catalogStatus.toUpperCase()}
-            </span>
-          </div>
-
-          <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
-
-          <button
-            onClick={toggleTheme}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: 'var(--text-sm)',
-              minHeight: 'var(--touch-target-min)',
-              minWidth: 'var(--touch-target-min)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-            aria-label="Toggle dark/light theme"
-          >
-            {theme === 'dark' ? '☀' : '☾'}
-          </button>
-
-          <button
-            onClick={handleToggleMute}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: 'var(--text-sm)',
-              minHeight: 'var(--touch-target-min)',
-              minWidth: 'var(--touch-target-min)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-            aria-label="Toggle audio sound"
-          >
-            {muted ? 'MUTED' : 'AUDIO'}
-          </button>
-        </div>
-      </header>
-
-      {/* Level Intro Modal with SplitText */}
-      {levelIntro && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(6, 13, 31, 0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 'var(--z-modal)',
-            backdropFilter: 'blur(10px)',
-          }}
-        >
-          <SpotlightCard
-            style={{
-              maxWidth: '560px',
-              width: '90%',
-              padding: '40px',
-              textAlign: 'center',
-            }}
-          >
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--sky-400)', letterSpacing: 'var(--tracking-eyebrow)', marginBottom: '12px' }}>
-              LEVEL {levelId} OPERATION
-            </div>
-
-            <h1
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: 'var(--text-3xl)',
-                fontWeight: 800,
-                color: 'var(--text)',
-                margin: '0 0 16px 0',
-                lineHeight: 1.1,
-              }}
-            >
-              <SplitText text={currentLevelDef.name} />
-            </h1>
-
-            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-base)', lineHeight: 1.6, marginBottom: '28px' }}>
-              {currentLevelDef.hint}
-            </p>
-
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <Magnet padding={50}>
-                <button
-                  onClick={() => setLevelIntro(false)}
-                  style={{
-                    minHeight: 'var(--touch-target-min)',
-                    padding: '14px 36px',
-                    background: 'var(--sky-400)',
-                    color: 'var(--ink)',
-                    border: 'none',
-                    borderRadius: 'var(--radius-pill)',
-                    fontWeight: 700,
-                    fontFamily: 'var(--font-display)',
-                    fontSize: 'var(--text-base)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  ENGAGE TETHER
-                </button>
-              </Magnet>
-            </div>
-          </SpotlightCard>
-        </div>
-      )}
-
-      {/* Mission Complete / Report Modal */}
-      {report && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(6, 13, 31, 0.88)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 'var(--z-modal)',
-            backdropFilter: 'blur(12px)',
-          }}
-        >
-          <SpotlightCard
-            style={{
-              maxWidth: '520px',
-              width: '90%',
-              padding: '36px',
-              textAlign: 'center',
-            }}
-          >
-            <div
-              style={{
-                fontSize: 'var(--text-xs)',
-                color: report.state === 'cleared' ? 'var(--sky-400)' : 'var(--pink-500)',
-                letterSpacing: 'var(--tracking-eyebrow)',
-                marginBottom: '8px',
-              }}
-            >
-              {report.state === 'cleared' ? 'ORBIT PURIFIED' : 'TETHER SEVERED'}
-            </div>
-
-            <h2
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: 'var(--text-2xl)',
-                fontWeight: 800,
-                color: 'var(--text)',
-                margin: '0 0 24px 0',
-              }}
-            >
-              {report.state === 'cleared' ? 'MISSION REPORT' : 'OPERATION FAILED'}
-            </h2>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '16px',
-                marginBottom: '28px',
-                textAlign: 'left',
-                background: 'var(--surface)',
-                padding: '20px',
-                borderRadius: 'var(--radius-lg)',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>DEORBITS</div>
-                <div style={{ fontSize: 'var(--text-xl)', fontWeight: 700, fontFamily: 'var(--font-numeric)' }}>
-                  <CountUp to={report.deorbits} />
-                </div>
-              </div>
-
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>FUEL REMAINING</div>
-                <div style={{ fontSize: 'var(--text-xl)', fontWeight: 700, fontFamily: 'var(--font-numeric)' }}>
-                  <CountUp to={report.fuelPct} />%
-                </div>
-              </div>
-
-              <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>TOTAL RECOVERY SCORE</div>
-                <div
-                  style={{
-                    fontSize: 'var(--text-3xl)',
-                    fontWeight: 800,
-                    fontFamily: 'var(--font-numeric)',
-                    color: 'var(--sky-400)',
-                  }}
-                >
-                  <CountUp to={report.score} />
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
-              <Magnet padding={40}>
-                <button
-                  onClick={() => {
-                    if (worldRef.current) worldRef.current.loadLevel(levelId);
-                    setReport(null);
-                  }}
-                  style={{
-                    minHeight: 'var(--touch-target-min)',
-                    padding: '12px 24px',
-                    background: 'var(--surface-strong)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-pill)',
-                    color: 'var(--text)',
-                    fontFamily: 'var(--font-display)',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  RETRY LEVEL
-                </button>
-              </Magnet>
-
-              {report.state === 'cleared' && levelId < 8 && (
-                <Magnet padding={40}>
-                  <button
-                    onClick={() => switchLevel(levelId + 1)}
-                    style={{
-                      minHeight: 'var(--touch-target-min)',
-                      padding: '12px 28px',
-                      background: 'var(--sky-400)',
-                      color: 'var(--ink)',
-                      border: 'none',
-                      borderRadius: 'var(--radius-pill)',
-                      fontFamily: 'var(--font-display)',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    NEXT LEVEL →
-                  </button>
-                </Magnet>
-              )}
-            </div>
-          </SpotlightCard>
-        </div>
-      )}
-
-      {/* Main Menu Modal with SpotlightCard */}
-      {menuOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(6, 13, 31, 0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 'var(--z-modal)',
-            backdropFilter: 'blur(10px)',
-          }}
-        >
-          <SpotlightCard
-            style={{
-              maxWidth: '480px',
-              width: '90%',
-              padding: '36px',
-            }}
-          >
-            <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--sky-400)', letterSpacing: 'var(--tracking-eyebrow)' }}>
-                NASA SPACE APPS CHALLENGE 2026
-              </div>
-              <h2
-                style={{
-                  fontFamily: 'var(--font-display)',
-                  fontSize: 'var(--text-3xl)',
-                  fontWeight: 800,
-                  margin: '4px 0 8px 0',
-                  color: 'var(--text)',
-                }}
-              >
-                DEBRIS DERBY
-              </h2>
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', lineHeight: 1.5 }}>
-                Zero weapons. Just mass, momentum, and a tether. Clear Earth&apos;s orbits before Kessler Syndrome closes the skies.
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <Magnet padding={30}>
-                <button
-                  onClick={() => setMenuOpen(false)}
-                  style={{
-                    width: '100%',
-                    minHeight: 'var(--touch-target-min)',
-                    background: 'var(--sky-400)',
-                    color: 'var(--ink)',
-                    border: 'none',
-                    borderRadius: 'var(--radius-pill)',
-                    fontWeight: 700,
-                    fontFamily: 'var(--font-display)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  RESUME MISSION
-                </button>
-              </Magnet>
-
-              <Magnet padding={30}>
-                <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setLevelSelectOpen(true);
-                  }}
-                  style={{
-                    width: '100%',
-                    minHeight: 'var(--touch-target-min)',
-                    background: 'var(--surface-strong)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-pill)',
-                    color: 'var(--text)',
-                    fontWeight: 700,
-                    fontFamily: 'var(--font-display)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  SELECT MISSION (1–8)
-                </button>
-              </Magnet>
-
-              <Magnet padding={30}>
-                <button
-                  onClick={() => {
-                    if (worldRef.current) worldRef.current.loadLevel(levelId);
-                    setMenuOpen(false);
-                  }}
-                  style={{
-                    width: '100%',
-                    minHeight: 'var(--touch-target-min)',
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-pill)',
-                    color: 'var(--text-muted)',
-                    fontFamily: 'var(--font-display)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  RESTART LEVEL
-                </button>
-              </Magnet>
-            </div>
-          </SpotlightCard>
-        </div>
-      )}
-
-      {/* Level Select Modal */}
-      {levelSelectOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(6, 13, 31, 0.88)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 'var(--z-modal)',
-            backdropFilter: 'blur(10px)',
-          }}
-        >
-          <SpotlightCard
-            style={{
-              maxWidth: '680px',
-              width: '92%',
-              padding: '36px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--sky-400)', letterSpacing: 'var(--tracking-eyebrow)' }}>
-                  MISSION MANIFEST
-                </div>
-                <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-2xl)', fontWeight: 800, margin: 0 }}>
-                  CHOOSE LEVEL
-                </h2>
-              </div>
-
-              <button
-                onClick={() => setLevelSelectOpen(false)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-muted)',
-                  fontSize: 'var(--text-xl)',
-                  cursor: 'pointer',
-                  minHeight: 'var(--touch-target-min)',
-                  minWidth: 'var(--touch-target-min)',
-                }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
-                gap: '12px',
-              }}
-            >
-              {LEVEL_DEFS.map((lvl) => (
-                <Magnet key={lvl.id} padding={20}>
-                  <button
-                    onClick={() => switchLevel(lvl.id)}
-                    style={{
-                      width: '100%',
-                      minHeight: '64px',
-                      background: lvl.id === levelId ? 'var(--sky-400)' : 'var(--surface)',
-                      color: lvl.id === levelId ? 'var(--ink)' : 'var(--text)',
-                      border: `1px solid ${lvl.id === levelId ? 'var(--sky-400)' : 'var(--border)'}`,
-                      borderRadius: 'var(--radius-md)',
-                      padding: '10px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <div style={{ fontSize: 'var(--text-xs)', opacity: 0.75 }}>LEVEL {lvl.id}</div>
-                    <div style={{ fontSize: 'var(--text-sm)', fontWeight: 700, fontFamily: 'var(--font-display)' }}>
-                      {lvl.name}
-                    </div>
-                  </button>
-                </Magnet>
-              ))}
-            </div>
-          </SpotlightCard>
-        </div>
-      )}
-
-      {/* Mobile Touch Controls */}
-      {isTouch && (
-        <TouchControls
-          onThrustChange={(thrusting, dir) => worldRef.current?.setThrusting(thrusting, dir)}
-          onGrabNearest={() => worldRef.current?.grabNearest()}
-          onRelease={() => worldRef.current?.release()}
-        />
-      )}
+      />
     </div>
   );
 }

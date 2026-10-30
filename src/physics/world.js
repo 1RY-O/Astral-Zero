@@ -125,11 +125,20 @@ export class World {
 
     this.pointer = { x: 0, y: 0 };
 
-    if (levelId !== null) {
-      this.loadLevel(levelId);
-    } else {
-      this.spawnScenario();
-    }
+    this.spawnScenario();
+  }
+
+  resetSwarm(seed = this.seed) {
+    this.seed = seed;
+    this.rng = mulberry32(seed);
+    this.fuel = 1;
+    this.tension = 0;
+    this.grabbed = null;
+    this.tether = null;
+    this.thrusting = false;
+    this.thrustDir = null;
+    this.burnedCount = 0;
+    this.spawnScenario();
   }
 
   getPlanetLimb() {
@@ -361,25 +370,35 @@ export class World {
       }
     }
 
-    // 1. Forces: thrust along tether normal
+    // 1. Forces: thrust along tether normal (drives tangential swing)
     if (this.thrusting && this.grabbed && this.fuel > 0) {
       const g = this.grabbed;
       const a = this.anchor;
-      let dx = g.x - a.x;
-      let dy = g.y - a.y;
-      if (this.thrustDir && (this.thrustDir.x !== 0 || this.thrustDir.y !== 0)) {
-        dx = this.thrustDir.x;
-        dy = this.thrustDir.y;
-      }
-      const d = Math.hypot(dx, dy);
+      const rx = g.x - a.x;
+      const ry = g.y - a.y;
+      const d = Math.hypot(rx, ry);
+
       if (d > 0) {
-        g.ax += (dx / d) * THRUST_ACC;
-        g.ay += (dy / d) * THRUST_ACC;
+        if (this.thrustDir && (this.thrustDir.x !== 0 || this.thrustDir.y !== 0)) {
+          const mag = Math.hypot(this.thrustDir.x, this.thrustDir.y);
+          g.ax += (this.thrustDir.x / mag) * THRUST_ACC;
+          g.ay += (this.thrustDir.y / mag) * THRUST_ACC;
+        } else {
+          // Tangential normal acceleration perpendicular to tether
+          const tx = -ry / d;
+          const ty = rx / d;
+          const vx = (g.x - g.px) / FIXED_DT;
+          const vy = (g.y - g.py) / FIXED_DT;
+          const dot = vx * tx + vy * ty;
+          const sign = dot >= 0 ? 1 : -1;
+          g.ax += tx * sign * THRUST_ACC;
+          g.ay += ty * sign * THRUST_ACC;
+        }
       }
       this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * dt);
     }
 
-    // 2. Verlet integration: zero-g
+    // 2. Verlet integration: zero-g with arena boundary containment
     for (const p of this.particles) {
       if (p.fixed) continue;
       const vx = (p.x - p.px) * DAMPING;
@@ -390,6 +409,20 @@ export class World {
       p.y += vy + p.ay * dt2;
       p.ax = 0;
       p.ay = 0;
+
+      // Soft boundary bounce to keep zero-g floating debris in view
+      const pad = p.radius + 16;
+      if (p.x < pad) {
+        p.x = pad;
+        p.px = p.x + Math.abs(vx);
+      } else if (p.x > this.width - pad) {
+        p.x = this.width - pad;
+        p.px = p.x - Math.abs(vx);
+      }
+      if (p.y < pad) {
+        p.y = pad;
+        p.py = p.y + Math.abs(vy);
+      }
     }
 
     // 3. Position-based distance constraints (12 iterations)
@@ -400,7 +433,7 @@ export class World {
     // 4. Circle-circle collisions and destructible fragmentation
     this.solveCollisions();
 
-    // 5. Atmospheric kill-zone (burn up on contact)
+    // 5. Atmospheric kill-zone (burn up on contact, respawn to maintain 7 floating debris)
     const atMs = Math.round(this.gameTime * 1000);
     for (let i = this.particles.length - 1; i >= 0; i -= 1) {
       const p = this.particles[i];
@@ -409,7 +442,6 @@ export class World {
         if (this.grabbed === p) {
           this.release();
         }
-        this.particles.splice(i, 1);
         this.burnedCount += 1;
 
         // Cascade window check (900ms)
@@ -435,8 +467,9 @@ export class World {
           atMs,
         });
 
+        playDeorbit();
+
         if (isRetrograde) {
-          playDeorbit();
           this.addFloatingText(`+${gainedScore} CLEAN (${this.chain}x)`, p.x, p.y - 10, PALETTE.clean);
         } else {
           this.addFloatingText(`-${Math.abs(gainedScore)} PROGRADE`, p.x, p.y - 10, PALETTE.danger);
@@ -452,6 +485,22 @@ export class World {
         if (this.chain >= 5) {
           this.freezeFrames = 6; // 100ms freeze
         }
+
+        // Respawn particle in upper orbit so 7 debris objects always float in zero-g sandbox
+        const angle = this.rng() * TAU;
+        const reach = 70 + this.rng() * 140;
+        const cx = this.width * 0.5;
+        const anchorY = this.anchor ? this.anchor.y : this.height * 0.22;
+        p.x = Math.min(Math.max(cx + Math.cos(angle) * reach, 40), this.width - 40);
+        p.y = Math.min(Math.max(anchorY + Math.sin(angle) * reach, 40), this.height * 0.48);
+        const speed = 20 + this.rng() * 40;
+        const vx = -Math.sin(angle) * speed;
+        const vy = Math.cos(angle) * speed;
+        p.px = p.x - vx * FIXED_DT;
+        p.py = p.y - vy * FIXED_DT;
+        p.ax = 0;
+        p.ay = 0;
+        p.releaseDot = -1;
       }
     }
 

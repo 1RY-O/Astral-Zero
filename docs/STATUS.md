@@ -1,10 +1,10 @@
 # Status — Debris Derby
 
-## Current Phase: ALL PHASES COMPLETE (Phases 0–9 Shipped)
+## Current Phase: Phase 3 — Bare Canvas + Tether Physics (User Sandbox Verification)
 
 Built for the **NASA International Space Apps Challenge 2026**.
 
-All quality gates, physics specifications, UI components, mobile touch controls, backend endpoints, and documentation rewrites are complete and verified.
+The client has been reset to the raw Phase 3 zero-g physics sandbox per instructions. All UI chrome, navigation headers, and Phase 4/5 features are held until explicit user approval of the physics sandbox.
 
 ---
 
@@ -15,13 +15,13 @@ All quality gates, physics specifications, UI components, mobile touch controls,
 | **Phase 0** | Recon & Inventory | **COMPLETE** | Pre-existing | docs/RECON.md inventory |
 | **Phase 1** | Cleanup & React 18 Toolchain | **COMPLETE** | `502d25f`, `095abf6` | React 18 + Vite + ESLint green |
 | **Phase 2** | Backend Rewrite & Celestrak GP | **COMPLETE** | `1e9835c`, `7bc21cb` | 2 Hz ambientCatalog, REST endpoints |
-| **Phase 3** | Fix Physics & Input | **COMPLETE** | `c50d295` | Playwright test & zero-g verification |
-| **Phase 4** | Core Loop & 25-Year Rule Scoring | **COMPLETE** | `bdfa76c` | Locked formulas, 900ms cascades, Web Audio |
-| **Phase 5** | Visual Design System & ReactBits | **COMPLETE** | `0a20329` | ReactBits (`SpotlightCard`, `Magnet`, `CountUp`, `SplitText`) |
-| **Phase 6** | Mobile Responsive & Touch | **COMPLETE** | `71fa3a3` | Virtual stick, drag-to-grab/aim, release-to-fire |
-| **Phase 7** | Celestrak Ambient Feed & REST | **COMPLETE** | `49c6794` | Socket.io 2.0.0 contract, REST verification |
-| **Phase 8** | Complete Documentation Rewrite | **COMPLETE** | `d012fa4` | README, ARCHITECTURE, DESIGN_SYSTEM, etc. |
-| **Phase 9** | Quality Gates & Clean-Clone QA | **COMPLETE** | `fa6ab5a` | Zero warnings, zero banned strings, tests 31/31 |
+| **Phase 3** | Bare Canvas + Tether Physics | **IN REVIEW** | Current | Zero-g 7-debris swarm, Click/E, Space normal thrust, Q/Mouse-Up release |
+| **Phase 4** | Core Loop & 25-Year Rule Scoring | **HELD** | Staged | Awaiting Phase 3 approval |
+| **Phase 5** | Visual Design System & ReactBits | **HELD** | Staged | Awaiting Phase 3 approval |
+| **Phase 6** | Mobile Responsive & Touch | **HELD** | Staged | Awaiting Phase 3 approval |
+| **Phase 7** | Celestrak Ambient Feed & REST | **HELD** | Staged | Awaiting Phase 3 approval |
+| **Phase 8** | Complete Documentation Rewrite | **HELD** | Staged | Awaiting Phase 3 approval |
+| **Phase 9** | Quality Gates & Clean-Clone QA | **HELD** | Staged | Awaiting Phase 3 approval |
 
 ---
 

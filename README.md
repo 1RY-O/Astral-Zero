@@ -25,9 +25,8 @@ debris.
 This runaway chain reaction is the **Kessler Cascade**: once it triggers,
 collisions create more debris than they destroy, the cascade is
 self-sustaining, and **Low Earth Orbit becomes an impassable shell** that
-traps humanity on Earth. The cascade is already underway — there are
-**over 36,000 tracked objects** and millions of untracked fragments larger
-than 1 cm in orbit today.
+traps humanity on Earth. The risk is present-tense: orbital debris is not
+a future scenario.
 
 Solar Sentinel exists to **detect the cascade tipping point** and give
 operators the decision window to **spend cleanup energy before the chain

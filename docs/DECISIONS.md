@@ -42,3 +42,20 @@ Append-only. Do not edit old entries. Date each entry.
 ## Session protocol
 - One phase per session. Stop at phase boundary, commit, summarise.
 - New session opens by reading DECISIONS.md, STATUS.md, SPEC.md in that order.
+
+## 2026-10-30 (post-Phase 1 recon)
+- Chain-detection window: 900 ms (brief-specified). Agent's 2.5 s 
+  approximation was incorrect and has been corrected in SPEC.md.
+- #E01A7A (--pink-500-text-on-light): sanctioned as a text-only 
+  accessibility variant of --pink-500. It is NOT a fourth brand colour. 
+  Permitted ONLY for text on light surfaces. Not for backgrounds, borders, 
+  or accents.
+- TLE source: Celestrak GP API, not api.nasa.gov. NASA endpoint is dead 
+  (404 as of recon). Celestrak attribution required in payloads.
+- No silent fallback: if TLE fetch fails, log loud and either flag stale 
+  catalog to client or refuse to serve. No silent 2023 data.
+- Agent's approximation calls accepted as design decisions unless the 
+  brief explicitly specified otherwise: linger definition (once per 
+  over-held object), releaseDot retrograde test, event payload field 
+  names, validation limits (64 deorbits, 3 s submit rate limit), 
+  canonical contract version 2.0.0-debris-derby, REST response field names.

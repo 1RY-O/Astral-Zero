@@ -84,8 +84,8 @@ run_score = Σ(object_value * cascade_multiplier)
 ```
 
 - `n` is the length of the current deorbit chain. A chain continues while
-  removals land inside the chain window (2.5 s at 60 Hz); it resets after
-  that window or at run end. `n` starts at 1.
+  removals land inside the **900 ms** chain window; it resets after that
+  window or at run end. `n` starts at 1.
 - **Prograde/retrograde:** deorbit credit requires a **retrograde release**
   (the release velocity has a component opposite the object's orbital
   velocity). A prograde release spends fuel, raises the orbit, and earns no
@@ -482,6 +482,9 @@ in git history. The locked anchors — clock split, Verlet with 12
 iterations, three verbs, scoring formulas, eight level names, palette,
 React boundary, ReactBits rule, anti-goals, and the three requested
 corrections — are reproduced verbatim where quoted. Phase-level
-deliverables, tuning defaults (chain window, linger limit, rate limits),
-and payload field names are reconstruction detail, not recovered text.
-`docs/DECISIONS.md` wins over any detail here.
+deliverables, tuning defaults, and payload field names are reconstruction
+detail, not recovered text. `docs/DECISIONS.md` wins over any detail here.
+
+**Correction (2026-10-30):** the chain-detection window is **900 ms**, as
+specified in the brief. The first reconstruction's 2.5 s figure was wrong
+and has been corrected here and in `docs/DECISIONS.md`.

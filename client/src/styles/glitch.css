@@ -1,4 +1,4 @@
-/* Debris Darling — Corrupted Glitch & CRT CSS System */
+/* Debris Darling / Kessler Tycoon — Corrupted Glitch & CRT CSS System */
 
 @keyframes scanline {
   0% {
@@ -66,6 +66,34 @@
   animation: violent-shake 0.35s ease-in-out infinite;
 }
 
+/* CRT Shutdown Animation for Fail State */
+@keyframes crt-shutdown {
+  0% {
+    transform: scale(1, 1);
+    filter: brightness(1);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1, 0.005);
+    filter: brightness(3);
+    opacity: 0.9;
+  }
+  80% {
+    transform: scale(0, 0.005);
+    filter: brightness(5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(0, 0);
+    filter: brightness(0);
+    opacity: 0;
+  }
+}
+
+.crt-shutdown {
+  animation: crt-shutdown 0.75s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
 /* Flash Hot Pink Alert */
 .flash-hotpink {
   animation: flash-hotpink-anim 0.4s ease-out;
@@ -82,7 +110,7 @@
 
 /* Corrupted NASA Wireframe Box */
 .wireframe-box {
-  background: rgba(6, 17, 32, 0.85);
+  background: rgba(6, 17, 32, 0.9);
   border: 1px solid #6d4aff;
   box-shadow: 0 0 10px rgba(109, 74, 255, 0.35), inset 0 0 8px rgba(109, 74, 255, 0.2);
   position: relative;
@@ -133,6 +161,62 @@
   animation: rgb-split 0.2s infinite;
 }
 
+/* Dangerous Action Button (Hot Pink) */
+.action-danger-btn {
+  background: rgba(255, 45, 149, 0.15);
+  color: #FF2D95;
+  border: 1px solid #FF2D95;
+  padding: 10px 16px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 10px rgba(255, 45, 149, 0.3);
+}
+
+.action-danger-btn:hover:not(:disabled) {
+  background: #FF2D95;
+  color: #061120;
+  box-shadow: 0 0 20px rgba(255, 45, 149, 0.7);
+}
+
+.action-danger-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: #555;
+  color: #888;
+}
+
+/* Safe Action Button (Sky Blue) */
+.action-safe-btn {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38BDF8;
+  border: 1px solid #38BDF8;
+  padding: 10px 16px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+.action-safe-btn:hover:not(:disabled) {
+  background: #38BDF8;
+  color: #061120;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
+}
+
+.action-safe-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: #555;
+  color: #888;
+}
+
 /* Glitch Title text effects */
 .glitch-text {
   position: relative;
@@ -142,4 +226,14 @@
 
 .glitch-text:hover {
   animation: rgb-split 0.15s infinite;
+}
+
+/* Progress bar pulse */
+@keyframes pulse-bar {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 1; }
+}
+
+.progress-active {
+  animation: pulse-bar 1s infinite alternate;
 }

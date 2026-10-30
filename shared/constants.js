@@ -1,21 +1,39 @@
 /**
- * Debris Darling — Shared Constants & Types
+ * Kessler Tycoon — Shared Constants & Types
  * Built for the NASA International Space Apps Challenge 2026.
  */
 
-export const PHYSICS = {
-  FIXED_DT: 1 / 60,
-  MAX_SUBSTEPS: 5,
-  CONSTRAINT_ITERATIONS: 12,
-  DAMPING: 0.9995,
-  TETHER_REST: 160,
-  TETHER_MAX: 300,
-  GRAB_RADIUS: 36,
-  ANCHOR_RADIUS: 8,
-  THRUST_ACC: 980,
-  FUEL_DRAIN: 0.22,
-  CHAIN_WINDOW_MS: 900,
-  SHIP_MASS: 120,
+export const ECONOMY = {
+  INITIAL_BUDGET: 1000,
+  TUG_COST: 200,
+  UPGRADE_COST: 500,
+  PURGE_COST: 1000,
+  PURGE_RISK_SPIKE: 20.0,
+  INSOLVENCY_LIMIT: -500,
+};
+
+export const ZONES = {
+  LEO: {
+    id: 'LEO',
+    name: 'Low Earth Orbit (LEO)',
+    altitude: '160 - 2,000 km',
+    baseDebris: 12,
+    basePayout: 350,
+  },
+  MEO: {
+    id: 'MEO',
+    name: 'Medium Earth Orbit (MEO)',
+    altitude: '2,000 - 35,786 km',
+    baseDebris: 18,
+    basePayout: 550,
+  },
+  GEO: {
+    id: 'GEO',
+    name: 'Geostationary Orbit (GEO)',
+    altitude: '35,786 km',
+    baseDebris: 25,
+    basePayout: 900,
+  },
 };
 
 export const COLORS = {
@@ -29,15 +47,10 @@ export const COLORS = {
   WHITE: '#FFFFFF',
 };
 
-export const AI_TAUNTS = {
-  JOIN: 'Pathetic. NASA paid $2B for this script kiddie.',
-  PROGRADE: 'YOU JUST CREATED 14 NEW DEBRIS OBJECTS. GREAT JOB.',
-  RETROGRADE: "Finally. Still only 0.003% progress. Don't get cocky.",
-  FUEL_CRITICAL: 'Thruster integrity critical. Try not to die before lunch.',
-};
-
-export const KESSLER = {
-  CRITICAL_THRESHOLD: 84,
-  MAX_DEBRIS_BASE: 100,
-  DEORBIT_REDUCTION_SCALE: 50,
+export const AI_BOSS_TAUNTS = {
+  BANKRUPT: "You're bankrupt. My toaster has more processing power than your company.",
+  HIGH_RISK: "Orbit is turning into a blender. Do your job.",
+  IDLE: "Are you dead, or just incompetent? Deploy a tug.",
+  FLEET_UPGRADE: "Oh look, you bought a shiny new toy. Too bad you're still bad at your job.",
+  ZONE_CLEARED: "Finally. You did the bare minimum. Don't expect a raise.",
 };

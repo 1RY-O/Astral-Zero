@@ -1,36 +1,56 @@
 /**
- * Debris Darling — Main Client App
+ * Kessler Tycoon — Main Client App
  * Built for the NASA International Space Apps Challenge 2026.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
 import Landing from './components/Landing.jsx';
-import GameCanvas from './components/GameCanvas.jsx';
-import HUD from './components/HUD.jsx';
+import TycoonDashboard from './components/TycoonDashboard.jsx';
 import RageNotifications from './components/RageNotifications.jsx';
 import useGlitchEffect from './hooks/useGlitchEffect.js';
-import useOrbitalPhysics from './hooks/useOrbitalPhysics.js';
 import { initAudio, playRageAlarm } from './audio.js';
 import './styles/glitch.css';
 
 export default function App() {
   const [mode, setMode] = useState('landing');
+  const [systemOnline, setSystemOnline] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(false);
   const socketRef = useRef(null);
 
   const {
-    isAberrationActive,
-    isShakeActive,
     isFlashActive,
     notifications,
-    triggerProgradeRage,
-    triggerRetrogradeSuccess,
-    triggerFuelWarning,
+    triggerAberration,
+    triggerShake,
+    triggerHotPinkFlash,
     addNotification,
   } = useGlitchEffect();
 
-  // Socket.io initialization & event listeners
+  // Check health endpoint on load
+  useEffect(() => {
+    let isMounted = true;
+    fetch('/api/health')
+      .then((res) => {
+        if (!res.ok) throw new Error('Health check error');
+        return res.json();
+      })
+      .then((data) => {
+        if (isMounted && (data.status === 'ok' || data.system === 'SYSTEM ONLINE')) {
+          setSystemOnline(true);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setSystemOnline(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Socket.io initialization & boss taunt listener
   useEffect(() => {
     const socket = io({
       autoConnect: true,
@@ -40,78 +60,36 @@ export default function App() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('[Debris Darling] Socket connected to server:', socket.id);
-      socket.emit('mission_join', { missionId: 'mission-01' });
+      console.log('[Kessler Tycoon] Connected to flight AI server:', socket.id);
+      setSocketConnected(true);
+      setSystemOnline(true);
     });
 
-    socket.on('ai_taunt', (payload) => {
+    socket.on('disconnect', () => {
+      setSocketConnected(false);
+    });
+
+    socket.on('boss_taunt', (payload) => {
       if (payload?.message) {
-        addNotification(payload.message, 'taunt', 4500);
-      }
-    });
-
-    socket.on('ai_anger', (payload) => {
-      playRageAlarm();
-      triggerProgradeRage();
-    });
-
-    socket.on('ai_dismissal', (payload) => {
-      if (payload?.comment) {
-        triggerRetrogradeSuccess();
+        const isCritical = payload.intensity === 'high' || payload.intensity === 'critical';
+        if (isCritical) {
+          playRageAlarm();
+          triggerAberration(1200);
+          triggerShake(600);
+          triggerHotPinkFlash(400);
+        }
+        addNotification(payload.message, isCritical ? 'rage' : 'taunt', 4500);
       }
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [addNotification, triggerProgradeRage, triggerRetrogradeSuccess]);
-
-  // Throw event callback from physics engine
-  const handleThrowEvent = useCallback(
-    (payload) => {
-      const { direction, mass, deltaV } = payload;
-
-      if (direction === 'prograde') {
-        playRageAlarm();
-        triggerProgradeRage();
-      } else {
-        triggerRetrogradeSuccess();
-      }
-
-      if (socketRef.current?.connected) {
-        socketRef.current.emit('throw_event', { direction, mass, deltaV });
-      }
-    },
-    [triggerProgradeRage, triggerRetrogradeSuccess],
-  );
-
-  const handleFuelWarning = useCallback(() => {
-    triggerFuelWarning();
-  }, [triggerFuelWarning]);
-
-  const {
-    worldRef,
-    initWorld,
-    syncState,
-    debrisCount,
-    successfulDeorbits,
-    score,
-    fuel,
-  } = useOrbitalPhysics({
-    onThrowEvent: handleThrowEvent,
-    onFuelWarning: handleFuelWarning,
-  });
+  }, [addNotification, triggerAberration, triggerShake, triggerHotPinkFlash]);
 
   const handleStartGame = () => {
     initAudio();
-    setMode('game');
-  };
-
-  const handleResetLevel = () => {
-    if (worldRef.current) {
-      worldRef.current.initScenario();
-      syncState();
-    }
+    setMode('tycoon');
   };
 
   return (
@@ -119,26 +97,15 @@ export default function App() {
       {mode === 'landing' ? (
         <Landing onStartGame={handleStartGame} />
       ) : (
-        <>
-          <GameCanvas
-            worldRef={worldRef}
-            initWorld={initWorld}
-            syncState={syncState}
-            isAberrationActive={isAberrationActive}
-            isShakeActive={isShakeActive}
-          />
-          <HUD
-            debrisCount={debrisCount}
-            successfulDeorbits={successfulDeorbits}
-            score={score}
-            fuel={fuel}
-            currentLevel={1}
-            onResetLevel={handleResetLevel}
-            onBackToMenu={() => setMode('landing')}
-          />
-          <RageNotifications notifications={notifications} isFlashActive={isFlashActive} />
-        </>
+        <TycoonDashboard
+          socket={socketRef.current}
+          systemOnline={systemOnline || socketConnected}
+          onBackToMenu={() => setMode('landing')}
+        />
       )}
+
+      {/* Corrupted NASA AI Rage Taunts Popup Overlay */}
+      <RageNotifications notifications={notifications} isFlashActive={isFlashActive} />
     </div>
   );
 }

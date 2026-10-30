@@ -34,7 +34,7 @@ export function ContentOverlay({ children }) {
         justifyContent: 'center',
         padding: '2rem',
         textAlign: 'center',
-        maxWidth: '800px',
+        maxWidth: '850px',
       }}
     >
       <div
@@ -54,7 +54,7 @@ export function ContentOverlay({ children }) {
       {children}
       <div
         style={{
-          marginTop: '1.5rem',
+          marginTop: '2rem',
           color: 'rgba(255, 255, 255, 0.45)',
           fontSize: '0.75rem',
           fontFamily: 'ui-monospace, monospace',
@@ -68,7 +68,7 @@ export function ContentOverlay({ children }) {
 }
 
 export function GlitchTitle({
-  variants = ['DEBRIS DARLING', 'MISSION FAILURE', 'KESSLER IMMINENT'],
+  variants = ['KESSLER TYCOON', 'ORBITAL PROTOCOL', 'SYSTEM FAILURE'],
   primaryColor = '#FF2D95',
   secondaryColor = '#6d4aff',
 }) {
@@ -82,7 +82,7 @@ export function GlitchTitle({
         setIndex((prev) => (prev + 1) % variants.length);
         setGlitching(false);
       }, 150);
-    }, 2800);
+    }, 2400);
     return () => clearInterval(interval);
   }, [variants]);
 
@@ -96,7 +96,7 @@ export function GlitchTitle({
         fontWeight: 900,
         letterSpacing: '4px',
         color: '#FFFFFF',
-        margin: '0 0 1.5rem 0',
+        margin: '0 0 1rem 0',
         fontFamily: 'ui-monospace, monospace',
         textTransform: 'uppercase',
         textShadow: `-3px 0 ${primaryColor}, 3px 0 ${secondaryColor}`,
@@ -118,8 +118,13 @@ export function CTAButton({ glitchOnHover = true, onClick, children }) {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       style={{
-        fontSize: '1.1rem',
-        marginTop: '1rem',
+        fontSize: '1.2rem',
+        marginTop: '1.5rem',
+        backgroundColor: '#FF2D95',
+        borderColor: '#FF2D95',
+        color: '#FFFFFF',
+        boxShadow: '0 0 25px rgba(255, 45, 149, 0.65)',
+        padding: '16px 36px',
       }}
     >
       {children}
@@ -171,15 +176,43 @@ export default function Landing({ onStartGame }) {
           paused={false}
         />
       </div>
+
       {/* Foreground - Glitch Content */}
       <ContentOverlay>
         <GlitchTitle
-          variants={['DEBRIS DARLING', 'MISSION FAILURE', 'KESSLER IMMINENT']}
+          variants={['KESSLER TYCOON', 'ORBITAL PROTOCOL', 'SYSTEM FAILURE']}
           primaryColor="#FF2D95"
           secondaryColor="#6d4aff"
         />
+
+        <div
+          style={{
+            fontSize: '1.15rem',
+            color: '#7DD3FC',
+            fontFamily: 'ui-monospace, monospace',
+            letterSpacing: '1px',
+            marginBottom: '1rem',
+            maxWidth: '650px',
+            lineHeight: 1.5,
+          }}
+        >
+          The 25-Year Rule is a suggestion. Your bankruptcy is inevitable.
+        </div>
+
+        <div
+          style={{
+            fontSize: '0.85rem',
+            color: 'rgba(255, 255, 255, 0.65)',
+            fontFamily: 'ui-monospace, monospace',
+            marginBottom: '1rem',
+          }}
+        >
+          A rogue, corrupted NASA flight AI is privatizing space cleanup. Balance your budget, manage
+          LEO, MEO, and GEO, or watch Low Earth Orbit turn into a kinetic blender.
+        </div>
+
         <CTAButton glitchOnHover={true} onClick={onStartGame}>
-          INITIATE DEORBIT SEQUENCE
+          INITIATE CONTRACT
         </CTAButton>
       </ContentOverlay>
     </LandingPageWrapper>

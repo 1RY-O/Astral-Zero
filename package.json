@@ -1,40 +1,63 @@
 {
-  "name": "solar-sentinel",
-  "version": "0.1.0",
-  "description": "Solar Sentinel - A real-time, server-authoritative orbital debris threat simulation that ingests live Celestrak/NORAD TLE data, propagates objects with satellite.js at 2 Hz, runs the Kessler Cascade, and streams live collision-risk visuals to a Vanilla Canvas dashboard.",
+  "name": "debris-derby",
+  "version": "0.2.0",
+  "description": "Debris Derby — a physics-based tether-swinging game about cleaning up space debris. Built for the NASA International Space Apps Challenge 2026.",
   "type": "module",
   "private": true,
   "license": "MIT",
   "author": "Pilla Sri Sai Rahul",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/1RY-O/Astral-Zero.git"
+    "url": "git+https://github.com/1RY-O/debris-derby.git"
   },
-  "homepage": "https://github.com/1RY-O/Astral-Zero#readme",
+  "homepage": "https://github.com/1RY-O/debris-derby#readme",
   "bugs": {
-    "url": "https://github.com/1RY-O/Astral-Zero/issues"
+    "url": "https://github.com/1RY-O/debris-derby/issues"
   },
   "keywords": [
     "nasa-space-apps",
     "orbital-debris",
-    "dashboard",
-    "socket-io"
+    "kessler-syndrome",
+    "physics-game",
+    "verlet-integration",
+    "tether",
+    "canvas-2d",
+    "react",
+    "socket-io",
+    "satellite-js",
+    "vite"
   ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "dev:server": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/*.test.mjs",
+    "lint": "eslint ."
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
-    "express": "^5.2.1",
+    "express": "^5.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "satellite.js": "^7.1.0",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
     "nodemon": "^3.1.14",
     "playwright": "^1.64.1",
     "socket.io-client": "^4.8.4",

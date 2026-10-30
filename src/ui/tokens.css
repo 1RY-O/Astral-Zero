@@ -1,0 +1,229 @@
+/* ==========================================================================
+   Debris Derby — design tokens
+   --------------------------------------------------------------------------
+   This is the only stylesheet allowed to contain raw colour literals.
+   Everything else consumes custom properties.
+
+   Palette: sky blue = player / tether / clean; hot pink = danger / cascade /
+   penalty / CTA; white = text, frames, clean surfaces. Neutrals support the
+   two substrates and are not brand colours.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* Brand palette -------------------------------------------------------- */
+  --sky-300: #7DD3FC;
+  --sky-400: #38BDF8;
+  --sky-500: #0EA5E9;
+  --pink-400: #FF5FB0;
+  --pink-500: #FF2D95;
+  --pink-500-text-on-light: #E01A7A;
+  --white: #FFFFFF;
+
+  /* Supporting neutrals -------------------------------------------------- */
+  --canvas-dark: #060D1F;
+  --canvas-light: #F8FAFC;
+  --ink: #0B1220;
+  --muted: rgba(255, 255, 255, 0.62);
+  --muted-light: rgba(11, 18, 32, 0.62);
+
+  /* Semantic surfaces (dark is the default) ------------------------------ */
+  --bg: var(--canvas-dark);
+  --surface: rgba(255, 255, 255, 0.04);
+  --surface-raised: rgba(255, 255, 255, 0.07);
+  --surface-strong: rgba(255, 255, 255, 0.12);
+  --surface-inverse: var(--white);
+  --text: var(--white);
+  --text-muted: var(--muted);
+  --text-faint: rgba(255, 255, 255, 0.38);
+  --text-inverse: var(--ink);
+  --border: rgba(125, 211, 252, 0.18);
+  --border-strong: rgba(125, 211, 252, 0.42);
+  --border-danger: rgba(255, 45, 149, 0.45);
+
+  /* Semantic actions ----------------------------------------------------- */
+  --player: var(--sky-400);
+  --tether: var(--sky-300);
+  --clean: var(--sky-400);
+  --interactive: var(--sky-400);
+  --pressed: var(--sky-500);
+  --accent: var(--sky-400);
+  --accent-strong: var(--sky-500);
+  --accent-soft: rgba(56, 189, 248, 0.14);
+  --danger: var(--pink-500);
+  --danger-text: var(--pink-500);
+  --danger-hover: var(--pink-400);
+  --danger-soft: rgba(255, 45, 149, 0.14);
+  --cta-bg: var(--pink-500);
+  --cta-bg-hover: var(--pink-400);
+  --cta-text: var(--ink);
+  --focus: var(--sky-300);
+  --focus-halo: var(--canvas-dark);
+
+  /* Typography ----------------------------------------------------------- */
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-numeric: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+  --text-4xl: 3rem;
+  --text-5xl: clamp(3.5rem, 9vw, 6.5rem);
+  --text-6xl: clamp(4.5rem, 13vw, 10rem);
+
+  --leading-tight: 0.95;
+  --leading-snug: 1.15;
+  --leading-normal: 1.5;
+  --tracking-display: -0.03em;
+  --tracking-hud: 0.08em;
+  --tracking-eyebrow: 0.16em;
+
+  /* Spacing -------------------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+
+  /* Radii and borders ---------------------------------------------------- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --border-width-strong: 2px;
+
+  /* Motion --------------------------------------------------------------- */
+  --ease-entrance: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-physics: linear;
+  --duration-micro: 160ms;
+  --duration-standard: 320ms;
+  --duration-entrance: 640ms;
+
+  /* Elevation and glow --------------------------------------------------- */
+  --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.42);
+  --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.28);
+  --glow-player: 0 0 16px rgba(56, 189, 248, 0.55), 0 0 40px rgba(56, 189, 248, 0.18);
+  --glow-danger: 0 0 16px rgba(255, 45, 149, 0.55), 0 0 44px rgba(255, 45, 149, 0.2);
+
+  /* Interaction ---------------------------------------------------------- */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 3px;
+  --touch-target-min: 44px;
+  --hitbox-multiplier: 2.5;
+
+  /* Layers --------------------------------------------------------------- */
+  --z-canvas: 0;
+  --z-hud: 10;
+  --z-overlay: 20;
+  --z-modal: 30;
+  --z-toast: 40;
+  --z-cursor: 50;
+}
+
+/* Explicit light mode ---------------------------------------------------- */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: var(--canvas-light);
+  --surface: var(--white);
+  --surface-raised: var(--white);
+  --surface-strong: rgba(11, 18, 32, 0.08);
+  --surface-inverse: var(--ink);
+  --text: var(--ink);
+  --text-muted: var(--muted-light);
+  --text-faint: rgba(11, 18, 32, 0.42);
+  --text-inverse: var(--white);
+  --border: rgba(11, 18, 32, 0.14);
+  --border-strong: rgba(11, 18, 32, 0.32);
+  --border-danger: rgba(224, 26, 122, 0.42);
+
+  --player: var(--sky-500);
+  --tether: var(--sky-500);
+  --clean: var(--sky-500);
+  --interactive: var(--sky-500);
+  --pressed: var(--sky-500);
+  --accent: var(--sky-500);
+  --accent-strong: var(--sky-500);
+  --accent-soft: rgba(14, 165, 233, 0.12);
+  --danger: var(--pink-500);
+  --danger-text: var(--pink-500-text-on-light);
+  --danger-hover: var(--pink-400);
+  --danger-soft: rgba(255, 45, 149, 0.1);
+  --cta-bg: var(--pink-500);
+  --cta-bg-hover: var(--pink-400);
+  --cta-text: var(--ink);
+  --focus: var(--sky-500);
+  --focus-halo: var(--ink);
+
+  --shadow-panel: 0 24px 64px rgba(11, 18, 32, 0.14);
+  --shadow-float: 0 12px 32px rgba(11, 18, 32, 0.1);
+  --glow-player: 0 0 12px rgba(14, 165, 233, 0.3);
+  --glow-danger: 0 0 12px rgba(255, 45, 149, 0.3);
+}
+
+/* System preference: light, unless the user explicitly chose dark. -------- */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+
+    --bg: var(--canvas-light);
+    --surface: var(--white);
+    --surface-raised: var(--white);
+    --surface-strong: rgba(11, 18, 32, 0.08);
+    --surface-inverse: var(--ink);
+    --text: var(--ink);
+    --text-muted: var(--muted-light);
+    --text-faint: rgba(11, 18, 32, 0.42);
+    --text-inverse: var(--white);
+    --border: rgba(11, 18, 32, 0.14);
+    --border-strong: rgba(11, 18, 32, 0.32);
+    --border-danger: rgba(224, 26, 122, 0.42);
+
+    --player: var(--sky-500);
+    --tether: var(--sky-500);
+    --clean: var(--sky-500);
+    --interactive: var(--sky-500);
+    --pressed: var(--sky-500);
+    --accent: var(--sky-500);
+    --accent-strong: var(--sky-500);
+    --accent-soft: rgba(14, 165, 233, 0.12);
+    --danger: var(--pink-500);
+    --danger-text: var(--pink-500-text-on-light);
+    --danger-hover: var(--pink-400);
+    --danger-soft: rgba(255, 45, 149, 0.1);
+    --cta-bg: var(--pink-500);
+    --cta-bg-hover: var(--pink-400);
+    --cta-text: var(--ink);
+    --focus: var(--sky-500);
+    --focus-halo: var(--ink);
+
+    --shadow-panel: 0 24px 64px rgba(11, 18, 32, 0.14);
+    --shadow-float: 0 12px 32px rgba(11, 18, 32, 0.1);
+    --glow-player: 0 0 12px rgba(14, 165, 233, 0.3);
+    --glow-danger: 0 0 12px rgba(255, 45, 149, 0.3);
+  }
+}
+
+/* Decorative motion is optional; gameplay physics is never disabled. ------ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-micro: 0.01ms;
+    --duration-standard: 0.01ms;
+    --duration-entrance: 0.01ms;
+  }
+}

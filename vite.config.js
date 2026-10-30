@@ -1,27 +1,43 @@
 /**
- * Solar Sentinel - Vite configuration.
+ * Debris Derby — Vite configuration.
  *
- * Bundles the vanilla JS frontend (Canvas 2D + Socket.io client) and serves
- * `public/` at the site root. No game engine chunks — the whole client is a
- * few KB of ES modules.
+ * The client is split in two:
+ *  - React owns the UI chrome (menus, HUD overlays, mission report).
+ *  - A single Canvas 2D surface is created and driven imperatively outside
+ *    React's render cycle (see ARCHITECTURE.md).
+ *
+ * In development, REST and Socket.io traffic is proxied to the Express
+ * server on :3000 so the browser sees one origin.
  */
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  // Relative base so the build also works when served from a sub-path
-  // (e.g. by the Express + Socket.io backend).
   base: './',
+
+  plugins: [react()],
 
   server: {
     port: 5173,
-    // Bind on all interfaces so the dashboard can be tested on phones.
     host: true,
     open: false,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
   },
 
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    sourcemap: true,
+    sourcemap: false,
+    target: 'es2022',
   },
 });

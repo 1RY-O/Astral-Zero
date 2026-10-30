@@ -1,59 +1,71 @@
 # Status
 
 ## Current phase
-Phase 2 — backend rewrite. Blocked before code changes: the Celestrak GP API
-is unreachable from this environment.
+Phase 2 — backend rewrite. Mid-flight. All runtime code committed and
+verified; the live Celestrak fetch gate is pending first deployment (see F2).
 
 ## Completed
 - Phase 0: recon complete. Findings in docs/RECON.md.
-- Phase 1: cleanup + React toolchain. Commits 502d25f, 095abf6 on 
+- Phase 1: cleanup + React toolchain. Commits 502d25f, 095abf6 on
   feat/debris-derby. Build, tests (7/7), lint, audit all green.
-- Phase 2 preconditions:
-  - F1: chain-detection window corrected from 2.5 s to **900 ms** in
-    docs/SPEC.md and recorded in docs/DECISIONS.md. Implementation has not
-    started.
-  - F3: the two banned debris-population claims were removed from README.md
-    as a stopgap. Phase 8 still rewrites the README.
-  - docs/DECISIONS.md amendment appended (2026-10-30).
-  - F4: side-by-side socket doc/code reconciliation remains a Phase 2 hard
-    gate.
+- Phase 2: backend rewrite (commits 1e9835c, a0e2ad2, 7bc21cb).
+  - Replaced `src/game/loop.js` with a 2 Hz `ambientCatalog`; removed
+    `src/game/nasa-api.js` and `src/game/orbital-calc.js`.
+  - Celestrak GP JSON source
+    (`...?GROUP=active&FORMAT=json`) with attribution, `catalogStatus`
+    (`live` / `stale` / `unavailable`), 30-minute refresh, 60-second retry,
+    and loud failure. No fallback TLE file, no offline mode.
+  - REST: `GET /api/health`, `GET /api/levels`, `GET /api/leaderboard`.
+  - Socket contract `2.0.0-debris-derby`: `connected`,
+    `ambient_catalog`, `run_submit` (ack), `leaderboard_update`,
+    `server_notice`. Gameplay authority removed.
+  - Inbound `run_submit` validation, 3-second rate limit, server-side score
+    recomputation with the 900 ms chain window.
+  - `websocket_events.md` rewritten and reconciled side by side with the
+    emitters/listeners.
+  - Preconditions F1 (900 ms chain window), F3 (banned debris numbers
+    stopgap in README), F4 (socket doc↔code reconciliation) and the
+    DECISIONS amendment are committed.
+  - Tests 26/26, lint clean, build clean. Server boots cleanly; all three
+    endpoints return JSON.
 
-## Blocker
-- `celestrak.org:443` times out from this environment. DNS resolves
-  correctly to `104.168.149.178` (confirmed via Cloudflare DoH), TCP 443
-  does not connect, and a control HTTPS request to example.com succeeds.
-  `curl` and the harness fetch both time out. Per instruction, Phase 2 was
-  stopped before code changes; no third TLE source was invented.
-- Phase 2 cannot satisfy "Celestrak fetch verified working in this session"
-  until network egress to celestrak.org is available or a human approves a
-  different verified primary source.
+## Phase 2 preconditions
+- **F1:** chain-detection window corrected to **900 ms** in docs/SPEC.md
+  and docs/DECISIONS.md. Committed.
+- **F2:** Celestrak integration written with loud-failure behaviour.
+  Committed. Live fetch is **pending** because this sandbox blocks
+  `celestrak.org:443`; mock tests cover success, stale, and unavailable.
+  MUST verify on first deployment before submission.
+- **F3:** banned debris numbers removed from `README.md`; full rewrite
+  remains Phase 8.
+- **F4:** side-by-side `websocket_events.md` ↔ code event reconciliation is
+  complete.
 
 ## Rollback point
-Commit 095abf6 (Phase 1 complete) remains the code rollback target. The
-Phase 2 precondition commit sits on top and touches docs/README only; no
-runtime code changed.
+Phase 2 code: commit `7bc21cb`. Phase 1 fallback: `095abf6`.
 
 ## Next session
-After the Celestrak blocker is resolved: Phase 2 per docs/SPEC.md and
-docs/DECISIONS.md. Replace src/game/loop.js with the 2 Hz ambientCatalog
-(900 ms chain window is client scoring, not the catalog tick), strip server
-gameplay authority, add /api/levels, /api/leaderboard, /api/health, rewrite
-Socket.io events to 2.0.0-debris-derby, validate inbound payloads, switch
-TLEs to Celestrak with loud failure, reconcile websocket_events.md and code
-side by side. Do not touch client gameplay.
+Continue Phase 2: verify the live Celestrak fetch returns `live` on first
+deployment (network egress to celestrak.org required). Do not begin Phase 3
+until that gate is cleared.
 
 ## Known issues
+- Celestrak live fetch unverified in agent environment — sandbox network
+  blocks celestrak.org:443. Code written with loud-failure behaviour and
+  mock-tested.
 - README.md is still Solar Sentinel-era and will be rewritten in Phase 8.
-  The F3 stopgap only removed the two unverified debris numbers; do not
-  treat the rest of the README as accurate.
-- websocket_events.md and the server still disagree on events and payload
-  shapes. Phase 2 must resolve this with a side-by-side diff.
-- Version strings still include 1.0.0-solar-sentinel, 1.5.0-s14, and
-  1.0.0. Phase 2 collapses them to 2.0.0-debris-derby.
-- Old Solar Sentinel client still bundled. Deliberate, removed in Phase 5.
-- Celestrak is unreachable from this environment (see Blocker).
+- The old Solar Sentinel client is still the Vite entry and still listens
+  for the removed socket events. It will show catalog/contract errors
+  against the new server until Phase 5 replaces it. Deliberate.
+- The ambient catalog uses Celestrak `GROUP=active`, so every ambient object
+  has `isDebris: false`. Foreground game debris is client-side from Phase 3.
+- The leaderboard is in-memory and resets on server restart. No accounts,
+  no database.
+- `dist/` still builds the legacy client until Phase 5. Phase 2 verification
+  used the server tests and a live socket, not the built app.
 
 ## Pending human verification
+- First deployment: verify the Celestrak fetch actually returns `live`.
 - Phase 3 end: swing a tethered object yourself on the bare canvas.
 - Phase 4 mid: play levels 1-3 yourself.
 - Phase 5 end: open on real phone, not emulator.

@@ -1,168 +1,41 @@
 /**
- * Solar Sentinel — Socket.io event name registry (single source of truth).
- * ============================================================
- * Import this file from BOTH:
- *  - src/sockets/index.js (server handlers), and
- *  - future frontend netcode (copy the strings into Phaser).
+ * Debris Derby — Socket.io event registry (single source of truth).
  *
- * Why a registry instead of raw strings? A typo in 'player_shoot'
- * vs 'player_shot' would silently break gunfire. Central constants
- * + `websocket_events.md` prevent that class of bug.
+ * Names only. Payload shapes live in websocket_events.md and are enforced by
+ * src/sockets/index.js and src/game/runValidation.js.
  *
- * CONTRACT VERSIONING:
- *  - Bump SOCKET_EVENTS_VERSION on ANY breaking change
- *    (rename / remove / change payload shape).
- *  - Additive changes (new optional event) bump MINOR only.
- *  - `/api/info` exposes the current version so the Phaser client
- *    can warn on mismatch at boot.
- *
- * FULL JSON SHAPES live in websocket_events.md (repo root).
- * This file holds NAMES ONLY — intentionally no game logic.
- *
- * Phase 2 adds: operator presence, debris tracking, cleanup queues, rooms.
- * All Phase 1 names are UNCHANGED (backward compatible).
- *
- * Phase 3 adds: authoritative sim (player_input, entity_snapshot),
- * orbital lifecycle (entity (debris) spawn, cleanup, cascade resolution).
- * Legacy movement/debris events KEEP their names; in-room semantics become
- * server-authoritative (see websocket_events.md §13). Out-of-room (lobby)
- * behavior is byte-identical to Phase 2.
- *
- * Phase 4 adds: lag-compensated hits (server-internal, no wire change),
- * killfeed medals (streak_event), late join (room_join), reconnect grace
- * (player_join ack gains optional rejoined/roomId), TDM overtime
- * (score_update gains overtime flag; match_end gains 'overtime' reason).
- * Everything is ADDITIVE — 1.0–1.2 clients keep working untouched.
- *
- * Phase 5 adds: 3 authoritative maps (room_joined.map + match_state.map),
- * scrap_collector mode (tokens in entity_snapshot, scrap_event economy),
- * spectator booths (room_joined.spectators, room_update joinedSpectatorId,
- * SPECTATING rejections), progression in match_end (xp/level/medals/mvp/
- * telemetry on score rows). All ADDITIVE — 1.0–1.3 keeps working.
+ * Contract version 2.0.0-debris-derby is a full break from the Solar
+ * Sentinel contract. The server is not authoritative for gameplay: it emits
+ * an ambient TLE catalog and accepts validated completed runs.
  */
 
-/**
- * Wire contract version.
- *
- * `1.5.0-s14` is a MINOR bump for an ADDITIVE change set: S14 adds the
- * character/loadout selection pair, the ranked board + rating push, and the
- * orbital-shift / mimic / objective events, plus the `control_point` mode.
- * Nothing was renamed, removed or re-shaped, so an older reader still works —
- * which is exactly what `version.startsWith('1.')` on the client tolerates.
- */
-export const SOCKET_EVENTS_VERSION = '1.5.0-s14';
+export const SOCKET_EVENTS_VERSION = '2.0.0-debris-derby';
 
 export const SOCKET_EVENTS = Object.freeze({
-  // --- Connection lifecycle (Socket.io built-ins + our hello) ---
-  CONNECTION: 'connection', // built-in: fired server-side per client
-  DISCONNECT: 'disconnect', // built-in: fired on leave/timeout
-  CONNECTED: 'connected', // S->C: welcome + socket id + contract version
+  // Socket.io built-ins
+  CONNECTION: 'connection',
+  DISCONNECT: 'disconnect',
 
-  // --- Player core (Phase 1: skeleton, Phase 2: room-scoped relay) ---
-  PLAYER_JOIN: 'player_join', // C->S then S->C broadcast (lobby presence)
-  PLAYER_LEAVE: 'player_leave', // S->C broadcast (built on disconnect)
-  PLAYER_MOVE: 'player_move', // C->S legacy intent bridge (authoritative in rooms)
-  PLAYER_SHOOT: 'player_shoot', // C->S validated trigger (server spawns shells)
-  PLAYER_MELEE: 'player_melee', // C->S validated swing (server arc-tests)
-  PLAYER_HEALTH_UPDATE: 'player_health_update', // S->C ONLY (server is truth)
+  // Lifecycle
+  CONNECTED: 'connected', // S->C: socket id, contract version, catalog status
 
-  // --- Bots (Phase 1: shape defined, Phase 2: spawned per-room) ---
-  // --- Reserved for future features (defined early, implemented later) ---
-  // Keeping names stable NOW avoids breaking the Phaser client later.
-  PUZZLE_SOLVED: 'puzzle_solved', // C->S (mid-fight puzzle completion)
-  JUMPSCARE_TRIGGER: 'jumpscare_trigger', // S->C (server tells client to scare)
-  ROCKET_JUMP: 'rocket_jump', // C->S (easter egg movement tech)
-  PICKUP_COLLECTED: 'pickup_collected', // C->S (ammo/health/scrap)
-  MATCH_STATE: 'match_state', // S->C (lobby → countdown → playing → gameover)
-  ERROR: 'error_event', // S->C: uniform error envelope (avoid clash w/ built-in 'error')
+  // Ambient catalog (server -> client, 2 Hz)
+  AMBIENT_CATALOG: 'ambient_catalog',
 
-  // --- Phase 2: Party system (max 4, 6-char code, leader starts) ---
-  PARTY_CREATE: 'party_create', // C->S { name? } → ack { ok, party }
-  PARTY_JOIN: 'party_join', // C->S { code } → ack { ok, party }
-  PARTY_LEAVE: 'party_leave', // C->S {} → ack { ok } + party_update to rest
-  PARTY_UPDATE: 'party_update', // S->C { party | null } real-time member sync
-  PARTY_START_MATCH: 'party_start_match', // C->S { mode } (leader only) → room
-  PARTY_INVITE: 'party_invite', // C->S { friendId?, friendName? } invite w/o code
-  PARTY_INVITED: 'party_invited', // S->C { partyCode, fromId, fromName } to invitee
+  // Completed-run submission (client -> server, ack) and board update
+  RUN_SUBMIT: 'run_submit',
+  LEADERBOARD_UPDATE: 'leaderboard_update',
 
-  // --- Phase 2: Friends system (in-memory, survives reconnect) ---
-  FRIEND_ADD: 'friend_add', // C->S { friendId?, friendName? } → ack { ok, friends }
-  FRIEND_REMOVE: 'friend_remove', // C->S { friendId } → ack { ok, friends }
-  FRIEND_LIST: 'friend_list', // C->S {} → ack { ok, friends }
-  FRIEND_UPDATE: 'friend_update', // S->C { friends } push after add/remove/presence
-
-  // --- Phase 2: Matchmaking (solo queue + party start + bot fill) ---
-  QUEUE_JOIN: 'queue_join', // C->S { mode } → ack { ok, mode (effective), position }
-  QUEUE_LEAVE: 'queue_leave', // C->S {} → ack { ok }
-  QUEUE_UPDATE: 'queue_update', // S->C { mode, position, playersInQueue }
-  MATCH_FOUND: 'match_found', // S->C { roomId, mode, mapId } lobby UI hook
-
-  // --- Phase 2: Room lifecycle (authoritative roster, return to lobby) ---
-  ROOM_JOINED: 'room_joined', // S->C { room } full roster (players + bots) to spawn
-  ROOM_LEAVE: 'room_leave', // C->S {} voluntary exit → ack + room_update
-  ROOM_UPDATE: 'room_update', // S->C { room } membership delta (join/leave)
-  MATCH_END: 'match_end', // S->C { roomId, results, reason } + C->S request (stub)
-
-  // --- Phase 3: authoritative sim + debris lifecycle ---
-  PLAYER_INPUT: 'player_input', // C->S intent { moveX, jump, aim, fire, melee, seq } → ack
-  ENTITY_SNAPSHOT: 'entity_snapshot', // S->C { roomId, tick, serverTime, entities } 20 Hz
-  ENTITY_DEATH: 'entity_death', // S->C { victim, killer, cause, respawnInMs }
-  ENTITY_RESPAWN: 'entity_respawn', // S->C { id, x, y, hp } safe-spawn revive
-  SCORE_UPDATE: 'score_update', // S->C { scores, teams } on kills + match start
-
-  // --- Phase 4: killfeed medals + late join (additive) ---
-  STREAK_EVENT: 'streak_event', // S->C { kind, id, name, streak, text } first blood + tiers
-  ROOM_JOIN: 'room_join', // C->S { roomId? } late join a live room → ack + catch-up
-
-  // --- Phase 5: scrap economy (additive) ---
-  SCRAP_EVENT: 'scrap_event', // S->C { kind: drop|pickup|deposit, byId, amount, ... }
-
-  // --- S14: characters, loadouts, ranked (additive) ---
-  CHARACTER_SET: 'character_set', // C->S { character, variant? } validated selection
-  CHARACTER_UPDATE: 'character_update', // S->C { character, variant, unlocked, profile } accepted selection
-  RANKED_UPDATE: 'ranked_update', // S->C { placed, rating, league, seasonId, ... } after a ranked match
-  RANKED_BOARD: 'ranked_board', // C->S {} read-only standings request → ranked_update
-  ORBITAL_SHIFT: 'orbital_shift', // S->C { type: warning|shift|settled, platforms, geometry } arena shift
-  MIMIC_EVENT: 'mimic_event', // S->C { kind: spawn|arm|lunge|bite|hit|kill } decoy token
-  OBJECTIVE_EVENT: 'objective_event', // S->C { kind: capture|decay|unlock, team, from } control point
-
-  // --- NEW: Orbital Debris Monitoring (Solar Sentinel) ---
-  ORBITAL_SNAPSHOT: 'orbital_snapshot', // S->C { timestamp, tick, objects } 2 Hz live tracking
-  GLOBAL_THREAT_LEVEL: 'global_threat_level', // S->C { level: "Low/Medium/High", timestamp } aggregate threat assessment
-
-  // --- NEW: Object cleanup (Solar Sentinel) ---
-  PLAYER_CLEANUP: 'player_cleanup', // C->S { id } remove tracked object
-  CLEANUP_SUCCESS: 'cleanup_success', // S->C { id, success, energy, score } confirmation of removal
-  CLEANUP_FAILED: 'cleanup_failed', // S->C { id, reason } cleanup rejected by the server
-
-  // --- NEW: Kessler cascade + game over (Solar Sentinel) ---
-  COLLISION_ALERT: 'collision_alert', // S->C { type, objectId, x, y, riskLevel, collisionCount } high-risk collision
-  PROXIMITY_TIMER: 'proximity_timer', // S->C { timers: { id: { remainingMs, riskLevel } }, timestamp } countdown for high-risk debris
-  GAME_OVER: 'game_over', // S->C { finalScore, globalEnergy, collisionCount } simulation ended
-  LEVEL_UP: 'level_up', // S->C { level } new wave of simulated debris spawned
-  MISSION_ACCOMPLISHED: 'mission_accomplished', // S->C { wave, finalScore, globalEnergy, collisionCount, globalThreatLevel, issRiskLevel, finalStats } orbit secured
+  // Uniform server notice envelope
+  SERVER_NOTICE: 'server_notice',
 });
 
-/**
- * Phase 2 game modes (locked by design), plus Phase 5's scrap_collector.
- *  - ffa:          Free-for-All, max 10 players (humans + bot fill).
- *  - tdm:          Team Deathmatch, 4v4 (8 total, red vs blue).
- *  - bot_practice: friendly practice, human(s) vs bots only.
- *  - scrap_collector: bank dropped scrap at docks; most banked wins.
- *
- * Kept here (next to event names) so client + server share literals.
- * Tuning (targets, timers) lives in src/server-config.js.
- */
-export const GAME_MODES = Object.freeze({
-  FFA: 'ffa',
-  TDM: 'tdm',
-  // S14.5: control_point is a REAL server mode (gameModes.control_point +
-  // room support). It lives here so the queue validates it — the lobby card
-  // for it has existed since the objective mode shipped, and without this
-  // entry `queue_join { mode: 'control_point' }` was answered with BAD_MODE.
-  CONTROL: 'control_point',
-  BOT_PRACTICE: 'bot_practice',
-  SCRAP: 'scrap_collector',
+export const SERVER_NOTICE_CODES = Object.freeze({
+  CATALOG_UNAVAILABLE: 'CATALOG_UNAVAILABLE',
+  CATALOG_STALE: 'CATALOG_STALE',
+  BAD_PAYLOAD: 'BAD_PAYLOAD',
+  BAD_LEVEL: 'BAD_LEVEL',
+  BAD_SEED: 'BAD_SEED',
+  RATE_LIMITED: 'RATE_LIMITED',
+  SCORE_MISMATCH: 'SCORE_MISMATCH',
 });
-
-export const GAME_MODE_LIST = Object.freeze(Object.values(GAME_MODES));

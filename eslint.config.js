@@ -5,25 +5,25 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 /**
- * Legacy Solar Sentinel files are replaced phase by phase. They are ignored
- * until their rewrite lands; new code is linted from the start.
+ * Phase 2 rewrote the backend, so those files are linted from now on.
+ * Only the legacy Solar Sentinel client remains ignored until Phase 5
+ * replaces it.
  */
-const LEGACY_FILES = [
-  'server.js',
-  'src/app.js',
+const LEGACY_CLIENT_FILES = [
   'src/audio.js',
   'src/demoFeed.js',
-  'src/game/**',
   'src/main.js',
   'src/orbitalMap.js',
-  'src/routes/**',
-  'src/server-config.js',
-  'src/sockets/**',
 ];
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'playwright-output/**', ...LEGACY_FILES],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'playwright-output/**',
+      ...LEGACY_CLIENT_FILES,
+    ],
   },
   js.configs.recommended,
   {

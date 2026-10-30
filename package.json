@@ -1,6 +1,6 @@
 {
   "name": "debris-derby",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Debris Derby — a physics-based tether-swinging game about cleaning up space debris. Built for the NASA International Space Apps Challenge 2026.",
   "type": "module",
   "private": true,

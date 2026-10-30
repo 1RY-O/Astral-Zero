@@ -1,13 +1,14 @@
 /**
- * Debris Darling — Web Audio API Procedural Sound Engine
- * Synthesizes space tether physics cues and corrupted AI rage alarms.
+ * HELIOS PROTOCOL: Space Weather Superhero Tycoon — Web Audio Engine
+ * Procedural Cash Inc / Roblox Tycoon feedback sounds & corrupted AI alarms.
+ * Built for the NASA International Space Apps Challenge 2026.
  */
 
 let ctx = null;
 let muted = false;
 
 try {
-  muted = typeof localStorage !== 'undefined' && localStorage.getItem('debris_muted') === 'true';
+  muted = typeof localStorage !== 'undefined' && localStorage.getItem('helios_muted') === 'true';
 } catch {
   muted = false;
 }
@@ -36,7 +37,7 @@ export function isMuted() {
 export function setMuted(val) {
   muted = !!val;
   try {
-    localStorage.setItem('debris_muted', String(muted));
+    localStorage.setItem('helios_muted', String(muted));
   } catch {
     // ignore
   }
@@ -70,6 +71,52 @@ function tone({ type = 'sine', from = 440, to = 220, dur = 0.15, gain = 0.2, del
   }
 }
 
+// Cash Inc. / Roblox Tycoon Payout Chime (+Credits!)
+export function playCashChime() {
+  if (muted) return;
+  initAudio();
+  // Arpeggiated high crystalline chime
+  tone({ type: 'triangle', from: 880, to: 880, dur: 0.08, gain: 0.18, delay: 0 });
+  tone({ type: 'triangle', from: 1174.66, to: 1174.66, dur: 0.08, gain: 0.2, delay: 0.06 });
+  tone({ type: 'triangle', from: 1479.98, to: 1479.98, dur: 0.12, gain: 0.22, delay: 0.12 });
+  tone({ type: 'sine', from: 1760, to: 1760, dur: 0.2, gain: 0.25, delay: 0.18 });
+}
+
+// Hero Launch: tactile hyperdrive launch sound
+export function playHeroLaunch() {
+  if (muted) return;
+  tone({ type: 'sawtooth', from: 180, to: 720, dur: 0.18, gain: 0.2 });
+  tone({ type: 'sine', from: 220, to: 880, dur: 0.15, gain: 0.15, delay: 0.02 });
+}
+
+// Solar Flare Absorption: deep plasma containment pulse
+export function playFlareAbsorption() {
+  if (muted) return;
+  tone({ type: 'sawtooth', from: 320, to: 60, dur: 0.28, gain: 0.3 });
+  tone({ type: 'sine', from: 540, to: 120, dur: 0.22, gain: 0.2, delay: 0.04 });
+}
+
+// Department Upgrade Ding
+export function playUpgradeDing() {
+  if (muted) return;
+  tone({ type: 'sine', from: 523.25, to: 659.25, dur: 0.1, gain: 0.2 });
+  tone({ type: 'sine', from: 659.25, to: 1046.5, dur: 0.18, gain: 0.25, delay: 0.08 });
+}
+
+// Emergency Shield Overcharge
+export function playShieldOvercharge() {
+  if (muted) return;
+  tone({ type: 'sawtooth', from: 100, to: 600, dur: 0.35, gain: 0.35 });
+  tone({ type: 'square', from: 440, to: 880, dur: 0.25, gain: 0.2, delay: 0.1 });
+}
+
+// Corrupted AI Hostile Rage Alarm
+export function playRageAlarm() {
+  if (muted) return;
+  tone({ type: 'sawtooth', from: 300, to: 900, dur: 0.15, gain: 0.3 });
+  tone({ type: 'square', from: 800, to: 200, dur: 0.2, gain: 0.25, delay: 0.08 });
+}
+
 export function playGrab() {
   tone({ type: 'triangle', from: 600, to: 300, dur: 0.08, gain: 0.25 });
 }
@@ -84,14 +131,8 @@ export function playThrust() {
 
 export function playImpact() {
   tone({ type: 'sawtooth', from: 220, to: 40, dur: 0.28, gain: 0.35 });
-  tone({ type: 'square', from: 140, to: 30, dur: 0.2, gain: 0.25, delay: 0.02 });
 }
 
 export function playDeorbit() {
   tone({ type: 'sine', from: 523.25, to: 659.25, dur: 0.18, gain: 0.22 });
-}
-
-export function playRageAlarm() {
-  tone({ type: 'sawtooth', from: 300, to: 900, dur: 0.15, gain: 0.3 });
-  tone({ type: 'square', from: 800, to: 200, dur: 0.2, gain: 0.25, delay: 0.08 });
 }

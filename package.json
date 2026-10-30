@@ -1,7 +1,7 @@
 {
-  "name": "debris-darling",
-  "version": "1.0.0",
-  "description": "Debris Darling — a glitch-morph, rage-bait indie game themed around a corrupted NASA mission control AI. Built for the NASA International Space Apps Challenge 2026.",
+  "name": "helios-protocol",
+  "version": "2.0.0",
+  "description": "HELIOS PROTOCOL: Space Weather Superhero Tycoon — Built for the NASA International Space Apps Challenge 2026.",
   "type": "module",
   "private": true,
   "workspaces": [

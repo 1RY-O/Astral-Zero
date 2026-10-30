@@ -1,5 +1,5 @@
 /**
- * Kessler Tycoon — Server-Authoritative Express + Socket.IO Backend
+ * HELIOS PROTOCOL: Space Weather Superhero Tycoon — Server Backend
  * Built for the NASA International Space Apps Challenge 2026.
  */
 
@@ -10,6 +10,7 @@ import { Server } from 'socket.io';
 
 import missionsRouter from './routes/missions.js';
 import telemetryRouter from './routes/telemetry.js';
+import { AI_BOSS_TAUNTS, ECONOMY, DEPARTMENTS } from '../shared/constants.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -27,7 +28,8 @@ app.get('/api/health', (_req, res) => {
     status: 'ok',
     system: 'SYSTEM ONLINE',
     corruptedAI: 'ACTIVE',
-    game: 'Kessler Tycoon',
+    game: 'HELIOS PROTOCOL: Space Weather Superhero Tycoon',
+    agency: 'HELIOS International Space-Protection Agency',
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
   });
@@ -42,34 +44,64 @@ const io = new Server(httpServer, {
   },
 });
 
-function getInitialZones() {
+function getInitialDepartments() {
   return {
-    LEO: {
-      id: 'LEO',
-      name: 'Low Earth Orbit (LEO)',
-      altitude: '160 - 2,000 km',
-      debris: 12,
-      basePayout: 350,
-      riskImpact: 1.2,
-      dangerLevel: 'CRITICAL CONGESTION',
+    solar_obs: {
+      id: 'solar_obs',
+      name: DEPARTMENTS.SOLAR_OBS.name,
+      role: DEPARTMENTS.SOLAR_OBS.role,
+      classification: DEPARTMENTS.SOLAR_OBS.classification,
+      scienceSource: DEPARTMENTS.SOLAR_OBS.scienceSource,
+      description: DEPARTMENTS.SOLAR_OBS.description,
+      threatName: 'X-Class & M-Class Solar Flares',
+      threatCount: 6,
+      maxThreats: 18,
+      level: 1,
+      automated: false,
+      baseCost: DEPARTMENTS.SOLAR_OBS.baseCost,
+      basePayout: DEPARTMENTS.SOLAR_OBS.basePayout,
+      baseIntegrityRestore: DEPARTMENTS.SOLAR_OBS.baseIntegrityRestore,
+      baseDuration: DEPARTMENTS.SOLAR_OBS.baseDuration,
+      autoCost: DEPARTMENTS.SOLAR_OBS.autoCost,
+      upgradeCost: DEPARTMENTS.SOLAR_OBS.upgradeCost,
     },
-    MEO: {
-      id: 'MEO',
-      name: 'Medium Earth Orbit (MEO)',
-      altitude: '2,000 - 35,786 km',
-      debris: 18,
-      basePayout: 550,
-      riskImpact: 2.4,
-      dangerLevel: 'MODERATE SHIELDING',
+    research_lab: {
+      id: 'research_lab',
+      name: DEPARTMENTS.RESEARCH_LAB.name,
+      role: DEPARTMENTS.RESEARCH_LAB.role,
+      classification: DEPARTMENTS.RESEARCH_LAB.classification,
+      scienceSource: DEPARTMENTS.RESEARCH_LAB.scienceSource,
+      description: DEPARTMENTS.RESEARCH_LAB.description,
+      threatName: 'Coronal Mass Ejections (CMEs)',
+      threatCount: 4,
+      maxThreats: 14,
+      level: 1,
+      automated: false,
+      baseCost: DEPARTMENTS.RESEARCH_LAB.baseCost,
+      basePayout: DEPARTMENTS.RESEARCH_LAB.basePayout,
+      baseIntegrityRestore: DEPARTMENTS.RESEARCH_LAB.baseIntegrityRestore,
+      baseDuration: DEPARTMENTS.RESEARCH_LAB.baseDuration,
+      autoCost: DEPARTMENTS.RESEARCH_LAB.autoCost,
+      upgradeCost: DEPARTMENTS.RESEARCH_LAB.upgradeCost,
     },
-    GEO: {
-      id: 'GEO',
-      name: 'Geostationary Orbit (GEO)',
-      altitude: '35,786 km',
-      debris: 25,
-      basePayout: 900,
-      riskImpact: 4.0,
-      dangerLevel: 'LETHAL VELOCITY',
+    sat_defense: {
+      id: 'sat_defense',
+      name: DEPARTMENTS.SAT_DEFENSE.name,
+      role: DEPARTMENTS.SAT_DEFENSE.role,
+      classification: DEPARTMENTS.SAT_DEFENSE.classification,
+      scienceSource: DEPARTMENTS.SAT_DEFENSE.scienceSource,
+      description: DEPARTMENTS.SAT_DEFENSE.description,
+      threatName: 'Geomagnetic Storm Shockwaves',
+      threatCount: 3,
+      maxThreats: 10,
+      level: 1,
+      automated: false,
+      baseCost: DEPARTMENTS.SAT_DEFENSE.baseCost,
+      basePayout: DEPARTMENTS.SAT_DEFENSE.basePayout,
+      baseIntegrityRestore: DEPARTMENTS.SAT_DEFENSE.baseIntegrityRestore,
+      baseDuration: DEPARTMENTS.SAT_DEFENSE.baseDuration,
+      autoCost: DEPARTMENTS.SAT_DEFENSE.autoCost,
+      upgradeCost: DEPARTMENTS.SAT_DEFENSE.upgradeCost,
     },
   };
 }
@@ -80,23 +112,36 @@ const players = new Map();
 function createPlayerState(socketId) {
   return {
     socketId,
-    budget: 1000,
-    kesslerRisk: 10.0,
-    fleetLevel: 1, // deploy time = Math.max(1, 6 - fleetLevel) seconds
-    zones: getInitialZones(),
-    activeTugs: [],
+    budget: ECONOMY.INITIAL_BUDGET, // Funding Credits
+    magnetosphereIntegrity: ECONOMY.INITIAL_MAGNETOSPHERE, // 100.0%
+    departments: getInitialDepartments(),
+    activeMissions: [],
     gameOver: false,
     gameOverReason: null,
-    totalCleared: 0,
+    totalEventsMitigated: 0,
+    totalCreditsEarned: ECONOMY.INITIAL_BUDGET,
     lastActionAt: Date.now(),
     lastIdleTauntAt: 0,
     lastRiskTauntAt: 0,
     lastBrokeTauntAt: 0,
+    lastAutoDeployAt: {
+      solar_obs: 0,
+      research_lab: 0,
+      sat_defense: 0,
+    },
+    solarTelemetry: {
+      sdoFlareClass: 'M5.4',
+      donkiCmeSpeed: '1,320 km/s',
+      noaaKpIndex: 6.4,
+      stormStatus: 'G3 (STRONG STORM)',
+      solarWindSpeed: '590 km/s',
+      cyclePhase: 'Solar Cycle 25 Maximum',
+    },
   };
 }
 
 io.on('connection', (socket) => {
-  console.log(`[Kessler Tycoon Server] Contractor connected: ${socket.id}`);
+  console.log(`[HELIOS PROTOCOL Server] Director connected: ${socket.id}`);
   const state = createPlayerState(socket.id);
   players.set(socket.id, state);
 
@@ -107,182 +152,267 @@ io.on('connection', (socket) => {
   function emitState() {
     socket.emit('state_update', {
       budget: state.budget,
-      kesslerRisk: parseFloat(state.kesslerRisk.toFixed(1)),
-      fleetLevel: state.fleetLevel,
-      deployTimeSeconds: Math.max(1, 6 - state.fleetLevel),
-      upgradeCost: 500,
-      zones: state.zones,
-      activeTugs: state.activeTugs,
+      fundingCredits: state.budget,
+      magnetosphereIntegrity: parseFloat(state.magnetosphereIntegrity.toFixed(1)),
+      kesslerRisk: parseFloat((100 - state.magnetosphereIntegrity).toFixed(1)), // backwards compatibility
+      departments: state.departments,
+      activeMissions: state.activeMissions,
+      activeTugs: state.activeMissions, // backwards compatibility
       gameOver: state.gameOver,
       gameOverReason: state.gameOverReason,
-      totalCleared: state.totalCleared,
+      totalEventsMitigated: state.totalEventsMitigated,
+      totalCleared: state.totalEventsMitigated, // backwards compatibility
+      totalCreditsEarned: state.totalCreditsEarned,
+      solarTelemetry: state.solarTelemetry,
     });
   }
 
-  // Initial connection greeting
+  // Initial connection state
   socket.emit('init_game', {
     budget: state.budget,
-    kesslerRisk: state.kesslerRisk,
-    fleetLevel: state.fleetLevel,
-    deployTimeSeconds: 5,
-    upgradeCost: 500,
-    zones: state.zones,
+    fundingCredits: state.budget,
+    magnetosphereIntegrity: state.magnetosphereIntegrity,
+    kesslerRisk: 0.0,
+    departments: state.departments,
+    solarTelemetry: state.solarTelemetry,
   });
 
-  emitTaunt("NASA privatization protocol active. Don't bankrupt us on your first day.");
+  emitTaunt(AI_BOSS_TAUNTS.GREETING, 'medium');
 
-  // Action: Deploy Tug
-  socket.on('deploy_tug', (payload = {}) => {
-    state.lastActionAt = Date.now();
+  // Trigger Hero Mission Deployment
+  function launchMission(deptId) {
     if (state.gameOver) return;
 
-    const zoneId = payload.zone || 'LEO';
-    const zone = state.zones[zoneId];
-    if (!zone) return;
+    const dept = state.departments[deptId];
+    if (!dept) return;
 
-    if (zone.debris <= 0) {
-      emitTaunt(`Zone ${zoneId} has no debris to clear, genius.`);
+    if (state.budget < dept.baseCost) {
+      emitTaunt('Insufficient funding credits to deploy hero craft. Balance the budget, Director!', 'medium');
       return;
     }
 
-    const deployCost = 200;
-    state.budget -= deployCost;
+    state.lastActionAt = Date.now();
+    state.budget -= dept.baseCost;
 
-    const deployDuration = Math.max(1, 6 - state.fleetLevel);
-    const tugId = `tug-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+    const missionDuration = Math.max(1, dept.baseDuration - (dept.level - 1) * 0.4);
+    const missionId = `mission-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
-    state.activeTugs.push({
-      tugId,
-      zoneId,
-      duration: deployDuration,
+    const newMission = {
+      missionId,
+      tugId: missionId, // backwards compatibility
+      deptId,
+      zoneId: deptId, // backwards compatibility
+      duration: missionDuration,
       startedAt: Date.now(),
-    });
+      heroName:
+        deptId === 'solar_obs'
+          ? 'SOLAR INTERCEPTOR'
+          : deptId === 'research_lab'
+            ? 'PLASMA HARVESTER'
+            : 'SHIELD CRUISER',
+    };
 
+    state.activeMissions.push(newMission);
     emitState();
 
-    // Check if broke (< $100)
-    if (state.budget < 100 && Date.now() - state.lastBrokeTauntAt > 8000) {
+    if (state.budget < 100 && Date.now() - state.lastBrokeTauntAt > 10000) {
       state.lastBrokeTauntAt = Date.now();
-      emitTaunt("You're bankrupt. My toaster has more processing power than your company.");
+      emitTaunt(AI_BOSS_TAUNTS.BANKRUPT, 'high');
     }
 
-    // Schedule tug completion
+    // Mission completion timer
     setTimeout(() => {
-      // Find and remove tug
-      const idx = state.activeTugs.findIndex((t) => t.tugId === tugId);
+      const idx = state.activeMissions.findIndex((m) => m.missionId === missionId);
       if (idx !== -1) {
-        state.activeTugs.splice(idx, 1);
+        state.activeMissions.splice(idx, 1);
       }
 
       if (state.gameOver) return;
 
-      if (zone.debris > 0) {
-        zone.debris -= 1;
-        state.totalCleared += 1;
-        const payoutMultiplier = 1 + (state.fleetLevel - 1) * 0.35;
-        const payout = Math.round(zone.basePayout * payoutMultiplier);
-        state.budget += payout;
-        state.kesslerRisk = Math.max(0, state.kesslerRisk - 1.8);
+      // Calculate reward
+      const levelMultiplier = 1 + (dept.level - 1) * 0.45;
+      const payout = Math.round(dept.basePayout * levelMultiplier);
+      const integrityGain = parseFloat((dept.baseIntegrityRestore * (1 + (dept.level - 1) * 0.25)).toFixed(1));
 
-        socket.emit('tug_success', {
-          tugId,
-          zoneId,
-          payout,
-          clearedDebris: 1,
-        });
+      state.budget += payout;
+      state.totalCreditsEarned += payout;
+      state.magnetosphereIntegrity = Math.min(100.0, state.magnetosphereIntegrity + integrityGain);
+      dept.threatCount = Math.max(0, dept.threatCount - 1);
+      state.totalEventsMitigated += 1;
 
-        if (zone.debris === 0) {
-          emitTaunt("Finally. You did the bare minimum. Don't expect a raise.");
-        }
+      // Emit success events
+      socket.emit('mission_success', {
+        missionId,
+        tugId: missionId,
+        deptId,
+        payout,
+        integrityGain,
+        clearedThreats: 1,
+      });
+
+      socket.emit('tug_success', {
+        tugId: missionId,
+        zoneId: deptId,
+        payout,
+        clearedDebris: 1,
+      });
+
+      if (Math.random() < 0.25) {
+        emitTaunt(AI_BOSS_TAUNTS.SUCCESS, 'low');
       }
 
       emitState();
-    }, deployDuration * 1000);
+    }, missionDuration * 1000);
+  }
+
+  // Socket listener: deploy_mission (and deploy_hero / deploy_tug aliases)
+  socket.on('deploy_mission', (payload = {}) => {
+    const deptId = payload.deptId || payload.zone || 'solar_obs';
+    launchMission(deptId);
   });
 
-  // Action: Upgrade Fleet
-  socket.on('upgrade_fleet', () => {
+  socket.on('deploy_hero', (payload = {}) => {
+    const deptId = payload.deptId || payload.zone || 'solar_obs';
+    launchMission(deptId);
+  });
+
+  socket.on('deploy_tug', (payload = {}) => {
+    // Map legacy zones if needed
+    let deptId = payload.zone;
+    if (deptId === 'LEO') deptId = 'solar_obs';
+    else if (deptId === 'MEO') deptId = 'research_lab';
+    else if (deptId === 'GEO') deptId = 'sat_defense';
+    if (!state.departments[deptId]) deptId = 'solar_obs';
+    launchMission(deptId);
+  });
+
+  // Socket listener: upgrade_department (and upgrade_fleet alias)
+  socket.on('upgrade_department', (payload = {}) => {
     state.lastActionAt = Date.now();
     if (state.gameOver) return;
 
-    const upgradeCost = 500;
-    if (state.budget < upgradeCost) {
-      emitTaunt('Insufficient funds. You cannot even afford a bolt, contractor.');
+    const deptId = payload.deptId || 'solar_obs';
+    const dept = state.departments[deptId];
+    if (!dept) return;
+
+    if (state.budget < dept.upgradeCost) {
+      emitTaunt(`Insufficient funding credits for ${dept.name} upgrade.`, 'medium');
       return;
     }
 
-    if (state.fleetLevel >= 5) {
-      emitTaunt('Fleet is already at peak orbital spec.');
+    if (dept.level >= 5) {
+      emitTaunt(`${dept.name} is already at maximum operational spec (MK-5).`, 'medium');
       return;
     }
 
-    state.budget -= upgradeCost;
-    state.fleetLevel += 1;
+    state.budget -= dept.upgradeCost;
+    dept.level += 1;
+    dept.upgradeCost = Math.round(dept.upgradeCost * 1.6);
 
     emitState();
-    emitTaunt("Oh look, you bought a shiny new toy. Too bad you're still bad at your job.");
+    emitTaunt(AI_BOSS_TAUNTS.UPGRADE, 'medium');
   });
 
-  // Action: Emergency Purge
-  socket.on('emergency_purge', (payload = {}) => {
+  socket.on('upgrade_fleet', () => {
+    // Default to solar_obs or first upgradeable
+    const target = state.departments.solar_obs.level < 5
+      ? 'solar_obs'
+      : state.departments.research_lab.level < 5
+        ? 'research_lab'
+        : 'sat_defense';
+    socket.emit('upgrade_department', { deptId: target });
+  });
+
+  // Socket listener: buy_automation
+  socket.on('buy_automation', (payload = {}) => {
     state.lastActionAt = Date.now();
     if (state.gameOver) return;
 
-    const purgeCost = 1000;
-    if (state.budget < purgeCost) {
-      emitTaunt('Emergency laser burn requires $1,000 cash upfront.');
+    const deptId = payload.deptId || 'solar_obs';
+    const dept = state.departments[deptId];
+    if (!dept) return;
+
+    if (dept.automated) {
+      emitTaunt(`${dept.name} automation is already active!`, 'low');
       return;
     }
 
-    const zoneId = payload.zone || 'LEO';
-    const zone = state.zones[zoneId];
-    if (!zone) return;
+    if (state.budget < dept.autoCost) {
+      emitTaunt(`Need ${dept.autoCost} credits to automate ${dept.name}. Go earn them!`, 'medium');
+      return;
+    }
 
-    state.budget -= purgeCost;
-    const cleared = zone.debris;
-    zone.debris = 0;
-    state.totalCleared += cleared;
+    state.budget -= dept.autoCost;
+    dept.automated = true;
 
-    // Purge spikes Kessler Risk by 20%
-    state.kesslerRisk = Math.min(100, state.kesslerRisk + 20.0);
+    emitState();
+    emitTaunt(AI_BOSS_TAUNTS.AUTOMATION_PURCHASED, 'medium');
+  });
 
-    socket.emit('purge_success', {
-      zoneId,
-      clearedDebris: cleared,
-      riskSpike: 20.0,
+  // Socket listener: emergency_shield (and emergency_purge alias)
+  socket.on('emergency_shield', () => {
+    state.lastActionAt = Date.now();
+    if (state.gameOver) return;
+
+    const cost = ECONOMY.EMERGENCY_SHIELD_COST;
+    if (state.budget < cost) {
+      emitTaunt('Overcharging planetary magnetic coils requires 800 funding credits.', 'medium');
+      return;
+    }
+
+    state.budget -= cost;
+    state.magnetosphereIntegrity = Math.min(100.0, state.magnetosphereIntegrity + ECONOMY.EMERGENCY_SHIELD_RESTORE);
+
+    // Half all active threat counts
+    Object.values(state.departments).forEach((dept) => {
+      const cleared = Math.ceil(dept.threatCount / 2);
+      dept.threatCount -= cleared;
+      state.totalEventsMitigated += cleared;
     });
 
-    if (state.kesslerRisk >= 80 && Date.now() - state.lastRiskTauntAt > 6000) {
-      state.lastRiskTauntAt = Date.now();
-      emitTaunt('Orbit is turning into a blender. Do your job.');
-    }
+    socket.emit('shield_success', {
+      restoredIntegrity: ECONOMY.EMERGENCY_SHIELD_RESTORE,
+      cost,
+    });
+    socket.emit('purge_success', {
+      zoneId: 'ALL',
+      clearedDebris: 5,
+      riskSpike: -20.0,
+    });
 
     emitState();
+    emitTaunt('Planetary dipole coil overcharged! Solar plasma deflected, but watch your credit balance.', 'medium');
   });
 
-  // Action: Restart Game
+  socket.on('emergency_purge', () => {
+    // Alias to emergency shield
+    socket.emit('emergency_shield');
+  });
+
+  // Socket listener: restart_game
   socket.on('restart_game', () => {
     const fresh = createPlayerState(socket.id);
     players.set(socket.id, fresh);
     fresh.lastActionAt = Date.now();
+
     socket.emit('init_game', {
       budget: fresh.budget,
-      kesslerRisk: fresh.kesslerRisk,
-      fleetLevel: fresh.fleetLevel,
-      deployTimeSeconds: 5,
-      upgradeCost: 500,
-      zones: fresh.zones,
+      fundingCredits: fresh.budget,
+      magnetosphereIntegrity: fresh.magnetosphereIntegrity,
+      kesslerRisk: 0.0,
+      departments: fresh.departments,
+      solarTelemetry: fresh.solarTelemetry,
     });
-    emitTaunt("Telemetry reset. Try not to embarrass NASA this time.");
+    emitTaunt("HELIOS Protocol reset. Telemetry re-established. Protect our atmosphere!", 'medium');
   });
 
   socket.on('disconnect', () => {
-    console.log(`[Kessler Tycoon Server] Contractor disconnected: ${socket.id}`);
+    console.log(`[HELIOS PROTOCOL Server] Director disconnected: ${socket.id}`);
     players.delete(socket.id);
   });
 });
 
-// Server 3-second simulation loop & idle checker
+// Periodic Simulation Tick & Automation Runner (Every 2.5 seconds)
 setInterval(() => {
   const now = Date.now();
 
@@ -292,84 +422,166 @@ setInterval(() => {
     const socket = io.sockets.sockets.get(socketId);
     if (!socket) continue;
 
-    // 1. Natural debris accumulation over time
-    // LEO accumulates fastest (+2), MEO (+1 every tick), GEO (+1 every other tick)
-    state.zones.LEO.debris += 2;
-    state.zones.MEO.debris += 1;
-    if (Math.random() > 0.4) {
-      state.zones.GEO.debris += 1;
+    // 1. Natural Solar Activity / Space Weather Event Emergence
+    // Solar Observation Centre (SDO flares emerge quickly)
+    if (state.departments.solar_obs.threatCount < state.departments.solar_obs.maxThreats) {
+      state.departments.solar_obs.threatCount += Math.random() > 0.3 ? 1 : 0;
     }
 
-    // 2. Risk increases with total debris
-    const totalDebris =
-      state.zones.LEO.debris + state.zones.MEO.debris + state.zones.GEO.debris;
-    const riskIncrement = 0.6 + totalDebris * 0.035;
-    state.kesslerRisk = Math.min(100, state.kesslerRisk + riskIncrement);
+    // Space Weather Research Lab (CMEs emerge periodically)
+    if (state.departments.research_lab.threatCount < state.departments.research_lab.maxThreats) {
+      state.departments.research_lab.threatCount += Math.random() > 0.5 ? 1 : 0;
+    }
 
-    // 3. Idle check (10 seconds without action)
-    if (now - state.lastActionAt >= 10000 && now - state.lastIdleTauntAt >= 12000) {
+    // Satellite Protection Division (Geomagnetic shocks emerge slower but hit hard)
+    if (state.departments.sat_defense.threatCount < state.departments.sat_defense.maxThreats) {
+      state.departments.sat_defense.threatCount += Math.random() > 0.65 ? 1 : 0;
+    }
+
+    // 2. Solar Wind Erosion on Magnetosphere Integrity
+    const totalThreats =
+      state.departments.solar_obs.threatCount +
+      state.departments.research_lab.threatCount * 1.5 +
+      state.departments.sat_defense.threatCount * 2.5;
+
+    // Degradation rate based on solar storm intensity
+    const erosion = 0.4 + totalThreats * 0.045;
+    state.magnetosphereIntegrity = Math.max(0.0, state.magnetosphereIntegrity - erosion);
+
+    // 3. Automated Department Auto-Deployment
+    Object.values(state.departments).forEach((dept) => {
+      if (dept.automated) {
+        const lastDeploy = state.lastAutoDeployAt[dept.id] || 0;
+        const cooldown = (dept.baseDuration - (dept.level - 1) * 0.3) * 1000 + 1000;
+
+        // Auto deploy if cooldown met and player has credits (or minimal balance)
+        if (now - lastDeploy >= cooldown && state.budget >= dept.baseCost) {
+          state.lastAutoDeployAt[dept.id] = now;
+          state.budget -= dept.baseCost;
+
+          const missionDuration = Math.max(1, dept.baseDuration - (dept.level - 1) * 0.4);
+          const missionId = `auto-${dept.id}-${now}`;
+
+          const mission = {
+            missionId,
+            tugId: missionId,
+            deptId: dept.id,
+            zoneId: dept.id,
+            duration: missionDuration,
+            startedAt: now,
+            isAutomated: true,
+            heroName:
+              dept.id === 'solar_obs'
+                ? 'AUTO-INTERCEPTOR'
+                : dept.id === 'research_lab'
+                  ? 'PLASMA DRONE'
+                  : 'DEFENSE SATELLITE',
+          };
+
+          state.activeMissions.push(mission);
+
+          setTimeout(() => {
+            const idx = state.activeMissions.findIndex((m) => m.missionId === missionId);
+            if (idx !== -1) state.activeMissions.splice(idx, 1);
+            if (state.gameOver) return;
+
+            const levelMultiplier = 1 + (dept.level - 1) * 0.45;
+            const payout = Math.round(dept.basePayout * levelMultiplier);
+            const integrityGain = parseFloat((dept.baseIntegrityRestore * (1 + (dept.level - 1) * 0.25)).toFixed(1));
+
+            state.budget += payout;
+            state.totalCreditsEarned += payout;
+            state.magnetosphereIntegrity = Math.min(100.0, state.magnetosphereIntegrity + integrityGain);
+            dept.threatCount = Math.max(0, dept.threatCount - 1);
+            state.totalEventsMitigated += 1;
+
+            socket.emit('mission_success', {
+              missionId,
+              tugId: missionId,
+              deptId: dept.id,
+              payout,
+              integrityGain,
+              clearedThreats: 1,
+              isAutomated: true,
+            });
+            socket.emit('tug_success', {
+              tugId: missionId,
+              zoneId: dept.id,
+              payout,
+              clearedDebris: 1,
+            });
+          }, missionDuration * 1000);
+        }
+      }
+    });
+
+    // 4. Hostile AI Taunts for Idle or Critical States
+    if (now - state.lastActionAt >= 12000 && now - state.lastIdleTauntAt >= 14000) {
       state.lastIdleTauntAt = now;
       socket.emit('boss_taunt', {
-        message: 'Are you dead, or just incompetent? Deploy a tug.',
+        message: AI_BOSS_TAUNTS.IDLE,
         intensity: 'high',
         timestamp: now,
       });
     }
 
-    // 4. High Risk Taunt (> 80%)
-    if (state.kesslerRisk >= 80 && now - state.lastRiskTauntAt >= 10000) {
+    if (state.magnetosphereIntegrity < 35 && now - state.lastRiskTauntAt >= 10000) {
       state.lastRiskTauntAt = now;
       socket.emit('boss_taunt', {
-        message: 'Orbit is turning into a blender. Do your job.',
-        intensity: 'high',
+        message: AI_BOSS_TAUNTS.CRITICAL_MAGNETOSPHERE,
+        intensity: 'critical',
         timestamp: now,
       });
     }
 
-    // 5. Fail state check: Risk >= 100% OR Budget < -$500
-    if (state.kesslerRisk >= 100) {
+    // 5. Fail State Checks
+    if (state.magnetosphereIntegrity <= 0) {
       state.gameOver = true;
-      state.gameOverReason = 'KESSLER SYNDROME TRIGGERED (100% RISK)';
+      state.gameOverReason = 'MAGNETOSPHERE COLLAPSE (0% INTEGRITY)';
       socket.emit('game_over', {
         reason: state.gameOverReason,
-        finalScore: state.totalCleared,
-        message: 'Orbit has collapsed into a cascading storm of shrapnel. You are terminated.',
+        finalScore: state.totalEventsMitigated,
+        message:
+          'Earth’s geomagnetic shield was stripped by extreme coronal mass ejections. Planetary power grids fried. Game Over.',
       });
       socket.emit('boss_taunt', {
-        message: 'You triggered Kessler syndrome. NASA has revoked your contractor license permanently.',
+        message: 'Planetary shield collapsed. Earth is fried. NASA will see you in space court, Director.',
         intensity: 'critical',
       });
-    } else if (state.budget < -500) {
+    } else if (state.budget < ECONOMY.INSOLVENCY_LIMIT) {
       state.gameOver = true;
-      state.gameOverReason = 'CORPORATE INSOLVENCY (DEBT EXCEEDED -$500)';
+      state.gameOverReason = 'AGENCY INSOLVENCY (DEBT EXCEEDED -500 CREDITS)';
       socket.emit('game_over', {
         reason: state.gameOverReason,
-        finalScore: state.totalCleared,
-        message: 'Your debt exceeded -$500. NASA bailiffs have repossessed your fleet.',
+        finalScore: state.totalEventsMitigated,
+        message: 'HELIOS has run out of funds. Space weather assets seized by creditors.',
       });
       socket.emit('boss_taunt', {
-        message: "You're bankrupt. Security is escorting your belongings to the space incinerator.",
+        message: 'Insolvency limit reached. The Sun wins. Pack up your office, Director.',
         intensity: 'critical',
       });
     }
 
-    // Broadcast updated state
+    // Broadcast state update
     socket.emit('state_update', {
       budget: state.budget,
-      kesslerRisk: parseFloat(state.kesslerRisk.toFixed(1)),
-      fleetLevel: state.fleetLevel,
-      deployTimeSeconds: Math.max(1, 6 - state.fleetLevel),
-      upgradeCost: 500,
-      zones: state.zones,
-      activeTugs: state.activeTugs,
+      fundingCredits: state.budget,
+      magnetosphereIntegrity: parseFloat(state.magnetosphereIntegrity.toFixed(1)),
+      kesslerRisk: parseFloat((100 - state.magnetosphereIntegrity).toFixed(1)),
+      departments: state.departments,
+      activeMissions: state.activeMissions,
+      activeTugs: state.activeMissions,
       gameOver: state.gameOver,
       gameOverReason: state.gameOverReason,
-      totalCleared: state.totalCleared,
+      totalEventsMitigated: state.totalEventsMitigated,
+      totalCleared: state.totalEventsMitigated,
+      totalCreditsEarned: state.totalCreditsEarned,
+      solarTelemetry: state.solarTelemetry,
     });
   }
-}, 3000);
+}, 2500);
 
 httpServer.listen(port, () => {
-  console.log(`[Kessler Tycoon Server] Online at http://localhost:${port}`);
-  console.log(`[Kessler Tycoon Server] Health check: http://localhost:${port}/api/health`);
+  console.log(`[HELIOS PROTOCOL Server] Online at http://localhost:${port}`);
+  console.log(`[HELIOS PROTOCOL Server] Health check: http://localhost:${port}/api/health`);
 });

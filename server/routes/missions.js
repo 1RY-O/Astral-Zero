@@ -5,35 +5,43 @@ const router = express.Router();
 const MISSIONS = [
   {
     id: 1,
-    name: 'Sector 01: First Contact',
-    taunt: 'Calibrate your pathetic tether. Try not to miss the broad side of a satellite.',
-    debrisCount: 7,
-    kesslerRiskBase: 14.2,
-    fuelBudget: 100,
+    name: 'Sector 01: Solar Flare Intercept (NASA SDO)',
+    classification: 'LIVE OBSERVATION',
+    taunt: 'Active Region 3664 has erupted with an X-class flare. Deploy interceptors before high-frequency radio blackouts spread.',
+    eventCount: 6,
+    threatLevel: 'M4.2 - X1.0 Solar Flare',
+    payout: 320,
+    scienceSource: 'NASA Solar Dynamics Observatory (SDO) Atmospheric Imaging Assembly',
   },
   {
     id: 2,
-    name: 'Sector 02: Two-Body Problem',
-    taunt: 'Slingshot or obliterate. Telemetry predicts your failure probability at 99.4%.',
-    debrisCount: 12,
-    kesslerRiskBase: 28.5,
-    fuelBudget: 90,
+    name: 'Sector 02: Coronal Mass Ejection Deflection (NASA DONKI)',
+    classification: 'SCIENTIFIC FORECAST',
+    taunt: 'DONKI telemetry confirms a halo CME traveling at 1,450 km/s. Deflect the interplanetary plasma front.',
+    eventCount: 4,
+    threatLevel: 'Fast CME Shock Front',
+    payout: 750,
+    scienceSource: 'NASA DONKI (Space Weather Database of Notifications, Knowledge, Information)',
   },
   {
     id: 3,
-    name: 'Sector 03: Clean Sweep',
-    taunt: 'Cascade mitigation protocol. Every prograde throw further enrages Mission Control.',
-    debrisCount: 18,
-    kesslerRiskBase: 42.0,
-    fuelBudget: 80,
+    name: 'Sector 03: Magnetosphere Dipole Reinforcement (NOAA SWPC)',
+    classification: 'SIMULATED HERO MISSION',
+    taunt: 'NOAA SWPC reports Kp 7.6. Dayside magnetopause compressed below geosynchronous orbit. Reinforce Earth dipole shields.',
+    eventCount: 3,
+    threatLevel: 'G3 Strong Geomagnetic Storm',
+    payout: 1600,
+    scienceSource: 'NOAA Space Weather Prediction Center (SWPC) Planetary K-Index',
   },
   {
     id: 4,
-    name: 'Sector 04: Kessler Run',
-    taunt: 'LEO density approaching supercritical threshold. Good luck, meatbag.',
-    debrisCount: 28,
-    kesslerRiskBase: 84.0,
-    fuelBudget: 70,
+    name: 'Sector 04: Carrington-Scale Superflare Protocol',
+    classification: 'EMERGENCY PROTOCOL',
+    taunt: 'Superstorm telemetry confirmed. Extreme radiation belt storm. All HELIOS superhero divisions converge!',
+    eventCount: 12,
+    threatLevel: 'G5 Extreme Solar Storm / Carrington Event',
+    payout: 5000,
+    scienceSource: 'NASA Heliophysics System Observatory & NOAA SWPC Combined Feed',
   },
 ];
 
@@ -41,7 +49,8 @@ const MISSIONS = [
 router.get('/', (req, res) => {
   res.json({
     status: 'ok',
-    aiPersona: 'CORRUPTED_FLIGHT_CONTROLLER_V4',
+    aiPersona: 'HELIOS_MISSION_CONTROL_AI_V5',
+    agency: 'HELIOS International Space-Protection Protocol',
     missions: MISSIONS,
   });
 });
@@ -52,7 +61,7 @@ router.get('/:id', (req, res) => {
   if (!mission) {
     return res.status(404).json({
       error: 'MISSION_NOT_FOUND',
-      message: 'Specified orbital sector corrupted or purged from memory.',
+      message: 'Specified space weather sector corrupted or purged from HELIOS telemetry.',
     });
   }
   return res.json({ status: 'ok', mission });

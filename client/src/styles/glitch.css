@@ -1,4 +1,4 @@
-/* Debris Darling / Kessler Tycoon — Corrupted Glitch & CRT CSS System */
+/* Debris Darling / HELIOS PROTOCOL — Corrupted Glitch, CRT & Cash Inc Tycoon CSS */
 
 @keyframes scanline {
   0% {
@@ -110,9 +110,9 @@
 
 /* Corrupted NASA Wireframe Box */
 .wireframe-box {
-  background: rgba(6, 17, 32, 0.9);
+  background: rgba(6, 17, 32, 0.92);
   border: 1px solid #6d4aff;
-  box-shadow: 0 0 10px rgba(109, 74, 255, 0.35), inset 0 0 8px rgba(109, 74, 255, 0.2);
+  box-shadow: 0 0 12px rgba(109, 74, 255, 0.35), inset 0 0 10px rgba(109, 74, 255, 0.15);
   position: relative;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -161,6 +161,170 @@
   animation: rgb-split 0.2s infinite;
 }
 
+/* =========================================================
+   CASH INC. / ROBLOX TYCOON CHUNKY & TACTILE BUTTONS
+   ========================================================= */
+
+.chunky-tactile-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(180deg, #38BDF8 0%, #0284C7 100%);
+  color: #FFFFFF;
+  border: 2px solid #7DD3FC;
+  border-radius: 6px;
+  padding: 12px 18px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 900;
+  font-size: 0.92rem;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 5px 0 #0369A1, 0 8px 16px rgba(56, 189, 248, 0.4);
+  transform: translateY(0);
+  transition: all 0.08s ease;
+  user-select: none;
+}
+
+.chunky-tactile-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 6px 0 #0369A1, 0 10px 22px rgba(56, 189, 248, 0.6);
+}
+
+.chunky-tactile-btn:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 #0369A1, 0 2px 6px rgba(56, 189, 248, 0.3);
+}
+
+.chunky-tactile-btn:disabled {
+  background: #334155;
+  border-color: #475569;
+  color: #94A3B8;
+  box-shadow: 0 3px 0 #1E293B;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Secondary Gold / Research Button */
+.chunky-gold-btn {
+  background: linear-gradient(180deg, #FBBF24 0%, #D97706 100%);
+  border-color: #FDE68A;
+  color: #111827;
+  text-shadow: none;
+  box-shadow: 0 5px 0 #B45309, 0 8px 16px rgba(251, 191, 36, 0.35);
+}
+
+.chunky-gold-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 6px 0 #B45309, 0 10px 22px rgba(251, 191, 36, 0.55);
+}
+
+.chunky-gold-btn:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 #B45309, 0 2px 6px rgba(251, 191, 36, 0.3);
+}
+
+/* Magenta / Satellite Defense Button */
+.chunky-pink-btn {
+  background: linear-gradient(180deg, #FF5FB0 0%, #E11D48 100%);
+  border-color: #FDA4AF;
+  color: #FFFFFF;
+  box-shadow: 0 5px 0 #BE123C, 0 8px 16px rgba(255, 95, 176, 0.4);
+}
+
+.chunky-pink-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 6px 0 #BE123C, 0 10px 22px rgba(255, 95, 176, 0.6);
+}
+
+.chunky-pink-btn:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 #BE123C, 0 2px 6px rgba(255, 95, 176, 0.3);
+}
+
+/* Automation Button */
+.auto-upgrade-btn {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid #10B981;
+  color: #10B981;
+  padding: 6px 12px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 800;
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auto-upgrade-btn:hover:not(:disabled) {
+  background: #10B981;
+  color: #061120;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.6);
+}
+
+.auto-upgrade-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: #475569;
+  color: #64748B;
+}
+
+.auto-badge-active {
+  background: rgba(16, 185, 129, 0.25);
+  border: 1px solid #10B981;
+  color: #34D399;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: pulse-auto 2s infinite ease-in-out;
+}
+
+@keyframes pulse-auto {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.85);
+  }
+}
+
+/* Floating Reward Cash Text */
+@keyframes float-reward-anim {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(0.9);
+  }
+  40% {
+    transform: translateY(-24px) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-56px) scale(1.0);
+  }
+}
+
+.float-reward-text {
+  position: absolute;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 900;
+  font-size: 1.15rem;
+  letter-spacing: 1px;
+  pointer-events: none;
+  z-index: 1000;
+  animation: float-reward-anim 1.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 /* Dangerous Action Button (Hot Pink) */
 .action-danger-btn {
   background: rgba(255, 45, 149, 0.15);
@@ -189,34 +353,6 @@
   color: #888;
 }
 
-/* Safe Action Button (Sky Blue) */
-.action-safe-btn {
-  background: rgba(56, 189, 248, 0.12);
-  color: #38BDF8;
-  border: 1px solid #38BDF8;
-  padding: 10px 16px;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-weight: 700;
-  font-size: 0.85rem;
-  letter-spacing: 1px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
-}
-
-.action-safe-btn:hover:not(:disabled) {
-  background: #38BDF8;
-  color: #061120;
-  box-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
-}
-
-.action-safe-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  border-color: #555;
-  color: #888;
-}
-
 /* Glitch Title text effects */
 .glitch-text {
   position: relative;
@@ -236,4 +372,35 @@
 
 .progress-active {
   animation: pulse-bar 1s infinite alternate;
+}
+
+/* NASA Classification Badges */
+.badge-live-obs {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid #38BDF8;
+  color: #7DD3FC;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.badge-scientific-forecast {
+  background: rgba(251, 191, 36, 0.18);
+  border: 1px solid #FBBF24;
+  color: #FDE68A;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.badge-hero-mission {
+  background: rgba(255, 45, 149, 0.18);
+  border: 1px solid #FF2D95;
+  color: #FF5FB0;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 1px;
 }

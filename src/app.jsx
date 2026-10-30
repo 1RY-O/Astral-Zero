@@ -21,6 +21,7 @@ import SpotlightCard from './components/SpotlightCard.jsx';
 import Magnet from './components/Magnet.jsx';
 import CountUp from './components/CountUp.jsx';
 import SplitText from './components/SplitText.jsx';
+import TouchControls from './components/TouchControls.jsx';
 
 const MAX_SUBSTEPS = 5;
 const DEFAULT_SEED = 2026;
@@ -62,6 +63,9 @@ export default function App() {
   const [levelIntro, setLevelIntro] = useState(true);
   const [report, setReport] = useState(null); // { state, score, deorbits, fuelBonus }
   const [hudState, setHudState] = useState({ score: 0, fuel: 100, chain: 0 });
+  const [isTouch] = useState(
+    () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window)
+  );
 
   const currentLevelDef = getLevelDef(levelId);
 
@@ -184,19 +188,39 @@ export default function App() {
       }
     };
 
+    let isTouchingPayload = false;
+
     const onPointerDown = (event) => {
       initAudio();
       try {
         const rect = canvas.getBoundingClientRect();
         const clientX = event.clientX - rect.left;
         const clientY = event.clientY - rect.top;
-        world.grab(clientX, clientY);
+        const grabbed = world.grab(clientX, clientY);
+        if (grabbed) {
+          isTouchingPayload = true;
+        }
       } catch (err) {
         console.error(err);
       }
     };
 
-    const onPointerUp = () => {};
+    const onPointerMove = (event) => {
+      if (isTouchingPayload && world.grabbed) {
+        const rect = canvas.getBoundingClientRect();
+        world.pointer.x = event.clientX - rect.left;
+        world.pointer.y = event.clientY - rect.top;
+      }
+    };
+
+    const onPointerUp = (event) => {
+      if (isTouchingPayload && world.grabbed) {
+        if (event.pointerType === 'touch' || isTouch) {
+          world.release();
+        }
+      }
+      isTouchingPayload = false;
+    };
 
     const onKeyDown = (event) => {
       initAudio();
@@ -229,6 +253,7 @@ export default function App() {
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('mousedown', onPointerDown);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('mouseup', onPointerUp);
@@ -241,6 +266,7 @@ export default function App() {
       activeRef.current = false;
       cancelAnimationFrame(rafRef.current);
       canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('mousedown', onPointerDown);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('mouseup', onPointerUp);
@@ -249,7 +275,7 @@ export default function App() {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [report]);
+  }, [report, isTouch]);
 
   return (
     <div
@@ -793,6 +819,15 @@ export default function App() {
             </div>
           </SpotlightCard>
         </div>
+      )}
+
+      {/* Mobile Touch Controls */}
+      {isTouch && (
+        <TouchControls
+          onThrustChange={(thrusting, dir) => worldRef.current?.setThrusting(thrusting, dir)}
+          onGrabNearest={() => worldRef.current?.grabNearest()}
+          onRelease={() => worldRef.current?.release()}
+        />
       )}
     </div>
   );

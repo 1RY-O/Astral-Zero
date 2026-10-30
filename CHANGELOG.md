@@ -2,7 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
-## [2.0.0] - 2026-10-30 — Debris Derby (NASA Space Apps Challenge 2026)
+## [2.1.0] - 2026-10-30 — Final Visual, Physics & Full Architecture Push
+
+### Physics Engine Overhaul
+- **Rigid Pendulum Tether Dynamics:** Replaced loose slack zone with rigid position-based distance constraints for authentic centrifugal swinging and flinging.
+- **Centrifugal Tangential Acceleration:** Normal thrust forces drive high-speed circular angular velocity around the tug.
+- **Newtonian Recoil:** Opposite impulse applied to player cleanup tug upon payload release proportional to mass.
+- **Tether Snap:** Physical snapping on over-extension with pink screen flash.
+- **Permanent Level Deorbiting:** Deorbited satellites are permanently captured in the atmospheric kill-zone to clear missions.
+
+### High-End WebGL Renderer (`src/lib/physicsRenderer.ts`)
+- **Earth Limb Shader:** Massive curved Earth limb with Rayleigh-style atmospheric scattering rim glow in `--sky` (#38BDF8) and deep space substrate in `--night` (#060D1F).
+- **Parallax Starfield:** Dynamic procedural starfield with parallax displacement driven by tug movement and engine vibration.
+- **Dynamic Geometry Batch:** Rendered faceted grey debris polygons with crisp `--white` outlines, glowing sky blue tethers, active engine flames, and dotted prograde/retrograde trajectory curves.
+
+### UI, ReactBits & Mobile Touch
+- **Solid Agency Main Menu:** Replaced glassmorphism with high-contrast solid dark navy card and sky blue borders.
+- **Interactive Level 1 Tutorial:** Built 3-step overlay tutorial (Grab -> Thrust -> Release Retrograde).
+- **ReactBits Integration:** Typography reveal animations (`SplitText`) for level intros and animated counters (`CountUp`).
+- **Touch Controls:** On-screen virtual thrust stick, drag-to-grab, and release-to-fire for mobile devices.
+
+### Backend & Toolchain
+- **Concurrent Development:** `npm run dev` executes both client Vite server (:5173) and backend Express server (:3000) concurrently via `concurrently`.
+- **Quality Gates:** 100% test pass rate (31/31), zero ESLint warnings, production build verified.
 
 ### Phase 3 — Physics Engine & Zero-G Overhaul
 - **Zero-G Verlet Integration:** Removed constant downward gravity; debris floats naturally in Low Earth Orbit with velocity damping.

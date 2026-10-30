@@ -20,13 +20,28 @@ The client simulation runs in a local **Hill's relative reference frame** (relat
 * **Position-Based Distance Constraints (PBD):**
   The momentum tether is resolved using 12 constraint iterations per step:
   $$\Delta \vec{x}_a = \vec{n} \cdot (|\vec{x}_b - \vec{x}_a| - L_{\text{target}}) \frac{w_a}{w_a + w_b}$$
-  where $w = 1/m$ is the inverse mass. The anchor tug is fixed ($w_{\text{tug}} = 0$). The tether remains slack below its rest length ($160\text{ px}$) and pulls taut up to its maximum reach cap ($300\text{ px}$).
+  where $w = 1/m$ is the inverse mass. The anchor tug acts as the pendulum center ($w_{\text{tug}} = 0$). When a payload is grappled, the tether locks into a rigid distance constraint that converts linear thrust into centrifugal swing like a sling.
+* **Newtonian Recoil & Flinging:**
+  On release, the payload flies off tangentially to its circular arc with its instantaneous velocity vector. An opposite recoil impulse is applied to the cleanup tug proportional to the payload mass.
 * **Fixed Timestep Accumulator:**
   Driven at $\Delta t = 1/60\text{ s}$ with a maximum of 5 substeps per rendered frame to prevent death spirals on frame drops.
 * **Atmospheric Kill-Zone:**
-  The bottom boundary represents Earth's upper atmospheric re-entry limb. Objects penetrating the limb are vaporized and deleted immediately without bouncing or sliding.
+  The bottom boundary represents Earth's upper atmospheric re-entry limb. Objects penetrating the limb are vaporized and deorbited immediately without bouncing or sliding.
 * **Circle-Circle Collision & Destructible Fragmentation:**
   Transverse high-speed collisions ($v_{\text{rel}} > 75\text{ px/s}$) trigger fragmentation of destructible objects into 3 smaller daughter fragments with distributed masses and momentum conservation.
+
+---
+
+## 2. WebGL Rendering Pipeline (`src/lib/physicsRenderer.ts`)
+
+* **Atmospheric Earth Limb Shader:**
+  A fragment shader models Earth's curvature at the bottom of the viewport with Rayleigh atmospheric scattering glow in `--sky` (#38BDF8) and an inner substrate in `--night` (#060D1F).
+* **Parallax Starfield:**
+  Procedurally generated multi-layer starfield with dynamic parallax tracking driven by tug displacement and thruster vibration.
+* **Dynamic Geometry Batch:**
+  Instanced/batched 2D line and polygon shaders render faceted grey debris polygons with crisp `--white` outlines, glowing sky blue tethers, active engine flames, and dotted prograde/retrograde trajectory vectors.
+* **Direct DOM HUD Synchronization:**
+  React mounts the canvas once. The rAF loop updates the HUD DOM elements (`scoreRef`, `fuelBarRef`, `targetPanelRef`) directly via refs, completely bypassing React's virtual DOM and re-rendering cycles.
 
 ---
 

@@ -75,10 +75,11 @@ Debris Derby utilizes a split-clock architecture to maintain real-time physical 
 |                              CLIENT (60 Hz)                             |
 |                                                                         |
 |  +--------------------+        +-------------------------------------+  |
-|  | React 18 Shell     |        | Canvas 2D Physics Renderer          |  |
+|  | React 18 Shell     |        | WebGL Physics Renderer              |  |
 |  | - ReactBits UI     |        | - Fixed-step Verlet (60 Hz)         |  |
-|  | - HUD & Menus      |<------>| - 12-iteration distance constraints |  |
-|  | - Mobile Touch     |        | - 90-step trajectory preview        |  |
+|  | - HUD & Menus      |<------>| - Rigid distance constraint solver  |  |
+|  | - Interactive Tuts |        | - Earth limb atmospheric shader     |  |
+|  | - Mobile Touch     |        | - Parallax starfield & trajectory   |  |
 |  | - Web Audio synth  |        | - Atmospheric kill-zone             |  |
 |  +--------------------+        +-------------------------------------+  |
 +-------------------------------------------------------------------------+

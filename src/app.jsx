@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { io } from 'socket.io-client';
 import { World, FIXED_DT } from './physics/world.js';
 import { drawWorld } from './physics/render.js';
 import { getLevelDef, LEVEL_DEFS } from './game/levels.js';
@@ -63,6 +64,7 @@ export default function App() {
   const [levelIntro, setLevelIntro] = useState(true);
   const [report, setReport] = useState(null); // { state, score, deorbits, fuelBonus }
   const [hudState, setHudState] = useState({ score: 0, fuel: 100, chain: 0 });
+  const [catalogStatus, setCatalogStatus] = useState('live');
   const [isTouch] = useState(
     () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window)
   );
@@ -102,6 +104,24 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     const { seed, level } = parseParams();
     setLevelId(level);
+
+    const socket = io({
+      autoConnect: true,
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 3,
+    });
+
+    socket.on('connected', (payload) => {
+      if (payload?.catalog?.catalogStatus) {
+        setCatalogStatus(payload.catalog.catalogStatus);
+      }
+    });
+
+    socket.on('ambient_catalog', (payload) => {
+      if (payload?.catalogStatus) {
+        setCatalogStatus(payload.catalogStatus);
+      }
+    });
 
     const world = new World({
       width: canvas.clientWidth || 800,
@@ -146,6 +166,23 @@ export default function App() {
               deorbits: world.deorbits.length,
               fuelPct: Math.round(world.fuel * 100),
             });
+            if (world.state === 'cleared' && socket && world.deorbits.length > 0) {
+              const payload = {
+                levelId: world.levelId || 1,
+                callsign: 'TUG PILOT',
+                seed: world.seed,
+                durationMs: Math.min(3600000, Math.round(world.gameTime * 1000)),
+                fuelUsed: Math.max(0, Math.min(1000000, Math.round((1 - world.fuel) * world.fuelMax))),
+                lingers: world.lingers,
+                deorbits: world.deorbits,
+                clientScore: world.score,
+              };
+              socket.emit('run_submit', payload, (res) => {
+                if (res?.ok) {
+                  console.log('[Run Submitted to Leaderboard]', res);
+                }
+              });
+            }
           }
         }
 
@@ -274,6 +311,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('visibilitychange', onVisibilityChange);
+      socket.disconnect();
     };
   }, [report, isTouch]);
 
@@ -384,6 +422,23 @@ export default function App() {
               }}
             >
               <CountUp to={hudState.fuel} />%
+            </span>
+          </div>
+
+          <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Celestrak live ambient TLE feed (2 Hz)">
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: catalogStatus === 'live' ? 'var(--sky-400)' : 'var(--pink-500)',
+                display: 'inline-block',
+              }}
+            />
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-numeric)' }}>
+              CELESTRAK {catalogStatus.toUpperCase()}
             </span>
           </div>
 

@@ -1,6 +1,7 @@
 /**
  * Kessler Tycoon — Dashboard Component
- * Corrupted CRT terminal with central real-time orbital canvas & Roblox Tycoon progression.
+ * Corrupted CRT terminal with central real-time orbital canvas,
+ * visceral screen crack effect, and robust Game Over / restart flow.
  * Built for the NASA International Space Apps Challenge 2026.
  */
 
@@ -33,6 +34,7 @@ export default function TycoonDashboard({
   onBackToMenu,
 }) {
   const [gameState, setGameState] = useState({
+    status: 'active', // 'active' | 'terminated'
     budget: 1000,
     kesslerRisk: 10.0,
     fleetLevel: 1,
@@ -50,6 +52,7 @@ export default function TycoonDashboard({
   });
 
   const [screenFlashed, setScreenFlashed] = useState(false);
+  const [purgeBurst, setPurgeBurst] = useState(false);
   const [floatingTexts, setFloatingTexts] = useState([]);
   const canvasRef = useRef(null);
 
@@ -138,8 +141,11 @@ export default function TycoonDashboard({
       setGameState((prev) => ({
         ...prev,
         ...payload,
+        status: payload.status || prev.status,
         zones: payload.zones || prev.zones,
         activeTugs: payload.activeTugs || prev.activeTugs,
+        gameOver: payload.gameOver !== undefined ? payload.gameOver : (payload.status === 'terminated'),
+        gameOverReason: payload.gameOverReason || payload.reason || prev.gameOverReason,
       }));
     }
 
@@ -156,28 +162,35 @@ export default function TycoonDashboard({
     function handlePurgeSuccess() {
       playPurgeAlarm();
       setScreenFlashed(true);
+      setPurgeBurst(true);
       setTimeout(() => setScreenFlashed(false), 350);
+      setTimeout(() => setPurgeBurst(false), 4000);
       spawnFloatingReward(`ORBIT PURGED!`, 250, 130, '#FF2D95');
+    }
+
+    function handleGameOver(payload) {
+      setGameState((prev) => ({
+        ...prev,
+        status: 'terminated',
+        gameOver: true,
+        gameOverReason: payload?.reason || 'Kessler Cascade Detected',
+        totalCleared: payload?.finalScore !== undefined ? payload.finalScore : prev.totalCleared,
+        budget: payload?.finalBudget !== undefined ? payload.finalBudget : prev.budget,
+      }));
     }
 
     socket.on('init_game', handleState);
     socket.on('state_update', handleState);
     socket.on('tug_success', handleTugSuccess);
     socket.on('purge_success', handlePurgeSuccess);
-    socket.on('game_over', (payload) => {
-      setGameState((prev) => ({
-        ...prev,
-        gameOver: true,
-        gameOverReason: payload?.reason || 'TERMINATED',
-      }));
-    });
+    socket.on('game_over', handleGameOver);
 
     return () => {
       socket.off('init_game', handleState);
       socket.off('state_update', handleState);
       socket.off('tug_success', handleTugSuccess);
       socket.off('purge_success', handlePurgeSuccess);
-      socket.off('game_over');
+      socket.off('game_over', handleGameOver);
     };
   }, [socket]);
 
@@ -423,42 +436,68 @@ export default function TycoonDashboard({
 
   // Actions
   const handleDeployTug = (zoneId) => {
-    if (!socket || gameState.gameOver) return;
+    if (!socket || gameState.gameOver || gameState.status === 'terminated') return;
     playTugLaunch();
     socket.emit('deploy_tug', { zone: zoneId });
   };
 
   const handleBuyAutoTug = (zoneId) => {
-    if (!socket || gameState.gameOver) return;
+    if (!socket || gameState.gameOver || gameState.status === 'terminated') return;
     playUpgradeDing();
     socket.emit('buy_auto_tug', { zoneId });
   };
 
   const handleUpgradeFleet = () => {
-    if (!socket || gameState.gameOver) return;
+    if (!socket || gameState.gameOver || gameState.status === 'terminated') return;
     playUpgradeDing();
     socket.emit('upgrade_fleet');
   };
 
   const handleEmergencyPurge = (zoneId) => {
-    if (!socket || gameState.gameOver) return;
+    if (!socket || gameState.gameOver || gameState.status === 'terminated') return;
     socket.emit('emergency_purge', { zone: zoneId });
   };
 
   const handleRestart = () => {
-    if (!socket) return;
-    socket.emit('restart_game');
+    if (socket) {
+      socket.emit('restart_game');
+    }
+    // Optimistic immediate reset so UI updates without waiting
+    setGameState((prev) => ({
+      ...prev,
+      status: 'active',
+      gameOver: false,
+      gameOverReason: null,
+      budget: 1000,
+      kesslerRisk: 10.0,
+      totalCleared: 0,
+      activeTugs: [],
+    }));
   };
 
   const risk = gameState.kesslerRisk;
   const isHighRisk = risk >= 80;
+  const isGameOver = gameState.status === 'terminated' || gameState.gameOver;
   const riskColor = getKesslerColor(risk);
   const isBroke = gameState.budget < 200;
   const isNegative = gameState.budget < 0;
 
+  // Screen Crack Visual State
+  // Stage 3: Game Over (Full Shattered Glass)
+  // Stage 2: Purge or Risk >= 90% (Spiderweb fracture)
+  // Stage 1: Risk >= 80% (Faint Hot Pink corner crack)
+  let crackMode = 'none';
+  if (isGameOver) {
+    crackMode = 'shattered';
+  } else if (purgeBurst || risk >= 90) {
+    crackMode = 'spiderweb';
+  } else if (risk >= 80) {
+    crackMode = 'faint';
+  }
+
   return (
     <div
-      className={`crt-overlay ${isHighRisk && !gameState.gameOver ? 'violent-shake' : ''}`}
+      className={`crt-overlay ${isHighRisk && !isGameOver ? 'violent-shake' : ''}`}
       style={{
         position: 'relative',
         width: '100vw',
@@ -473,6 +512,189 @@ export default function TycoonDashboard({
         flexDirection: 'column',
       }}
     >
+      {/* VISCERAL SCREEN CRACK OVERLAY (SVG) */}
+      {crackMode !== 'none' && (
+        <svg
+          className={`screen-crack ${
+            crackMode === 'shattered'
+              ? 'screen-crack-shattered'
+              : crackMode === 'spiderweb'
+                ? 'screen-crack-spiderweb'
+                : 'screen-crack-faint'
+          }`}
+          viewBox="0 0 1000 1000"
+          preserveAspectRatio="none"
+        >
+          <defs>
+            <filter id="glow-pink" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
+          {/* STAGE 1 & 2: Top-Right Corner Spiderweb Fracture */}
+          {(crackMode === 'faint' || crackMode === 'spiderweb' || crackMode === 'shattered') && (
+            <g filter="url(#glow-pink)">
+              {/* Primary corner fracture spine */}
+              <path
+                d="M 990 10 L 910 110 L 870 95 L 820 180 L 780 170 L 730 250 L 680 230 L 640 310"
+                stroke="#FF2D95"
+                strokeWidth="3"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M 990 10 L 910 110 L 870 95 L 820 180 L 780 170 L 730 250 L 680 230 L 640 310"
+                stroke="#FFFFFF"
+                strokeWidth="1.2"
+                fill="none"
+              />
+
+              {/* Branching lateral cracks */}
+              <path
+                d="M 910 110 L 950 190 L 890 260 L 870 340"
+                stroke="#FF2D95"
+                strokeWidth="2.2"
+                fill="none"
+                strokeLinecap="round"
+              />
+              <path
+                d="M 820 180 L 860 210 L 840 280 L 810 320 L 830 390"
+                stroke="#FF2D95"
+                strokeWidth="2"
+                fill="none"
+              />
+              <path
+                d="M 780 170 L 740 120 L 690 140 L 650 110"
+                stroke="#FF2D95"
+                strokeWidth="2"
+                fill="none"
+              />
+              <path
+                d="M 730 250 L 750 330 L 710 380 L 670 430"
+                stroke="#FF2D95"
+                strokeWidth="2.2"
+                fill="none"
+              />
+              <path
+                d="M 870 95 L 830 30"
+                stroke="#FF2D95"
+                strokeWidth="1.8"
+                fill="none"
+              />
+            </g>
+          )}
+
+          {/* STAGE 2 & 3: Extensive Spiderwebbing & Bottom-Left Impact */}
+          {(crackMode === 'spiderweb' || crackMode === 'shattered') && (
+            <g filter="url(#glow-pink)">
+              {/* Bottom-left secondary impact */}
+              <path
+                d="M 20 980 L 110 880 L 150 900 L 220 820 L 210 750 L 300 690 L 360 710 L 440 620"
+                stroke="#FF2D95"
+                strokeWidth="3"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M 20 980 L 110 880 L 150 900 L 220 820 L 210 750 L 300 690 L 360 710 L 440 620"
+                stroke="#FFFFFF"
+                strokeWidth="1.2"
+                fill="none"
+              />
+              <path
+                d="M 110 880 L 80 800 L 130 730 L 170 660"
+                stroke="#FF2D95"
+                strokeWidth="2.2"
+                fill="none"
+              />
+              <path
+                d="M 220 820 L 280 850 L 330 800 L 400 830"
+                stroke="#FF2D95"
+                strokeWidth="2"
+                fill="none"
+              />
+
+              {/* Transverse bridge cracks crossing the screen */}
+              <path
+                d="M 640 310 L 590 380 L 520 420 L 440 620"
+                stroke="#FF2D95"
+                strokeWidth="2.5"
+                fill="none"
+              />
+              <path
+                d="M 590 380 L 650 440 L 610 520 L 540 560"
+                stroke="#FF2D95"
+                strokeWidth="2"
+                fill="none"
+              />
+              <path
+                d="M 520 420 L 470 380 L 410 430 L 360 480"
+                stroke="#FF2D95"
+                strokeWidth="2"
+                fill="none"
+              />
+            </g>
+          )}
+
+          {/* STAGE 3: CATASTROPHIC SHATTERED GLASS (GAME OVER) */}
+          {crackMode === 'shattered' && (
+            <g filter="url(#glow-pink)">
+              {/* Center Impact Crater Polygonal Shards */}
+              <polygon
+                points="490,470 510,465 525,480 515,500 485,505 475,485"
+                fill="rgba(255, 45, 149, 0.35)"
+                stroke="#FFFFFF"
+                strokeWidth="2"
+              />
+              <polygon
+                points="470,450 530,440 555,485 535,530 470,540 445,490"
+                fill="rgba(255, 45, 149, 0.2)"
+                stroke="#FF2D95"
+                strokeWidth="2.5"
+              />
+              <polygon
+                points="430,410 570,390 610,490 570,590 430,600 390,490"
+                fill="rgba(255, 45, 149, 0.12)"
+                stroke="#FF2D95"
+                strokeWidth="2"
+              />
+
+              {/* Smashed Radials Across Entire 100% Screen */}
+              <path d="M 500 480 L 150 0" stroke="#FF2D95" strokeWidth="3" fill="none" />
+              <path d="M 500 480 L 600 0" stroke="#FF2D95" strokeWidth="2.5" fill="none" />
+              <path d="M 500 480 L 950 150" stroke="#FF2D95" strokeWidth="3" fill="none" />
+              <path d="M 500 480 L 1000 450" stroke="#FF2D95" strokeWidth="3.2" fill="none" />
+              <path d="M 500 480 L 980 800" stroke="#FF2D95" strokeWidth="3" fill="none" />
+              <path d="M 500 480 L 750 1000" stroke="#FF2D95" strokeWidth="2.5" fill="none" />
+              <path d="M 500 480 L 450 1000" stroke="#FF2D95" strokeWidth="3" fill="none" />
+              <path d="M 500 480 L 100 950" stroke="#FF2D95" strokeWidth="2.8" fill="none" />
+              <path d="M 500 480 L 0 650" stroke="#FF2D95" strokeWidth="3.2" fill="none" />
+              <path d="M 500 480 L 0 300" stroke="#FF2D95" strokeWidth="2.5" fill="none" />
+
+              {/* White cores for shattered lines */}
+              <path d="M 500 480 L 150 0" stroke="#FFFFFF" strokeWidth="1" fill="none" />
+              <path d="M 500 480 L 950 150" stroke="#FFFFFF" strokeWidth="1" fill="none" />
+              <path d="M 500 480 L 1000 450" stroke="#FFFFFF" strokeWidth="1.2" fill="none" />
+              <path d="M 500 480 L 980 800" stroke="#FFFFFF" strokeWidth="1" fill="none" />
+              <path d="M 500 480 L 450 1000" stroke="#FFFFFF" strokeWidth="1" fill="none" />
+              <path d="M 500 480 L 0 650" stroke="#FFFFFF" strokeWidth="1.2" fill="none" />
+
+              {/* Intersecting Glass Shards */}
+              <polygon points="500,480 320,240 450,220" fill="rgba(255, 255, 255, 0.08)" stroke="#FF2D95" strokeWidth="1.5" />
+              <polygon points="500,480 680,260 760,340" fill="rgba(255, 45, 149, 0.15)" stroke="#FF2D95" strokeWidth="1.5" />
+              <polygon points="500,480 720,640 620,740" fill="rgba(255, 255, 255, 0.08)" stroke="#FF2D95" strokeWidth="1.5" />
+              <polygon points="500,480 340,710 260,610" fill="rgba(255, 45, 149, 0.15)" stroke="#FF2D95" strokeWidth="1.5" />
+            </g>
+          )}
+        </svg>
+      )}
+
       {/* Screen flash on critical events */}
       {screenFlashed && (
         <div
@@ -838,7 +1060,7 @@ export default function TycoonDashboard({
                         : 'chunky-deploy-btn chunky-deploy-geo'
                   }
                   onClick={() => handleDeployTug(zone.id)}
-                  disabled={gameState.budget < 200 || zone.debris === 0 || gameState.gameOver}
+                  disabled={gameState.budget < 200 || zone.debris === 0 || isGameOver}
                   style={{ width: '100%', marginBottom: '8px' }}
                 >
                   🚀 DEPLOY TUG ($200) [{gameState.deployTimeSeconds}s]
@@ -857,7 +1079,7 @@ export default function TycoonDashboard({
                     <button
                       className="upgrade-goal-btn"
                       onClick={() => handleBuyAutoTug(zone.id)}
-                      disabled={!canAffordAuto || gameState.gameOver}
+                      disabled={!canAffordAuto || isGameOver}
                     >
                       {canAffordAuto
                         ? `BUY AUTO-TUG ($${zone.autoCost.toLocaleString()})`
@@ -899,7 +1121,7 @@ export default function TycoonDashboard({
               key={z}
               className="action-danger-btn"
               onClick={() => handleEmergencyPurge(z)}
-              disabled={gameState.budget < 1000 || gameState.gameOver}
+              disabled={gameState.budget < 1000 || isGameOver}
             >
               PURGE {z} ($1,000)
             </button>
@@ -907,92 +1129,88 @@ export default function TycoonDashboard({
         </div>
       </div>
 
-      {/* GAME OVER SCREEN WITH CRT SHUTDOWN ANIMATION */}
-      {gameState.gameOver && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            backgroundColor: 'rgba(6, 17, 32, 0.96)',
-            zIndex: 10000,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '2rem',
-            textAlign: 'center',
-          }}
-        >
-          <div className="crt-shutdown" style={{ maxWidth: '650px', width: '100%' }}>
+      {/* VISCERAL FULL-SCREEN GAME OVER / TERMINATION SCREEN */}
+      {isGameOver && (
+        <div className="gameover-overlay">
+          <div className="gameover-box glitch-aberration">
             <div
-              className="wireframe-box glitch-aberration"
               style={{
-                borderColor: '#FF2D95',
-                padding: '2.5rem',
-                boxShadow: '0 0 30px rgba(255, 45, 149, 0.6)',
+                fontSize: '0.85rem',
+                letterSpacing: '3px',
+                color: '#FF2D95',
+                marginBottom: '1rem',
+                fontWeight: 800,
+                textTransform: 'uppercase',
               }}
             >
-              <div
-                style={{
-                  fontSize: '0.85rem',
-                  letterSpacing: '3px',
-                  color: '#FF2D95',
-                  marginBottom: '1rem',
-                  fontWeight: 700,
-                }}
-              >
-                [TERMINATION PROTOCOL EXECUTED // NASA FLIGHT CONTROL]
-              </div>
-
-              <h1
-                style={{
-                  fontSize: '2.4rem',
-                  color: '#FFFFFF',
-                  margin: '0 0 1rem 0',
-                  textShadow: '-2px 0 #FF2D95, 2px 0 #6d4aff',
-                }}
-              >
-                CONTRACTOR TERMINATED
-              </h1>
-
-              <div
-                style={{
-                  fontSize: '1rem',
-                  color: '#FFC107',
-                  marginBottom: '1.2rem',
-                  lineHeight: 1.5,
-                }}
-              >
-                REASON: {gameState.gameOverReason}
-              </div>
-
-              <div
-                style={{
-                  fontSize: '0.85rem',
-                  color: 'rgba(255, 255, 255, 0.7)',
-                  marginBottom: '1.8rem',
-                }}
-              >
-                Total Debris Cleared Before Collapse: <strong>{gameState.totalCleared}</strong>
-              </div>
-
-              <button
-                className="glitch-btn"
-                onClick={handleRestart}
-                style={{
-                  backgroundColor: '#FF2D95',
-                  borderColor: '#FF2D95',
-                  color: '#FFFFFF',
-                  padding: '14px 28px',
-                  fontSize: '1.1rem',
-                }}
-              >
-                REAPPLY FOR CONTRACT ($1,000 SEED)
-              </button>
+              [SYSTEM: TERMINATION PROTOCOL // NASA FLIGHT CONTROL]
             </div>
+
+            <h1
+              className="glitch-text"
+              style={{
+                fontSize: 'clamp(2rem, 5vw, 3.2rem)',
+                color: '#FFFFFF',
+                margin: '0 0 1.2rem 0',
+                letterSpacing: '3px',
+                textShadow: '-3px 0 #FF2D95, 3px 0 #6d4aff',
+              }}
+            >
+              CONTRACT TERMINATED
+            </h1>
+
+            <div
+              style={{
+                fontSize: '1.15rem',
+                color: '#FFC107',
+                marginBottom: '1.5rem',
+                fontWeight: 700,
+              }}
+            >
+              Reason: {gameState.gameOverReason || (gameState.kesslerRisk >= 100 ? 'Kessler Cascade Detected' : 'Insolvency')}
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '12px',
+                background: 'rgba(6, 17, 32, 0.8)',
+                border: '1px solid rgba(255, 45, 149, 0.4)',
+                padding: '14px 18px',
+                marginBottom: '1.8rem',
+                textAlign: 'center',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.65)' }}>
+                  TOTAL DEBRIS CLEARED
+                </div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#38BDF8', marginTop: '4px' }}>
+                  {gameState.totalCleared}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.65)' }}>
+                  FINAL BUDGET
+                </div>
+                <div
+                  style={{
+                    fontSize: '1.4rem',
+                    fontWeight: 900,
+                    color: gameState.budget < 0 ? '#FF2D95' : '#4CAF50',
+                    marginTop: '4px',
+                  }}
+                >
+                  ${gameState.budget.toLocaleString()}
+                </div>
+              </div>
+            </div>
+
+            {/* Massive Hot Pink Button */}
+            <button className="restart-massive-btn" onClick={handleRestart}>
+              RE-INITIALIZE CONTRACT
+            </button>
           </div>
         </div>
       )}

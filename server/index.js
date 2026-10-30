@@ -77,10 +77,13 @@ function getInitialZones() {
 
 // Map socketId -> player game state
 const players = new Map();
+// Map socketId -> Set of active setTimeout IDs
+const playerTimeouts = new Map();
 
 function createPlayerState(socketId) {
   return {
     socketId,
+    status: 'active', // 'active' | 'terminated'
     budget: ECONOMY.INITIAL_BUDGET,
     kesslerRisk: 10.0,
     fleetLevel: 1,
@@ -98,10 +101,35 @@ function createPlayerState(socketId) {
   };
 }
 
+function clearAllPlayerTimeouts(socketId) {
+  const timers = playerTimeouts.get(socketId);
+  if (timers) {
+    timers.forEach((t) => clearTimeout(t));
+    timers.clear();
+  }
+}
+
+function registerPlayerTimeout(socketId, timerId) {
+  let timers = playerTimeouts.get(socketId);
+  if (!timers) {
+    timers = new Set();
+    playerTimeouts.set(socketId, timers);
+  }
+  timers.add(timerId);
+}
+
+function unregisterPlayerTimeout(socketId, timerId) {
+  const timers = playerTimeouts.get(socketId);
+  if (timers) {
+    timers.delete(timerId);
+  }
+}
+
 io.on('connection', (socket) => {
   console.log(`[Kessler Tycoon Server] Contractor connected: ${socket.id}`);
   const state = createPlayerState(socket.id);
   players.set(socket.id, state);
+  playerTimeouts.set(socket.id, new Set());
 
   function emitTaunt(message, intensity = 'medium') {
     socket.emit('boss_taunt', { message, intensity, timestamp: Date.now() });
@@ -109,6 +137,7 @@ io.on('connection', (socket) => {
 
   function emitState() {
     socket.emit('state_update', {
+      status: state.status,
       budget: state.budget,
       kesslerRisk: parseFloat(state.kesslerRisk.toFixed(1)),
       fleetLevel: state.fleetLevel,
@@ -122,8 +151,56 @@ io.on('connection', (socket) => {
     });
   }
 
+  // Check fail conditions immediately on any state change
+  function checkFailState() {
+    if (state.gameOver || state.status === 'terminated') return true;
+
+    if (state.kesslerRisk >= 100) {
+      state.status = 'terminated';
+      state.gameOver = true;
+      state.gameOverReason = 'Kessler Cascade Detected';
+      clearAllPlayerTimeouts(socket.id);
+      socket.emit('game_over', {
+        status: 'terminated',
+        reason: state.gameOverReason,
+        finalScore: state.totalCleared,
+        finalBudget: state.budget,
+        message: 'Orbit has collapsed into a cascading storm of shrapnel. You are terminated.',
+      });
+      socket.emit('boss_taunt', {
+        message: 'You triggered Kessler syndrome. NASA has revoked your contractor license permanently.',
+        intensity: 'critical',
+      });
+      emitState();
+      return true;
+    }
+
+    if (state.budget < ECONOMY.INSOLVENCY_LIMIT) {
+      state.status = 'terminated';
+      state.gameOver = true;
+      state.gameOverReason = 'Insolvency';
+      clearAllPlayerTimeouts(socket.id);
+      socket.emit('game_over', {
+        status: 'terminated',
+        reason: state.gameOverReason,
+        finalScore: state.totalCleared,
+        finalBudget: state.budget,
+        message: 'Your debt exceeded -$500. NASA bailiffs have repossessed your fleet.',
+      });
+      socket.emit('boss_taunt', {
+        message: "You're bankrupt. Security is escorting your belongings to the space incinerator.",
+        intensity: 'critical',
+      });
+      emitState();
+      return true;
+    }
+
+    return false;
+  }
+
   // Initial connection greeting
   socket.emit('init_game', {
+    status: state.status,
     budget: state.budget,
     kesslerRisk: state.kesslerRisk,
     fleetLevel: state.fleetLevel,
@@ -136,7 +213,7 @@ io.on('connection', (socket) => {
 
   // Trigger Tug Deployment function
   function deployTugToZone(zoneId, isAuto = false) {
-    if (state.gameOver) return;
+    if (checkFailState()) return;
 
     const zone = state.zones[zoneId];
     if (!zone) return;
@@ -146,8 +223,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (state.budget < ECONOMY.TUG_COST) {
-      if (!isAuto) emitTaunt('Insufficient funds to deploy orbital tug.', 'medium');
+    if (state.budget <= ECONOMY.INSOLVENCY_LIMIT) {
+      checkFailState();
       return;
     }
 
@@ -165,6 +242,7 @@ io.on('connection', (socket) => {
       isAuto,
     });
 
+    if (checkFailState()) return;
     emitState();
 
     if (state.budget < 100 && Date.now() - state.lastBrokeTauntAt > 10000) {
@@ -173,13 +251,16 @@ io.on('connection', (socket) => {
     }
 
     // Schedule tug completion
-    setTimeout(() => {
+    let timerId = null;
+    timerId = setTimeout(() => {
+      unregisterPlayerTimeout(socket.id, timerId);
+
       const idx = state.activeTugs.findIndex((t) => t.tugId === tugId);
       if (idx !== -1) {
         state.activeTugs.splice(idx, 1);
       }
 
-      if (state.gameOver) return;
+      if (state.gameOver || state.status === 'terminated') return;
 
       if (zone.debris > 0) {
         zone.debris -= 1;
@@ -203,6 +284,8 @@ io.on('connection', (socket) => {
 
       emitState();
     }, deployDuration * 1000);
+
+    registerPlayerTimeout(socket.id, timerId);
   }
 
   // Socket listener: deploy_tug
@@ -214,7 +297,7 @@ io.on('connection', (socket) => {
   // Socket listener: buy_auto_tug
   socket.on('buy_auto_tug', (payload = {}) => {
     state.lastActionAt = Date.now();
-    if (state.gameOver) return;
+    if (checkFailState()) return;
 
     const zoneId = payload.zoneId || payload.zone || 'LEO';
     const zone = state.zones[zoneId];
@@ -240,7 +323,7 @@ io.on('connection', (socket) => {
   // Socket listener: upgrade_fleet
   socket.on('upgrade_fleet', () => {
     state.lastActionAt = Date.now();
-    if (state.gameOver) return;
+    if (checkFailState()) return;
 
     if (state.budget < state.upgradeCost) {
       emitTaunt('Insufficient funds for fleet upgrade.', 'medium');
@@ -263,14 +346,9 @@ io.on('connection', (socket) => {
   // Socket listener: emergency_purge
   socket.on('emergency_purge', (payload = {}) => {
     state.lastActionAt = Date.now();
-    if (state.gameOver) return;
+    if (checkFailState()) return;
 
     const purgeCost = ECONOMY.PURGE_COST;
-    if (state.budget < purgeCost) {
-      emitTaunt('Emergency laser burn requires $1,000 cash upfront.', 'medium');
-      return;
-    }
-
     const zoneId = payload.zone || 'LEO';
     const zone = state.zones[zoneId];
     if (!zone) return;
@@ -294,27 +372,54 @@ io.on('connection', (socket) => {
       emitTaunt(AI_BOSS_TAUNTS.HIGH_RISK, 'high');
     }
 
+    if (checkFailState()) return;
     emitState();
   });
 
-  // Socket listener: restart_game
+  // Socket listener: restart_game (Full reset of all timeouts and game state)
   socket.on('restart_game', () => {
+    console.log(`[Kessler Tycoon Server] Resetting game for contractor: ${socket.id}`);
+    clearAllPlayerTimeouts(socket.id);
+
     const fresh = createPlayerState(socket.id);
     players.set(socket.id, fresh);
     fresh.lastActionAt = Date.now();
+
     socket.emit('init_game', {
+      status: 'active',
       budget: fresh.budget,
       kesslerRisk: fresh.kesslerRisk,
       fleetLevel: fresh.fleetLevel,
       deployTimeSeconds: 5,
       upgradeCost: fresh.upgradeCost,
       zones: fresh.zones,
+      activeTugs: [],
+      gameOver: false,
+      gameOverReason: null,
+      totalCleared: 0,
     });
-    emitTaunt("Telemetry reset. Try not to embarrass NASA this time.", 'medium');
+
+    socket.emit('state_update', {
+      status: 'active',
+      budget: fresh.budget,
+      kesslerRisk: fresh.kesslerRisk,
+      fleetLevel: fresh.fleetLevel,
+      deployTimeSeconds: 5,
+      upgradeCost: fresh.upgradeCost,
+      zones: fresh.zones,
+      activeTugs: [],
+      gameOver: false,
+      gameOverReason: null,
+      totalCleared: 0,
+    });
+
+    emitTaunt("Contract re-initialized. Telemetry reset. Don't blow it this time.", 'medium');
   });
 
   socket.on('disconnect', () => {
     console.log(`[Kessler Tycoon Server] Contractor disconnected: ${socket.id}`);
+    clearAllPlayerTimeouts(socket.id);
+    playerTimeouts.delete(socket.id);
     players.delete(socket.id);
   });
 });
@@ -324,7 +429,7 @@ setInterval(() => {
   const now = Date.now();
 
   for (const [socketId, state] of players.entries()) {
-    if (state.gameOver) continue;
+    if (state.gameOver || state.status === 'terminated') continue;
 
     const socket = io.sockets.sockets.get(socketId);
     if (!socket) continue;
@@ -349,7 +454,7 @@ setInterval(() => {
         const lastDeploy = state.lastAutoTugAt[zone.id] || 0;
         const cooldown = (Math.max(1.2, 4.5 - (state.fleetLevel - 1) * 0.7) + 0.8) * 1000;
 
-        if (now - lastDeploy >= cooldown && state.budget >= ECONOMY.TUG_COST) {
+        if (now - lastDeploy >= cooldown && state.budget > ECONOMY.INSOLVENCY_LIMIT) {
           state.lastAutoTugAt[zone.id] = now;
           state.budget -= ECONOMY.TUG_COST;
 
@@ -364,10 +469,13 @@ setInterval(() => {
             isAuto: true,
           });
 
-          setTimeout(() => {
+          let timerId = null;
+          timerId = setTimeout(() => {
+            unregisterPlayerTimeout(socketId, timerId);
+
             const idx = state.activeTugs.findIndex((t) => t.tugId === tugId);
             if (idx !== -1) state.activeTugs.splice(idx, 1);
-            if (state.gameOver) return;
+            if (state.gameOver || state.status === 'terminated') return;
 
             if (zone.debris > 0) {
               zone.debris -= 1;
@@ -386,6 +494,8 @@ setInterval(() => {
               });
             }
           }, deployDuration * 1000);
+
+          registerPlayerTimeout(socketId, timerId);
         }
       }
     });
@@ -412,11 +522,15 @@ setInterval(() => {
 
     // 6. Fail State Check: Risk >= 100% OR Budget < -$500
     if (state.kesslerRisk >= 100) {
+      state.status = 'terminated';
       state.gameOver = true;
-      state.gameOverReason = 'KESSLER SYNDROME TRIGGERED (100% RISK)';
+      state.gameOverReason = 'Kessler Cascade Detected';
+      clearAllPlayerTimeouts(socketId);
       socket.emit('game_over', {
+        status: 'terminated',
         reason: state.gameOverReason,
         finalScore: state.totalCleared,
+        finalBudget: state.budget,
         message: 'Orbit has collapsed into a cascading storm of shrapnel. You are terminated.',
       });
       socket.emit('boss_taunt', {
@@ -424,11 +538,15 @@ setInterval(() => {
         intensity: 'critical',
       });
     } else if (state.budget < ECONOMY.INSOLVENCY_LIMIT) {
+      state.status = 'terminated';
       state.gameOver = true;
-      state.gameOverReason = 'CORPORATE INSOLVENCY (DEBT EXCEEDED -$500)';
+      state.gameOverReason = 'Insolvency';
+      clearAllPlayerTimeouts(socketId);
       socket.emit('game_over', {
+        status: 'terminated',
         reason: state.gameOverReason,
         finalScore: state.totalCleared,
+        finalBudget: state.budget,
         message: 'Your debt exceeded -$500. NASA bailiffs have repossessed your fleet.',
       });
       socket.emit('boss_taunt', {
@@ -439,6 +557,7 @@ setInterval(() => {
 
     // Broadcast updated state
     socket.emit('state_update', {
+      status: state.status,
       budget: state.budget,
       kesslerRisk: parseFloat(state.kesslerRisk.toFixed(1)),
       fleetLevel: state.fleetLevel,

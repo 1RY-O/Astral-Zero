@@ -1,4 +1,4 @@
-/* Kessler Tycoon — Corrupted Glitch, CRT & Tactile Tycoon CSS */
+/* Kessler Tycoon — Corrupted Glitch, CRT & Visceral Screen Crack CSS */
 
 @keyframes scanline {
   0% {
@@ -66,34 +66,6 @@
   animation: violent-shake 0.35s ease-in-out infinite;
 }
 
-/* CRT Shutdown Animation for Fail State */
-@keyframes crt-shutdown {
-  0% {
-    transform: scale(1, 1);
-    filter: brightness(1);
-    opacity: 1;
-  }
-  40% {
-    transform: scale(1, 0.005);
-    filter: brightness(3);
-    opacity: 0.9;
-  }
-  80% {
-    transform: scale(0, 0.005);
-    filter: brightness(5);
-    opacity: 0.8;
-  }
-  100% {
-    transform: scale(0, 0);
-    filter: brightness(0);
-    opacity: 0;
-  }
-}
-
-.crt-shutdown {
-  animation: crt-shutdown 0.75s cubic-bezier(0.23, 1, 0.32, 1) forwards;
-}
-
 /* Flash Hot Pink Alert */
 .flash-hotpink {
   animation: flash-hotpink-anim 0.4s ease-out;
@@ -106,6 +78,124 @@
   100% {
     background-color: transparent;
   }
+}
+
+/* =========================================================
+   VISCERAL SCREEN CRACK & SHATTERED GLASS EFFECT
+   ========================================================= */
+
+.screen-crack {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9990;
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+.screen-crack-faint {
+  opacity: 0.7;
+  filter: drop-shadow(0 0 6px #FF2D95);
+}
+
+.screen-crack-spiderweb {
+  opacity: 0.92;
+  filter: drop-shadow(0 0 10px #FF2D95) drop-shadow(0 0 2px #FFFFFF);
+  animation: pulse-crack 1.5s infinite alternate ease-in-out;
+}
+
+.screen-crack-shattered {
+  opacity: 1;
+  filter: drop-shadow(0 0 14px #FF2D95) drop-shadow(0 0 4px #FFFFFF);
+  background: radial-gradient(circle at 50% 50%, rgba(255, 45, 149, 0.15) 0%, rgba(6, 17, 32, 0.6) 80%);
+  animation: violent-shake 0.35s infinite, rgb-split 0.25s infinite;
+}
+
+@keyframes pulse-crack {
+  0% {
+    opacity: 0.75;
+    filter: drop-shadow(0 0 8px #FF2D95);
+  }
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 14px #FF2D95) drop-shadow(0 0 3px #FFFFFF);
+  }
+}
+
+/* =========================================================
+   GAME OVER MODAL (NON-DISAPPEARING & VISCERAL)
+   ========================================================= */
+
+.gameover-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(6, 17, 32, 0.94);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  box-sizing: border-box;
+  animation: gameover-intro 0.25s ease-out;
+}
+
+@keyframes gameover-intro {
+  0% {
+    opacity: 0;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.gameover-box {
+  background: rgba(8, 20, 38, 0.98);
+  border: 3px solid #FF2D95;
+  box-shadow: 0 0 50px rgba(255, 45, 149, 0.75), inset 0 0 30px rgba(255, 45, 149, 0.3);
+  padding: 2.5rem 3rem;
+  max-width: 680px;
+  width: 100%;
+  text-align: center;
+  position: relative;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.restart-massive-btn {
+  background: #FF2D95;
+  border: 2px solid #FDA4AF;
+  color: #FFFFFF;
+  padding: 18px 42px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 900;
+  font-size: 1.35rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 6px;
+  box-shadow: 0 6px 0 #9F1239, 0 10px 30px rgba(255, 45, 149, 0.8);
+  transition: all 0.08s ease;
+  user-select: none;
+  display: inline-block;
+  margin-top: 1rem;
+}
+
+.restart-massive-btn:hover {
+  background: #FF5FB0;
+  box-shadow: 0 8px 0 #9F1239, 0 14px 40px rgba(255, 45, 149, 1);
+  filter: brightness(1.15);
+}
+
+.restart-massive-btn:active {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 #9F1239, 0 4px 10px rgba(255, 45, 149, 0.5);
 }
 
 /* Corrupted NASA Wireframe Box */
@@ -361,34 +451,6 @@
 }
 
 .action-danger-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  border-color: #555;
-  color: #888;
-}
-
-/* Safe Action Button (Sky Blue) */
-.action-safe-btn {
-  background: rgba(56, 189, 248, 0.12);
-  color: #38BDF8;
-  border: 1px solid #38BDF8;
-  padding: 10px 16px;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-weight: 700;
-  font-size: 0.85rem;
-  letter-spacing: 1px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
-}
-
-.action-safe-btn:hover:not(:disabled) {
-  background: #38BDF8;
-  color: #061120;
-  box-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
-}
-
-.action-safe-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   border-color: #555;

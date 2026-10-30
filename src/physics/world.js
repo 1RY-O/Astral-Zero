@@ -274,8 +274,10 @@ export class World {
     }
     if (!best) return false;
 
+    const dist = Math.hypot(best.x - ax, best.y - ay);
+    const lockedLength = Math.min(TETHER_MAX, Math.max(50, dist));
     this.grabbed = best;
-    this.tether = { rest: TETHER_REST, max: TETHER_MAX };
+    this.tether = { length: lockedLength, rest: lockedLength, max: TETHER_MAX };
     this.tension = 0;
     playGrab();
     return true;
@@ -297,8 +299,10 @@ export class World {
     }
     if (!best) return false;
 
+    const dist = Math.hypot(best.x - ax, best.y - ay);
+    const lockedLength = Math.min(TETHER_MAX, Math.max(50, dist));
     this.grabbed = best;
-    this.tether = { rest: TETHER_REST, max: TETHER_MAX };
+    this.tether = { length: lockedLength, rest: lockedLength, max: TETHER_MAX };
     this.tension = 0;
     playGrab();
     return true;
@@ -425,7 +429,7 @@ export class World {
           const vx = (g.x - g.px) / FIXED_DT;
           const vy = (g.y - g.py) / FIXED_DT;
           const dot = vx * tx + vy * ty;
-          const sign = dot >= 0 ? 1 : -1;
+          const sign = Math.abs(dot) > 2 ? (dot >= 0 ? 1 : -1) : 1;
           g.ax += tx * sign * THRUST_ACC;
           g.ay += ty * sign * THRUST_ACC;
         }
@@ -521,21 +525,26 @@ export class World {
           this.freezeFrames = 6; // 100ms freeze
         }
 
-        // Respawn particle in upper orbit so 7 debris objects always float in zero-g sandbox
-        const angle = this.rng() * TAU;
-        const reach = 70 + this.rng() * 140;
-        const cx = this.width * 0.5;
-        const anchorY = this.anchor ? this.anchor.y : this.height * 0.22;
-        p.x = Math.min(Math.max(cx + Math.cos(angle) * reach, 40), this.width - 40);
-        p.y = Math.min(Math.max(anchorY + Math.sin(angle) * reach, 40), this.height * 0.48);
-        const speed = 20 + this.rng() * 40;
-        const vx = -Math.sin(angle) * speed;
-        const vy = Math.cos(angle) * speed;
-        p.px = p.x - vx * FIXED_DT;
-        p.py = p.y - vy * FIXED_DT;
-        p.ax = 0;
-        p.ay = 0;
-        p.releaseDot = -1;
+        if (this.levelId !== null) {
+          // In levels, deorbited satellite is permanently cleared
+          this.particles.splice(i, 1);
+        } else {
+          // In sandbox mode only, respawn particle in upper orbit so debris swarm stays active
+          const angle = this.rng() * TAU;
+          const reach = 70 + this.rng() * 140;
+          const cx = this.width * 0.5;
+          const anchorY = this.anchor ? this.anchor.y : this.height * 0.22;
+          p.x = Math.min(Math.max(cx + Math.cos(angle) * reach, 40), this.width - 40);
+          p.y = Math.min(Math.max(anchorY + Math.sin(angle) * reach, 40), this.height * 0.48);
+          const speed = 20 + this.rng() * 40;
+          const vx = -Math.sin(angle) * speed;
+          const vy = Math.cos(angle) * speed;
+          p.px = p.x - vx * FIXED_DT;
+          p.py = p.y - vy * FIXED_DT;
+          p.ax = 0;
+          p.ay = 0;
+          p.releaseDot = -1;
+        }
       }
     }
 
@@ -560,14 +569,15 @@ export class World {
   solveTether() {
     const a = this.anchor;
     const b = this.grabbed;
-    const { rest: restLength, max: maxLength } = this.tether;
+    if (!a || !b || !this.tether) return;
+    const { length: lockedLength, max: maxLength } = this.tether;
 
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const dist = Math.hypot(dx, dy) || 1e-6;
 
     // TETHER SNAP: If distance > maxLength, snap the tether and flash the screen --pink
-    if (dist > maxLength + 5) {
+    if (dist > maxLength + 8) {
       this.release();
       this.flashPink = 1.0;
       this.screenShake = 16;
@@ -575,24 +585,13 @@ export class World {
       return;
     }
 
-    if (dist <= restLength) {
-      this.tension = 0;
-      return;
-    }
-
-    const target = dist > maxLength ? maxLength : restLength;
+    // Rigid pendulum distance constraint
+    const target = lockedLength || maxLength;
     const diff = (dist - target) / dist;
-    const wa = a.invMass;
-    const wb = b.invMass;
-    const wsum = wa + wb;
-    if (wsum > 0) {
-      a.x += dx * diff * (wa / wsum);
-      a.y += dy * diff * (wa / wsum);
-      b.x -= dx * diff * (wb / wsum);
-      b.y -= dy * diff * (wb / wsum);
-    }
+    b.x -= dx * diff;
+    b.y -= dy * diff;
 
-    this.tension = dist - target;
+    this.tension = Math.max(0, dist - target);
   }
 
   solveCollisions() {

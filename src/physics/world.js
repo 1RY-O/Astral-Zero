@@ -9,6 +9,7 @@
 
 import { getLevelDef } from '../game/levels.js';
 import { playGrab, playWhip, playThrust, playImpact, playDeorbit, playCascade } from '../game/audio.js';
+import { PALETTE } from '../ui/tokens.js';
 
 const FIXED_DT = 1 / 60;
 const MAX_SUBSTEPS = 5;
@@ -216,7 +217,7 @@ export class World {
     }
   }
 
-  addFloatingText(text, x, y, color = '#38BDF8') {
+  addFloatingText(text, x, y, color = PALETTE.clean) {
     this.floatingTexts.push({
       text,
       x,
@@ -436,9 +437,9 @@ export class World {
 
         if (isRetrograde) {
           playDeorbit();
-          this.addFloatingText(`+${gainedScore} CLEAN (${this.chain}x)`, p.x, p.y - 10, '#38BDF8');
+          this.addFloatingText(`+${gainedScore} CLEAN (${this.chain}x)`, p.x, p.y - 10, PALETTE.clean);
         } else {
-          this.addFloatingText(`-${Math.abs(gainedScore)} PROGRADE`, p.x, p.y - 10, '#FF2D95');
+          this.addFloatingText(`-${Math.abs(gainedScore)} PROGRADE`, p.x, p.y - 10, PALETTE.danger);
         }
 
         // Trigger slow-motion on cascade
@@ -461,7 +462,7 @@ export class World {
         // Fuel bonus on level clear
         const fuelBonus = Math.round(500 * this.fuel);
         this.score += fuelBonus;
-        this.addFloatingText(`LEVEL CLEARED! +${fuelBonus} FUEL`, this.width * 0.5, this.height * 0.4, '#38BDF8');
+        this.addFloatingText(`LEVEL CLEARED! +${fuelBonus} FUEL`, this.width * 0.5, this.height * 0.4, PALETTE.clean);
       } else if (this.fuel <= 0 && !this.grabbed) {
         // Check if any remaining debris is moving toward atmospheric entry
         const hasMoving = this.particles.some((p) => Math.hypot(p.x - p.px, p.y - p.py) > 0.5);
@@ -589,7 +590,7 @@ export class World {
       this.particles.push(frag);
     }
 
-    this.addFloatingText('CASCADE SHATTER', p.x, p.y, '#FF2D95');
+    this.addFloatingText('CASCADE SHATTER', p.x, p.y, PALETTE.danger);
   }
 
   getTrajectory(steps = 90) {

@@ -131,7 +131,7 @@ const SpotlightCard = ({
       }
       light.style.opacity = String(Math.min(1, state.presence * s.intensity * boost));
       edge.style.opacity = String(Math.min(1, state.presence * s.borderGlow * boost));
-      const grainy = s.grain > 0 ? gradient(s, size, state.x, state.y, '#000 0%, transparent 100%') : 'none';
+      const grainy = s.grain > 0 ? gradient(s, size, state.x, state.y, 'black 0%, transparent 100%') : 'none';
       if (grainy !== drawn.noise) {
         drawn.noise = grainy;
         noise.style.webkitMaskImage = grainy;

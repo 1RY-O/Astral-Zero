@@ -1,151 +1,163 @@
-# 🛰️ Solar Sentinel — Orbital Debris Threat Command
+# Debris Derby
 
-> **Solar Sentinel** is a real-time, server-authoritative decision-support
-> simulation. It ingests live **Celestrak / NORAD Two-Line Element (TLE)**
-> data, propagates every tracked object with `satellite.js` on a fixed **2 Hz**
-> tick, and streams a live orbital-debris picture over Socket.io to a
-> Vanilla Canvas dashboard.
->
-> Operators use the visualization to spot imminent conjunctions, spend a
-> limited **Cleanup Energy** budget to neutralize the highest-risk debris,
-> and — when the Kessler Cascade is left unchecked — watch unmitigated
-> collisions spawn a self-sustaining chain reaction that locks Earth in a
-> ring of junk.
+Built for the NASA International Space Apps Challenge 2026.
+
+Debris Derby is a physics-based orbital tether cleanup game. Operating a cleanup tug in Low Earth Orbit, you grapple dead satellites and orbital fragments, swing them on a momentum tether, and release them onto clean deorbit trajectories into the atmosphere.
+
+You have no weapons, no ammo, and no lasers: you have mass, momentum, and a rope.
 
 ---
 
-## The Problem — Kessler Syndrome
+## 1. The Problem — Kessler Syndrome
 
-In 1978, NASA scientist **Donald Kessler** realized that as orbital debris
-multiplies, the probability of two objects colliding rises. Each collision
-shatters the parent bodies into **hundreds to thousands of fresh fragments**,
-and those fragments go on to collide with other objects — spawning yet more
-debris.
+In 1978, NASA astrophysicist Donald Kessler described a catastrophic scenario for space exploration: past a critical density of orbital debris in Low Earth Orbit (LEO), collisions between objects spawn thousands of new fragments. Each fragment becomes a projectile capable of striking other satellites, triggering an exponential, self-sustaining cascade known as **Kessler Syndrome**.
 
-This runaway chain reaction is the **Kessler Cascade**: once it triggers,
-collisions create more debris than they destroy, the cascade is
-self-sustaining, and **Low Earth Orbit becomes an impassable shell** that
-traps humanity on Earth. The risk is present-tense: orbital debris is not
-a future scenario.
-
-Solar Sentinel exists to **detect the cascade tipping point** and give
-operators the decision window to **spend cleanup energy before the chain
-reaction runs away**.
+Once Kessler Syndrome takes hold, satellite collisions create more debris than natural atmospheric drag can clear, rendering critical orbital bands impassable for generations. The most cost-effective way to preserve access to space is mass removal: deorbiting high-mass dead payloads before they collide and trigger runaway fragmentation.
 
 ---
 
-## The Solution
+## 2. The Game: Three Verbs & Orbital Physics
 
-A single-authoritative **server-side simulation** that turns raw public
-orbital data into an actionable, real-time threat picture:
+Debris Derby strips away conventional shooting mechanics. Every action relies on orbital mechanics and momentum exchange.
 
-1. **Live TLE Ingestion** — Celestrak/NORAD TLEs are fetched and cached on a
-   refresh cadence; stale data is rejected.
-2. **Authoritative Propagation** — `satellite.js` propagates every object's
-   ECI position on a lock-step **2 Hz (500 ms) tick** the client never
-   overrides.
-3. **Collision & Conjunction Detection** — each tick, every object pair is
-   scored for conjunction probability and close-approach time.
-4. **The Kessler Cascade** — high-risk conjunctions that are *not* cleaned
-   before their predicted Time-To-Collision actually collide, destroying the
-   parent objects and **spawning 3 new debris fragments** to seed the next
-   generation of threats.
-5. **Cleanup Energy Grid** — a server-authoritative, regenerating resource
-   budget that gates how often an operator can remove debris, preventing
-   spam and forcing **prioritized triage**.
-6. **Live Dashboard** — a Vanilla Canvas renderer at **60 fps** pushes the
-   propagated positions, risk levels, and cascade alerts to every connected
-   operator with minimal CPU use on low-end devices.
+| Verb | Input | Mechanism |
+|---|---|---|
+| **GRAB** | Pointer/Touch down or `E` | Attaches a position-based distance tether to the nearest debris within reach. |
+| **THRUST** | Hold `Space`, `WASD` / Arrows, or virtual stick | Applies thrust along the tether normal to accelerate the swing; drains finite fuel. |
+| **RELEASE** | Pointer/Touch up, click tethered object, or `Q` | Detaches the tether, releasing the satellite along its current tangential release velocity. |
 
----
+### Prograde vs. Retrograde Releases (The 25-Year Rule in Motion)
 
-## Core Features
+In Low Earth Orbit, direction of release determines satellite fate:
 
-### Live Orbital Mechanics
-Real Celestrak/NORAD TLEs are propagated with `satellite.js` at a **2 Hz tick
-rate** (500 ms). The server is the single source of truth for every object's
-position — the client only renders what the server emits.
+* **Retrograde Release (Backward, against orbital velocity vector $\Delta v < 0$):**
+  Reduces orbital velocity, lowers orbital perigee into Earth's upper atmosphere, and causes clean re-entry burn-up. Earns a **+80 clean deorbit bonus**.
+* **Prograde Release (Forward, with orbital velocity vector $\Delta v > 0$):**
+  Pumps energy into the orbit, raises orbital apogee, extends orbital lifetime, and worsens orbital congestion. Results in a **-150 penalty**.
+* **Sideways Transverse Collision:**
+  Swinging a satellite into another debris object shatters it into 3 smaller fragments. Removals linked within the **900 ms** causal cascade window trigger exponential score multipliers.
 
-### The Kessler Cascade
-A server-side simulation: when two high-risk debris objects reach their
-predicted Time-To-Collision and are **not** removed in time, they collide and
-**spawn 3 new debris objects** each, continuing the cascade. The simulation
-ends (`game_over`) the moment the cascade becomes unstoppable.
+### Scoring Formula
 
-### Resource Management
-A server-authoritative **"Cleanup Energy" grid** meters every de-orbit action.
-Energy regenerates on a fixed cadence, so operators must triage the
-**highest-risk** conjunctions first — the system rejects any cleanup request
-that exceeds the available budget.
+```
+object_value        = 50 * clamp(mass_kg / 10, 0.5, 4)
+cascade_multiplier  = n * (n + 1) / 2
+deorbit_bonus       = 80  per retrograde release
+prograde_penalty    = -150 per prograde release
+fuel_bonus          = 500 * (fuel_left / fuel_max)
+
+round_score = Σ(object_value * cascade_multiplier) + (80 * deorbit_count) - (150 * prograde_count) + fuel_bonus
+```
 
 ---
 
-## Tech Stack
+## 3. NASA Grounding & Mission Standards
 
-| Layer | Technology |
-|-------|------------|
-| Simulation engine | Node.js |
-| HTTP API | Express |
-| Realtime transport | Socket.io |
-| Orbital propagation | satellite.js |
-| Dashboard renderer | Vanilla Canvas (60 fps, low-end friendly) |
-| Dev tooling | nodemon (server hot-reload), Vite (dev), dotenv (config) |
+Debris Derby's design directly reflects NASA standards and real-world orbital data:
+
+1. **Celestrak / NORAD Active Catalog (OMM TLEs):**
+   The ambient space background is propagated from live General Perturbations (GP) orbital data provided by Celestrak using SGP4 propagation (`satellite.js`). No historical or synthetic fallback data is served silently.
+2. **NASA 25-Year Rule & Post-Mission Disposal Standards:**
+   - **NASA Safety Standard 1740.14** (*Guidelines and Assessment Procedures for Limiting Orbital Debris*)
+   - **NPR 8715.6E** (*NASA Procedural Requirements for Limiting Orbital Debris*, effective April 18, 2024)
+   - **NASA-STD-8719.14** (*Process for Limiting Orbital Debris*)
+   
+   These standards mandate that LEO missions plan for atmospheric disposal within 25 years (and recently tightened toward 5 years). Only retrograde burns decrease semi-major axis and perigee altitude to achieve atmospheric capture.
 
 ---
 
-## How to Run
+## 4. Architecture
+
+Debris Derby utilizes a split-clock architecture to maintain real-time physical simulation on client hardware while streaming ambient orbital data from the server.
+
+```
++-------------------------------------------------------------------------+
+|                              CLIENT (60 Hz)                             |
+|                                                                         |
+|  +--------------------+        +-------------------------------------+  |
+|  | React 18 Shell     |        | Canvas 2D Physics Renderer          |  |
+|  | - ReactBits UI     |        | - Fixed-step Verlet (60 Hz)         |  |
+|  | - HUD & Menus      |<------>| - 12-iteration distance constraints |  |
+|  | - Mobile Touch     |        | - 90-step trajectory preview        |  |
+|  | - Web Audio synth  |        | - Atmospheric kill-zone             |  |
+|  +--------------------+        +-------------------------------------+  |
++-------------------------------------------------------------------------+
+                                    ^
+                                    | Socket.io (JSON)
+                                    | 2 Hz ambient catalog & run submit
+                                    v
++-------------------------------------------------------------------------+
+|                              SERVER (2 Hz)                              |
+|                                                                         |
+|  +-----------------------------+     +-------------------------------+  |
+|  | Celestrak GP Ingestion      |     | REST & Validation Service     |  |
+|  | - 30-min cache refresh      |     | - GET /api/health             |  |
+|  | - SGP4 propagation          |     | - GET /api/levels             |  |
+|  | - Loud failure policy       |     | - GET /api/leaderboard        |  |
+|  | - Attribution tracking      |     | - Authoritative score recheck |  |
+|  +-----------------------------+     +-------------------------------+  |
++-------------------------------------------------------------------------+
+```
+
+---
+
+## 5. Missions (Levels 1–8)
+
+1. **First Contact** — Single heavy satellite, generous tether reach, learn GRAB → THRUST → RELEASE.
+2. **Two-Body Problem** — Two drifting bodies; momentum transfer between consecutive swings.
+3. **Clean Sweep** — Clustered debris field; cascade fragmentation multiplier introduction.
+4. **Ricochet** — Elastic boundaries; bank payloads off obstacles toward atmospheric entry.
+5. **Dominoes** — Chained removals within the 900 ms causal window.
+6. **Fragile Cargo** — Mass limits and tension sensitivity.
+7. **Moving Targets** — Drifting orbital velocities; lead the grab ahead of the trajectory.
+8. **Kessler Event** — Dense chaotic field and finite fuel budget; the final operational exam.
+
+---
+
+## 6. Installation & Run Instructions
+
+### Prerequisites
+- Node.js >= 20.19.0
+- npm >= 10.0.0
+
+### Quick Start
 
 ```bash
-# 1. Install dependencies
-npm install
+# Clone the repository
+git clone https://github.com/1RY-O/debris-derby.git
+cd debris-derby
 
-# 2. Start the authoritative server (TLE fetcher + 2 Hz sim + Socket.io)
-npm run dev:server
+# Install dependencies
+npm ci
 
-# 3. Start the dashboard (live in your browser at http://localhost:5173)
+# Run development server (Client on :5173, Backend on :3000)
 npm run dev
 ```
 
-Once both are running, the dashboard connects over Socket.io and begins
-receiving the live orbital snapshot stream.
-
----
-
-## Data Flow
-
-```
-Celestrak / NORAD TLE  →  satellite.js propagation (2 Hz tick)
-        →  conjunction & collision risk scoring
-        →  Kessler Cascade resolution (collisions spawn 3 debris each)
-        →  Cleanup Energy budget check
-        →  Socket.io  →  Vanilla Canvas dashboard (60 fps)
-```
-
----
-
-## Socket Contracts
-
-The real-time wire protocol is documented in
-[`websocket_events.md`](./websocket_events.md). The four core events are:
-
-| Event | Direction | Purpose |
-|-------|-----------|---------|
-| `orbital_snapshot` | S → C | Full positional + risk state of every tracked object |
-| `player_cleanup` | C → S / S → C | Operator spends Cleanup Energy to remove a debris object |
-| `collision_alert` | S → C | A conjunction has crossed the alert threshold; cascade brewing |
-| `game_over` | S → C | The Kessler Cascade has run away — Earth is locked in debris |
-
----
-
-## Testing
+### Full Production Build & Test
 
 ```bash
-npm test                    # server + simulation suites
-npm run test:sockets        # live Socket.io contract checks
-npm run test:net            # 2 Hz loop + conjunction / cascade logic
+# Run unit and contract test suite
+npm test
+
+# Run ESLint validation
+npm run lint
+
+# Build production bundle
+npm run build
+
+# Start production server
+npm start
 ```
+
+Visit `http://localhost:3000` in your web browser.
 
 ---
 
-*Built for the NASA Space Apps Challenge 2026 — Solar Sentinel.
-Protecting our orbital frontier. 🛰️✨*
+## 7. License & Credits
+
+Built for the **NASA International Space Apps Challenge 2026**.
+
+- Physics & Gameplay: Verlet integration, Position-Based Dynamics, Hill's relative reference frame.
+- Data Source: Celestrak GP API (`https://celestrak.org`).
+- License: MIT.

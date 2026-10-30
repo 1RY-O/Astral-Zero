@@ -2,27 +2,22 @@
  * Debris Derby — Phase 3 physics world.
  *
  * Fixed-step (60 Hz) Verlet integration with position-based distance
- * constraints (12 iterations per fixed step). Pure JavaScript: no DOM,
- * no React, no game engine. Every body and constraint is allocated once
- * at scenario spawn; the hot step loop mutates in place and allocates
- * nothing.
- *
- * Debug world (Phase 3 only): a zero-g void with a fixed anchor (the
- * player tug) at the top centre and a handful of seeded debris masses
- * drifting under their own initial velocity. The tether is a rope
- * constraint between the anchor and one grabbed body: slack below rest
- * length, taut toward rest length, hard-capped at max length.
+ * constraints (12 iterations per fixed step). Zero-g environment: no
+ * downward gravity. Atmospheric kill-zone (planet limb) deletes debris
+ * on contact (burn up). Circle-circle collision with destructible impact
+ * fragmentation.
  */
 
 const FIXED_DT = 1 / 60;
 const MAX_SUBSTEPS = 5;
 const CONSTRAINT_ITERATIONS = 12;
 const DT2 = FIXED_DT * FIXED_DT;
+const DAMPING = 0.9995;
 
 // Tether
 const TETHER_REST = 160; // px: slack below this length
 const TETHER_MAX = 300; // px: hard reach cap
-const GRAB_RADIUS = 24; // px: pointer radius test for GRAB
+const GRAB_RADIUS = 32; // px: pointer radius test for GRAB
 const ANCHOR_RADIUS = 7;
 
 // Debris swarm
@@ -80,10 +75,9 @@ function makeFixedParticle(x, y, radius) {
 }
 
 function debrisColor(mass) {
-  // Heavier debris reads whiter; mass affects visuals only in Phase 3.
   const t = Math.min(1, Math.max(0, (mass - 6) / 12));
   const a = 0.35 + 0.65 * t;
-  return `rgba(255, 255, 255, ${a})`;
+  return `rgba(255, 255, 255, ${a.toFixed(3)})`;
 }
 
 export class World {
@@ -101,13 +95,30 @@ export class World {
 
     this.fuel = 1;
     this.thrusting = false;
+    this.thrustDir = null; // optional directional vector { x, y }
     this.tension = 0;
     this.substeps = 0;
+    this.burnedCount = 0;
 
     // Last pointer position in world (CSS pixel) space.
     this.pointer = { x: 0, y: 0 };
 
     this.spawnScenario();
+  }
+
+  getPlanetLimb() {
+    const r = Math.max(this.width, this.height) * 2;
+    const apexY = this.height - 40;
+    const cx = this.width * 0.5;
+    const cy = apexY + r;
+    return { cx, cy, r, apexY };
+  }
+
+  isInsideAtmosphere(x, y, radius = 0) {
+    const limb = this.getPlanetLimb();
+    const dx = x - limb.cx;
+    const dy = y - limb.cy;
+    return Math.hypot(dx, dy) <= (limb.r + radius);
   }
 
   spawnScenario() {
@@ -127,9 +138,8 @@ export class World {
       y = Math.min(Math.max(y, 40), this.height * 0.5);
 
       const radius = 6 + this.rng() * 10;
-      const mass = 0.5 + radius; // kg-ish; visual only in Phase 3
+      const mass = 0.5 + radius;
       const speed = 20 + this.rng() * 40;
-      // Tangential drift so the swarm is not static.
       const vx = -Math.sin(angle) * speed;
       const vy = Math.cos(angle) * speed;
 
@@ -139,10 +149,6 @@ export class World {
     }
   }
 
-  /**
-   * Canvas CSS size changed (resize / device-pixel-ratio). Re-anchor the
-   * debug world without resetting the simulation.
-   */
   setSize(width, height) {
     this.width = width;
     this.height = height;
@@ -155,28 +161,33 @@ export class World {
   /* ------------------------------------------------------------------ */
   // Input
 
-  /**
-   * GRAB: pointer radius test. The nearest debris within GRAB_RADIUS of
-   * the pointer and within TETHER_MAX of the anchor is attached. Rope
-   * behaviour: slack below rest length, taut past it.
-   */
   grab(worldX, worldY) {
     this.pointer.x = worldX;
     this.pointer.y = worldY;
-    if (this.grabbed) return false;
 
-    const radius2 = GRAB_RADIUS * GRAB_RADIUS;
+    // If clicking on already grabbed body, release it
+    if (this.grabbed) {
+      if (dist2(worldX, worldY, this.grabbed.x, this.grabbed.y) <= Math.max(GRAB_RADIUS * GRAB_RADIUS, this.grabbed.radius * this.grabbed.radius * 4)) {
+        this.release();
+        return false;
+      }
+    }
+
     const reach2 = TETHER_MAX * TETHER_MAX;
     const ax = this.anchor.x;
     const ay = this.anchor.y;
 
     let best = null;
-    let bestD2 = radius2;
+    let bestD2 = GRAB_RADIUS * GRAB_RADIUS;
     for (const p of this.particles) {
-      if (dist2(worldX, worldY, p.x, p.y) >= bestD2) continue;
+      const pHitRadius = Math.max(GRAB_RADIUS, p.radius + 12);
+      const d2p = dist2(worldX, worldY, p.x, p.y);
+      if (d2p > pHitRadius * pHitRadius) continue;
       if (dist2(ax, ay, p.x, p.y) > reach2) continue;
-      bestD2 = dist2(worldX, worldY, p.x, p.y);
-      best = p;
+      if (d2p < bestD2) {
+        bestD2 = d2p;
+        best = p;
+      }
     }
     if (!best) return false;
 
@@ -186,7 +197,6 @@ export class World {
     return true;
   }
 
-  /** GRAB without a pointer: nearest debris within tether reach (E key). */
   grabNearest() {
     if (this.grabbed) return false;
     const reach2 = TETHER_MAX * TETHER_MAX;
@@ -209,92 +219,217 @@ export class World {
     return true;
   }
 
-  /** RELEASE: detach the tether; the body keeps its release velocity. */
   release() {
+    const released = this.grabbed;
     this.tether = null;
     this.grabbed = null;
     this.tension = 0;
+    return released;
   }
 
-  setThrusting(thrusting) {
+  setThrusting(thrusting, dir = null) {
     this.thrusting = !!thrusting;
+    this.thrustDir = dir;
   }
 
   /* ------------------------------------------------------------------ */
   // Fixed step
 
-  /**
-   * One fixed step (1/60 s). Callers drive the accumulator; see the app
-   * shell for max-substep clamping.
-   */
   step() {
     const particles = this.particles;
+    const dt = FIXED_DT;
     const dt2 = DT2;
 
-    // 1. Forces: thrust along the tether normal.
+    // 1. Forces: thrust along tether normal (or manual direction)
     if (this.thrusting && this.grabbed && this.fuel > 0) {
       const g = this.grabbed;
       const a = this.anchor;
       let dx = g.x - a.x;
       let dy = g.y - a.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
+      if (this.thrustDir && (this.thrustDir.x !== 0 || this.thrustDir.y !== 0)) {
+        dx = this.thrustDir.x;
+        dy = this.thrustDir.y;
+      }
+      const d = Math.hypot(dx, dy);
       if (d > 0) {
         g.ax += (dx / d) * THRUST_ACC;
         g.ay += (dy / d) * THRUST_ACC;
       }
-      this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * FIXED_DT);
+      this.fuel = Math.max(0, this.fuel - FUEL_DRAIN * dt);
     }
 
-    // 2. Verlet integration.
+    // 2. Verlet integration: zero-g (no downward gravity)
     for (const p of particles) {
       if (p.fixed) continue;
-      const nx = p.x;
-      const ny = p.y;
-      p.x += (p.x - p.px) + p.ax * dt2;
-      p.y += (p.y - p.py) + p.ay * dt2;
-      p.px = nx;
-      p.py = ny;
+      const vx = (p.x - p.px) * DAMPING;
+      const vy = (p.y - p.py) * DAMPING;
+      p.px = p.x;
+      p.py = p.y;
+      p.x += vx + p.ax * dt2;
+      p.y += vy + p.ay * dt2;
       p.ax = 0;
       p.ay = 0;
     }
 
-    // 3. Position-based constraints.
+    // 3. Position-based tether constraint (12 iterations per step)
     for (let it = 0; it < CONSTRAINT_ITERATIONS; it += 1) {
       if (this.tether && this.grabbed) this.solveTether();
+    }
+
+    // 4. Circle-circle collisions and destructible fragmentation
+    this.solveCollisions();
+
+    // 5. Atmospheric kill-zone (planet limb) - burn up on contact, NO bounce/slide
+    for (let i = particles.length - 1; i >= 0; i -= 1) {
+      const p = particles[i];
+      if (p.fixed) continue;
+      if (this.isInsideAtmosphere(p.x, p.y, p.radius)) {
+        if (this.grabbed === p) {
+          this.release();
+        }
+        particles.splice(i, 1);
+        this.burnedCount += 1;
+      }
     }
   }
 
   solveTether() {
     const a = this.anchor;
-    const g = this.grabbed;
-    const { rest, max } = this.tether;
+    const b = this.grabbed;
+    const { rest: restLength, max: maxLength } = this.tether;
 
-    let dx = g.x - a.x;
-    let dy = g.y - a.y;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    if (d === 0) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy) || 1e-6;
+
+    if (dist <= restLength) {
       this.tension = 0;
       return;
     }
 
-    // Rope: slack below rest length, taut toward rest length, hard cap
-    // at max length.
-    let target = null;
-    if (d > max) target = max;
-    else if (d > rest) target = rest;
-    if (target === null) {
-      this.tension = 0;
-      return;
+    const target = dist > maxLength ? maxLength : restLength;
+    const diff = (dist - target) / dist;
+    const wa = a.invMass;
+    const wb = b.invMass;
+    const wsum = wa + wb;
+    if (wsum > 0) {
+      a.x += dx * diff * (wa / wsum);
+      a.y += dy * diff * (wa / wsum);
+      b.x -= dx * diff * (wb / wsum);
+      b.y -= dy * diff * (wb / wsum);
     }
 
-    const correction = (d - target) / d;
-    const totalInvMass = a.invMass + g.invMass;
-    if (totalInvMass === 0) return;
-    const share = g.invMass / totalInvMass;
-    g.x -= dx * correction * share;
-    g.y -= dy * correction * share;
+    this.tension = dist - target;
+  }
 
-    this.tension = d - target;
+  solveCollisions() {
+    const dt = FIXED_DT;
+    for (let i = 0; i < this.particles.length; i += 1) {
+      const p1 = this.particles[i];
+      for (let j = i + 1; j < this.particles.length; j += 1) {
+        const p2 = this.particles[j];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const d2 = dx * dx + dy * dy;
+        const minDist = p1.radius + p2.radius;
+        if (d2 < minDist * minDist && d2 > 0) {
+          const dist = Math.sqrt(d2);
+          const nx = dx / dist;
+          const ny = dy / dist;
+
+          const v1x = (p1.x - p1.px) / dt;
+          const v1y = (p1.y - p1.py) / dt;
+          const v2x = (p2.x - p2.px) / dt;
+          const v2y = (p2.y - p2.py) / dt;
+          const relSpeed = Math.hypot(v2x - v1x, v2y - v1y);
+
+          // Destructible fragmentation on fast impact
+          if (relSpeed > 75 && (p1.radius >= 8 || p2.radius >= 8)) {
+            const targetIdx = p1.radius >= p2.radius ? i : j;
+            this.fragmentParticle(targetIdx, relSpeed, nx, ny);
+            return;
+          }
+
+          // Elastic separation
+          const overlap = minDist - dist;
+          const w1 = p1.invMass;
+          const w2 = p2.invMass;
+          const wsum = w1 + w2;
+          if (wsum > 0) {
+            p1.x -= nx * overlap * (w1 / wsum);
+            p1.y -= ny * overlap * (w1 / wsum);
+            p2.x += nx * overlap * (w2 / wsum);
+            p2.y += ny * overlap * (w2 / wsum);
+          }
+
+          const kx = v1x - v2x;
+          const ky = v1y - v2y;
+          const p = 2 * (nx * kx + ny * ky) / (p1.mass + p2.mass);
+          p1.px = p1.x - (v1x - p * p2.mass * nx) * dt;
+          p1.py = p1.y - (v1y - p * p2.mass * ny) * dt;
+          p2.px = p2.x - (v2x + p * p1.mass * nx) * dt;
+          p2.py = p2.y - (v2y + p * p1.mass * ny) * dt;
+        }
+      }
+    }
+  }
+
+  fragmentParticle(index, impactSpeed, nx = 0, ny = 1) {
+    const p = this.particles[index];
+    if (!p) return;
+    if (this.grabbed === p) {
+      this.release();
+    }
+    this.particles.splice(index, 1);
+
+    const newRadius = Math.max(3.5, p.radius * 0.58);
+    const newMass = Math.max(0.2, p.mass / 3);
+    const vx = (p.x - p.px) / FIXED_DT;
+    const vy = (p.y - p.py) / FIXED_DT;
+    const baseAngle = Math.atan2(ny, nx);
+
+    for (let k = 0; k < 3; k += 1) {
+      const angle = baseAngle + (k * (TAU / 3)) + (this.rng() * 0.2 - 0.1);
+      const speed = Math.max(25, impactSpeed * 0.4);
+      const fvx = vx * 0.5 + Math.cos(angle) * speed;
+      const fvy = vy * 0.5 + Math.sin(angle) * speed;
+      const fx = p.x + Math.cos(angle) * (newRadius + 2);
+      const fy = p.y + Math.sin(angle) * (newRadius + 2);
+      const frag = makeParticle(
+        `${p.id}-f${k}-${Math.floor(this.rng() * 1000)}`,
+        fx,
+        fy,
+        fvx,
+        fvy,
+        newRadius,
+        newMass,
+        debrisColor(newMass),
+      );
+      this.particles.push(frag);
+    }
+  }
+
+  getTrajectory(steps = 90) {
+    if (!this.grabbed) return [];
+    const p = this.grabbed;
+    const pts = [{ x: p.x, y: p.y }];
+    let simX = p.x;
+    let simY = p.y;
+    let simVx = (p.x - p.px) / FIXED_DT;
+    let simVy = (p.y - p.py) / FIXED_DT;
+    const dt = FIXED_DT;
+
+    for (let s = 0; s < steps; s += 1) {
+      simX += simVx * dt;
+      simY += simVy * dt;
+      simVx *= DAMPING;
+      simVy *= DAMPING;
+      pts.push({ x: simX, y: simY });
+      if (this.isInsideAtmosphere(simX, simY, p.radius)) {
+        break;
+      }
+    }
+    return pts;
   }
 }
 

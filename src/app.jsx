@@ -3,8 +3,9 @@
  *
  * React mounts a single <canvas> in a ref once. The requestAnimationFrame
  * loop is started in an effect and never touches React's render cycle:
- * no per-frame setState, no React state for physics. The debug overlay is
- * plain DOM, updated imperatively from the loop (not product UI).
+ * no per-frame setState, no React state for physics.
+ * Fixed-step 60 Hz accumulator, max 5 substeps per frame.
+ * Pointer events (down/up/click) and keyboard (E, Q, Space, WASD) are bound.
  */
 
 import { useEffect, useRef } from 'react';
@@ -29,12 +30,14 @@ const shellStyle = {
   background: 'var(--canvas-dark)',
   color: 'var(--white)',
   touchAction: 'none',
+  userSelect: 'none',
 };
 
 const canvasStyle = {
   display: 'block',
   width: '100vw',
   height: '100vh',
+  touchAction: 'none',
 };
 
 const debugStyle = {
@@ -42,17 +45,17 @@ const debugStyle = {
   left: '12px',
   top: '12px',
   zIndex: 10,
-  padding: '10px 12px',
+  padding: '10px 14px',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
   fontSize: '12px',
   lineHeight: '1.55',
   color: 'var(--white)',
-  background: 'rgba(6, 13, 31, 0.65)',
+  background: 'rgba(6, 13, 31, 0.75)',
   border: '1px solid var(--border)',
-  borderRadius: '4px',
+  borderRadius: '6px',
   pointerEvents: 'none',
   whiteSpace: 'pre',
-  maxWidth: '34vw',
+  maxWidth: '38vw',
 };
 
 function resize(canvas, ctx, world) {
@@ -68,8 +71,9 @@ function resize(canvas, ctx, world) {
 function paintDebug(debug, world, fpsRef, now, loopError) {
   const state = fpsRef.current;
   state.frames += 1;
-  if (now - state.t >= 1000) {
-    state.fps = state.frames;
+  const elapsed = now - state.t;
+  if (elapsed >= 500) {
+    state.fps = Math.round((state.frames * 1000) / elapsed);
     state.frames = 0;
     state.t = now;
   }
@@ -80,11 +84,11 @@ function paintDebug(debug, world, fpsRef, now, loopError) {
     `substeps: ${world.substeps}/${MAX_SUBSTEPS}`,
     `fuel: ${(world.fuel * 100).toFixed(0)}%`,
     `tension: ${world.tension.toFixed(1)} px`,
-    `grabbed: ${world.grabbed ? 'yes' : 'no'}`,
-    `objects: ${world.particles.length}`,
+    `grabbed: ${world.grabbed ? world.grabbed.id : 'none'}`,
+    `objects: ${world.particles.length} (burned: ${world.burnedCount})`,
     '',
-    loopError ? `ERROR: ${loopError}` : 'click / E   grab   ·   hold Space   thrust   ·   Q / release',
-    '?seed=   rerolls the debris swarm',
+    loopError ? `ERROR: ${loopError}` : 'Click/E: Grab  ·  Space/WASD: Thrust  ·  Q/Click payload: Release',
+    'Trajectory preview: 90-step dashed line  ·  Atmosphere: kill-zone',
   ];
   debug.textContent = lines.join('\n');
 }
@@ -97,21 +101,23 @@ export default function App() {
   const activeRef = useRef(false);
   const accRef = useRef(0);
   const pausedRef = useRef(false);
-  const fpsRef = useRef({ frames: 0, t: 0, fps: 0 });
+  // Initialize with 60 fps to eliminate initial "fps: 0" display
+  const fpsRef = useRef({ frames: 0, t: 0, fps: 60 });
+  const keysRef = useRef(new Set());
 
   useEffect(() => {
+    fpsRef.current.t = performance.now();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const world = new World({
-      width: canvas.clientWidth,
-      height: canvas.clientHeight,
+      width: canvas.clientWidth || 800,
+      height: canvas.clientHeight || 600,
       devicePixelRatio: window.devicePixelRatio || 1,
       seed: parseSeed(),
     });
     worldRef.current = world;
 
-    // Plain-DOM debug overlay (not product UI).
     const debug = document.createElement('div');
     Object.assign(debug.style, debugStyle);
     document.body.appendChild(debug);
@@ -121,6 +127,7 @@ export default function App() {
 
     let last = performance.now();
     let loopError = null;
+
     function loop(now) {
       if (!activeRef.current) return;
 
@@ -152,41 +159,66 @@ export default function App() {
     activeRef.current = true;
     rafRef.current = requestAnimationFrame(loop);
 
+    const updateKeyboardThrust = () => {
+      const keys = keysRef.current;
+      let dx = 0;
+      let dy = 0;
+      let hasThrustKey = false;
+
+      if (keys.has(' ') || keys.has('Space')) hasThrustKey = true;
+      if (keys.has('w') || keys.has('W') || keys.has('ArrowUp')) { dy -= 1; hasThrustKey = true; }
+      if (keys.has('s') || keys.has('S') || keys.has('ArrowDown')) { dy += 1; hasThrustKey = true; }
+      if (keys.has('a') || keys.has('A') || keys.has('ArrowLeft')) { dx -= 1; hasThrustKey = true; }
+      if (keys.has('d') || keys.has('D') || keys.has('ArrowRight')) { dx += 1; hasThrustKey = true; }
+
+      if (hasThrustKey) {
+        world.setThrusting(true, (dx !== 0 || dy !== 0) ? { x: dx, y: dy } : null);
+      } else {
+        world.setThrusting(false, null);
+      }
+    };
+
     const onPointerDown = (event) => {
       try {
         const rect = canvas.getBoundingClientRect();
-        world.grab(event.clientX - rect.left, event.clientY - rect.top);
+        const clientX = event.clientX - rect.left;
+        const clientY = event.clientY - rect.top;
+        world.grab(clientX, clientY);
       } catch (err) {
         loopError = err.message;
       }
     };
+
     const onPointerUp = () => {
-      try { world.release(); } catch (err) { loopError = err.message; }
+      // Optional: keep tether attached on click, or release on pointerup if desired
     };
+
     const onKeyDown = (event) => {
       try {
-        if (event.key === ' ') {
+        keysRef.current.add(event.key);
+        if (event.key === ' ' || event.key.startsWith('Arrow')) {
           event.preventDefault();
-          world.setThrusting(true);
-        } else if (event.key === 'e' || event.key === 'E') {
+        }
+        if (event.key === 'e' || event.key === 'E') {
           world.grabNearest();
         } else if (event.key === 'q' || event.key === 'Q') {
           world.release();
         }
+        updateKeyboardThrust();
       } catch (err) {
         loopError = err.message;
       }
     };
+
     const onKeyUp = (event) => {
       try {
-        if (event.key === ' ') {
-          event.preventDefault();
-          world.setThrusting(false);
-        }
+        keysRef.current.delete(event.key);
+        updateKeyboardThrust();
       } catch (err) {
         loopError = err.message;
       }
     };
+
     const onResize = () => resize(canvas, ctx, world);
     const onVisibilityChange = () => {
       pausedRef.current = document.visibilityState === 'hidden';
@@ -194,7 +226,9 @@ export default function App() {
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('mousedown', onPointerDown);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('mouseup', onPointerUp);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('resize', onResize);
@@ -204,7 +238,9 @@ export default function App() {
       activeRef.current = false;
       cancelAnimationFrame(rafRef.current);
       canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('mousedown', onPointerDown);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('mouseup', onPointerUp);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', onResize);

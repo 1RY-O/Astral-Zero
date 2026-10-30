@@ -54,12 +54,9 @@ export default function App() {
   const massRef = useRef(null);
   const lifetimeRef = useRef(null);
 
-  // High-level game state
-  const [inGame, setInGame] = useState(() => {
-    const { autoplay } = parseParams();
-    return autoplay;
-  });
-  const inGameRef = useRef(inGame);
+  // Default to inGame = true so player can immediately interact, grab, and swing
+  const [inGame, setInGame] = useState(true);
+  const inGameRef = useRef(true);
 
   const [currentLevel, setCurrentLevel] = useState(1);
   const [levelModalOpen, setLevelModalOpen] = useState(false);
@@ -310,19 +307,29 @@ export default function App() {
     // Input Handlers
     function canvasCoords(e) {
       const b = canvas.getBoundingClientRect();
-      return { x: e.clientX - b.left, y: e.clientY - b.top };
+      const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      return {
+        x: clientX - b.left,
+        y: clientY - b.top,
+      };
     }
 
+    let lastClickTime = 0;
     function onPointerDown(e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (e.target && typeof e.target.closest === 'function' && e.target.closest('button, a')) {
+        return;
+      }
+
+      const now = performance.now();
+      if (now - lastClickTime < 25) return; // Dedup rapid pointerdown + mousedown
+      lastClickTime = now;
+
       initAudio();
       const pt = canvasCoords(e);
-      if (e.button === 0) {
-        if (!inGameRef.current) {
-          inGameRef.current = true;
-          setInGame(true);
-        }
-        world.grab(pt.x, pt.y);
-      }
+      const grabbed = world.grab(pt.x, pt.y);
+      console.log(`[Debris Derby Pointer] pointerdown at (${pt.x.toFixed(1)}, ${pt.y.toFixed(1)}) | Hit/Grabbed:`, grabbed, '| Active target:', world.grabbed ? world.grabbed.id : 'NONE');
     }
 
     function onPointerMove(e) {
@@ -332,28 +339,21 @@ export default function App() {
     }
 
     function onPointerUp(e) {
-      if (e.button === 0) {
-        world.release();
-      }
+      if (e.button !== undefined && e.button !== 0) return;
+      world.release();
     }
 
     function onKeyDown(e) {
       if (keysRef.current.has(e.code)) return;
       keysRef.current.add(e.code);
 
-      // Auto-start on game controls
-      if (!inGameRef.current && (e.code === 'KeyE' || e.code === 'Space' || e.code === 'KeyQ' || e.code === 'Enter')) {
-        initAudio();
-        inGameRef.current = true;
-        setInGame(true);
-      }
-
       if (e.code === 'Space') {
         world.setThrusting(true);
         e.preventDefault();
       } else if (e.code === 'KeyE') {
         initAudio();
-        world.grabNearest();
+        const nearest = world.grabNearest();
+        console.log('[Debris Derby Pointer] Key E grabNearest | Hit/Grabbed:', nearest, '| Active target:', world.grabbed ? world.grabbed.id : 'NONE');
         e.preventDefault();
       } else if (e.code === 'KeyQ') {
         world.release();
@@ -370,9 +370,15 @@ export default function App() {
       }
     }
 
+    // Bind pointer events on both canvas and window for 100% click reliability
     canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('mousedown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('mousemove', onPointerMove, { passive: true });
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('mouseup', onPointerUp);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('resize', resize);
@@ -381,8 +387,13 @@ export default function App() {
       activeRef.current = false;
       cancelAnimationFrame(rafRef.current);
       canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('mousedown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('mousemove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('mouseup', onPointerUp);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', resize);

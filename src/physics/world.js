@@ -8,7 +8,7 @@
  */
 
 import { getLevelDef } from '../game/levels.js';
-import { playGrab, playWhip, playThrust, playImpact, playDeorbit, playCascade } from '../game/audio.js';
+import { playGrab, playWhip, playThrust, playImpact, playDeorbit } from '../game/audio.js';
 import { PALETTE } from '../ui/tokens.js';
 
 const FIXED_DT = 1 / 60;
@@ -39,14 +39,21 @@ function mulberry32(seed) {
   };
 }
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
 function dist2(ax, ay, bx, by) {
   const dx = bx - ax;
   const dy = by - ay;
   return dx * dx + dy * dy;
+}
+
+/**
+ * Exact hit detection: returns true if click coordinates are within
+ * multiplier * radius of the target coordinates.
+ */
+export function isHit(clickX, clickY, targetX, targetY, radius, multiplier = 2.5) {
+  const dx = targetX - clickX;
+  const dy = targetY - clickY;
+  const hitRadius = multiplier * radius;
+  return dx * dx + dy * dy <= hitRadius * hitRadius;
 }
 
 function makeParticle(id, x, y, vx, vy, radius, mass, color) {
@@ -246,38 +253,41 @@ export class World {
     this.pointer.x = worldX;
     this.pointer.y = worldY;
 
+    // Toggle release if clicking on currently grabbed object
     if (this.grabbed) {
-      if (
-        dist2(worldX, worldY, this.grabbed.x, this.grabbed.y) <=
-        Math.max(GRAB_RADIUS * GRAB_RADIUS, this.grabbed.radius * this.grabbed.radius * 4)
-      ) {
+      if (isHit(worldX, worldY, this.grabbed.x, this.grabbed.y, this.grabbed.radius, 2.5)) {
         this.release();
         return false;
       }
     }
 
-    const reach2 = TETHER_MAX * TETHER_MAX;
-    const ax = this.anchor.x;
-    const ay = this.anchor.y;
-
     let best = null;
-    let bestD2 = GRAB_RADIUS * GRAB_RADIUS;
+    let bestDist = Infinity;
+
+    // Hit detection: click within 2.5x radius of any debris object
     for (const p of this.particles) {
-      const pHitRadius = Math.max(GRAB_RADIUS, p.radius + 14);
-      const d2p = dist2(worldX, worldY, p.x, p.y);
-      if (d2p > pHitRadius * pHitRadius) continue;
-      if (dist2(ax, ay, p.x, p.y) > reach2) continue;
-      if (d2p < bestD2) {
-        bestD2 = d2p;
-        best = p;
+      if (p.fixed) continue;
+      const dx = p.x - worldX;
+      const dy = p.y - worldY;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist <= 2.5 * p.radius) {
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = p;
+        }
       }
     }
+
     if (!best) return false;
 
+    const ax = this.anchor ? this.anchor.x : this.width * 0.5;
+    const ay = this.anchor ? this.anchor.y : this.height * 0.22;
     const dist = Math.hypot(best.x - ax, best.y - ay);
-    const lockedLength = Math.min(TETHER_MAX, Math.max(50, dist));
+    const lockedLength = Math.max(40, dist);
+
     this.grabbed = best;
-    this.tether = { length: lockedLength, rest: lockedLength, max: TETHER_MAX };
+    this.tether = { length: lockedLength, rest: lockedLength, max: Math.max(TETHER_MAX, lockedLength + 40) };
     this.tension = 0;
     playGrab();
     return true;
@@ -285,24 +295,25 @@ export class World {
 
   grabNearest() {
     if (this.grabbed) return false;
-    const reach2 = TETHER_MAX * TETHER_MAX;
-    const ax = this.anchor.x;
-    const ay = this.anchor.y;
+    const ax = this.anchor ? this.anchor.x : this.width * 0.5;
+    const ay = this.anchor ? this.anchor.y : this.height * 0.22;
 
     let best = null;
-    let bestD2 = reach2;
+    let bestD2 = Infinity;
     for (const p of this.particles) {
+      if (p.fixed) continue;
       const d2 = dist2(ax, ay, p.x, p.y);
-      if (d2 >= bestD2) continue;
-      bestD2 = d2;
-      best = p;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = p;
+      }
     }
     if (!best) return false;
 
-    const dist = Math.hypot(best.x - ax, best.y - ay);
-    const lockedLength = Math.min(TETHER_MAX, Math.max(50, dist));
+    const dist = Math.sqrt(bestD2);
+    const lockedLength = Math.max(40, dist);
     this.grabbed = best;
-    this.tether = { length: lockedLength, rest: lockedLength, max: TETHER_MAX };
+    this.tether = { length: lockedLength, rest: lockedLength, max: Math.max(TETHER_MAX, lockedLength + 40) };
     this.tension = 0;
     playGrab();
     return true;
@@ -483,21 +494,9 @@ export class World {
         }
         this.burnedCount += 1;
 
-        // Cascade window check (900ms)
-        if (this.lastDeorbitTime !== null && atMs - this.lastDeorbitTime <= CHAIN_WINDOW_MS) {
-          this.chain += 1;
-        } else {
-          this.chain = 1;
-        }
-        this.lastDeorbitTime = atMs;
-        if (this.chain > this.maxChain) this.maxChain = this.chain;
-
-        // Scoring: Retrograde (+80) vs Prograde (-150)
+        // Points, scoring popups and cascade effects disabled for testing per user request
         const isRetrograde = p.releaseDot < 0;
-        const objectValue = 50 * clamp(p.mass / 10, 0.5, 4);
-        const multiplier = (this.chain * (this.chain + 1)) / 2;
-        const gainedScore = Math.round(objectValue * multiplier + (isRetrograde ? 80 : -150));
-        this.score = Math.max(0, this.score + gainedScore);
+        this.score = 0;
 
         this.deorbits.push({
           objectId: p.id,
@@ -507,23 +506,6 @@ export class World {
         });
 
         playDeorbit();
-
-        if (isRetrograde) {
-          this.addFloatingText(`+${gainedScore} CLEAN (${this.chain}x)`, p.x, p.y - 10, PALETTE.clean);
-        } else {
-          this.addFloatingText(`-${Math.abs(gainedScore)} PROGRADE`, p.x, p.y - 10, PALETTE.danger);
-        }
-
-        // Trigger slow-motion on cascade
-        if (this.chain >= 2) {
-          this.timeScale = 0.25;
-          this.slowMoTimer = 0.7;
-          playCascade(this.chain);
-          this.screenShake = Math.min(18, 5 + this.chain * 3);
-        }
-        if (this.chain >= 5) {
-          this.freezeFrames = 6; // 100ms freeze
-        }
 
         if (this.levelId !== null) {
           // In levels, deorbited satellite is permanently cleared

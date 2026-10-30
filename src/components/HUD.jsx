@@ -1,13 +1,13 @@
 import { forwardRef } from 'react';
 
-const FROSTED_PILL = {
-  background: 'rgba(6, 13, 31, 0.6)',
+const ALPHA_FROSTED_PILL = {
+  background: 'rgba(6, 17, 32, 0.78)',
   backdropFilter: 'blur(16px)',
   WebkitBackdropFilter: 'blur(16px)',
-  border: '1px solid rgba(255, 255, 255, 0.15)',
+  border: '1px solid rgba(255, 255, 255, 0.25)',
   borderRadius: '9999px',
   boxShadow:
-    '0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.12)',
+    '0 16px 40px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
 };
 
 const HUD = forwardRef(function HUD(
@@ -45,377 +45,328 @@ const HUD = forwardRef(function HUD(
         userSelect: 'none',
       }}
     >
-      {/* Top-Left: Score, Mission Selector, Reset, Hint Pills */}
+      {/* Top Center: Alpha Project Frosted Glass HUD Pill */}
       <div
         style={{
           position: 'fixed',
-          top: '28px',
-          left: '32px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          alignItems: 'flex-start',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* Score Pill */}
-          <div
-            style={{
-              ...FROSTED_PILL,
-              padding: '6px 18px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <span
-              style={{
-                fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-                fontSize: '11px',
-                fontWeight: 700,
-                color: 'rgba(255, 255, 255, 0.6)',
-                letterSpacing: '0.12em',
-              }}
-            >
-              SCORE
-            </span>
-            <span
-              ref={scoreRef}
-              style={{
-                fontFamily: 'var(--font-numeric, monospace)',
-                fontSize: '20px',
-                fontWeight: 700,
-                color: '#FFFFFF',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              0
-            </span>
-          </div>
-
-          {/* Mission Selector Pill */}
-          <button
-            type="button"
-            onClick={onOpenLevelModal}
-            style={{
-              ...FROSTED_PILL,
-              pointerEvents: 'auto',
-              padding: '8px 16px',
-              color: 'var(--sky)',
-              fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              cursor: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              transition: 'border-color 0.15s ease, background 0.15s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--sky)';
-              e.currentTarget.style.background = 'rgba(56, 189, 248, 0.12)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-              e.currentTarget.style.background = 'rgba(6, 13, 31, 0.6)';
-            }}
-          >
-            <span>
-              MISSION 0{currentLevel}: {displayLevelName}
-            </span>
-            <span style={{ fontSize: '9px', opacity: 0.8 }}>▼</span>
-          </button>
-        </div>
-
-        {/* Action Controls: Reset & Hint Pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* Reset Icon Button Pill */}
-          <button
-            type="button"
-            onClick={onReset}
-            title="Reset Mission [R]"
-            style={{
-              ...FROSTED_PILL,
-              pointerEvents: 'auto',
-              padding: '6px 14px',
-              color: 'var(--white)',
-              fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              cursor: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'border-color 0.15s ease, background 0.15s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--pink)';
-              e.currentTarget.style.background = 'rgba(255, 45, 149, 0.12)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-              e.currentTarget.style.background = 'rgba(6, 13, 31, 0.6)';
-            }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ display: 'block' }}
-            >
-              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-            </svg>
-            <span>RESET</span>
-            <span style={{ opacity: 0.5, fontSize: '10px' }}>[R]</span>
-          </button>
-
-          {/* Hint Icon Button Pill */}
-          <button
-            type="button"
-            onClick={onToggleHint}
-            title="Toggle Mission Hint [H]"
-            style={{
-              ...FROSTED_PILL,
-              pointerEvents: 'auto',
-              padding: '6px 14px',
-              color: showHint ? 'var(--sky)' : 'var(--white)',
-              borderColor: showHint ? 'var(--sky)' : 'rgba(255, 255, 255, 0.15)',
-              background: showHint
-                ? 'rgba(56, 189, 248, 0.16)'
-                : 'rgba(6, 13, 31, 0.6)',
-              fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              cursor: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--sky)';
-            }}
-            onMouseLeave={(e) => {
-              if (!showHint) {
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-              }
-            }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ display: 'block' }}
-            >
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            <span>HINT</span>
-            <span style={{ opacity: 0.5, fontSize: '10px' }}>[H]</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Center-Screen: Frosted Subtle Compass UI */}
-      <div
-        style={{
-          position: 'fixed',
-          top: '28px',
+          top: '20px',
           left: '50%',
           transform: 'translateX(-50%)',
           display: 'flex',
           alignItems: 'center',
           gap: '16px',
-          padding: '8px 24px',
-          ...FROSTED_PILL,
-          fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-          fontSize: '11px',
-          fontWeight: 700,
-          letterSpacing: '0.08em',
+          padding: '8px 22px',
+          ...ALPHA_FROSTED_PILL,
+          pointerEvents: 'auto',
+          maxWidth: 'calc(100vw - 32px)',
+          boxSizing: 'border-box',
         }}
       >
-        <span
+        {/* Mission Selector Button inside Pill */}
+        <button
+          type="button"
+          onClick={onOpenLevelModal}
+          title="Select Mission (1–8)"
           style={{
-            color: 'var(--sky)',
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--sky, #38BDF8)',
+            fontFamily: '"Instrument Sans", "Inter", sans-serif',
+            fontSize: '11px',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            cursor: 'none',
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
+            padding: '4px 8px',
+            borderRadius: '9999px',
+            transition: 'background 0.15s ease',
+            whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(56, 189, 248, 0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
           }}
         >
-          <span>◀</span> RETROGRADE (-X)
-        </span>
-        <span style={{ color: 'rgba(255, 255, 255, 0.2)' }}>|</span>
-        <span
+          <span>MISSION 0{currentLevel}</span>
+          <span style={{ opacity: 0.5 }}>::</span>
+          <span style={{ color: '#FFFFFF' }}>{displayLevelName}</span>
+          <span style={{ fontSize: '9px', opacity: 0.7, marginLeft: '2px' }}>▼</span>
+        </button>
+
+        {/* Divider */}
+        <div style={{ width: '1px', height: '16px', background: 'rgba(255, 255, 255, 0.2)' }} />
+
+        {/* Score */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+          <span
+            style={{
+              fontFamily: '"Instrument Sans", "Inter", sans-serif',
+              fontSize: '11px',
+              fontWeight: 700,
+              color: 'rgba(255, 255, 255, 0.65)',
+              letterSpacing: '0.1em',
+            }}
+          >
+            SCORE
+          </span>
+          <span
+            ref={scoreRef}
+            style={{
+              fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, monospace',
+              fontSize: '18px',
+              fontWeight: 700,
+              color: '#FFFFFF',
+              letterSpacing: '-0.02em',
+              minWidth: '24px',
+            }}
+          >
+            0
+          </span>
+        </div>
+
+        {/* Divider */}
+        <div style={{ width: '1px', height: '16px', background: 'rgba(255, 255, 255, 0.2)' }} />
+
+        {/* Fuel Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+          <span
+            style={{
+              fontFamily: '"Instrument Sans", "Inter", sans-serif',
+              fontSize: '11px',
+              fontWeight: 700,
+              color: 'rgba(255, 255, 255, 0.65)',
+              letterSpacing: '0.1em',
+            }}
+          >
+            FUEL
+          </span>
+          <div
+            style={{
+              width: '100px',
+              height: '8px',
+              background: 'rgba(255, 255, 255, 0.1)',
+              borderRadius: '9999px',
+              overflow: 'hidden',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div
+              ref={fuelBarRef}
+              style={{
+                width: '100%',
+                height: '100%',
+                background: 'var(--sky, #38BDF8)',
+                boxShadow: '0 0 8px rgba(56, 189, 248, 0.6)',
+                borderRadius: '9999px',
+                transition: 'width 0.05s linear',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ width: '1px', height: '16px', background: 'rgba(255, 255, 255, 0.2)' }} />
+
+        {/* Hint button (?) */}
+        <button
+          type="button"
+          onClick={onToggleHint}
+          title="Toggle Mission Hint [H]"
           style={{
-            color: 'var(--pink)',
+            width: '28px',
+            height: '28px',
+            borderRadius: '50%',
+            border: showHint
+              ? '1.5px solid var(--sky, #38BDF8)'
+              : '1px solid rgba(255, 255, 255, 0.25)',
+            background: showHint
+              ? 'rgba(56, 189, 248, 0.2)'
+              : 'rgba(255, 255, 255, 0.05)',
+            color: showHint ? 'var(--sky, #38BDF8)' : '#FFFFFF',
+            fontFamily: '"Instrument Sans", "Inter", sans-serif',
+            fontSize: '13px',
+            fontWeight: 700,
+            cursor: 'none',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
+            justifyContent: 'center',
+            transition: 'all 0.15s ease',
+            padding: 0,
+            lineHeight: 1,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = 'var(--sky, #38BDF8)';
+            e.currentTarget.style.background = 'rgba(56, 189, 248, 0.25)';
+          }}
+          onMouseLeave={(e) => {
+            if (!showHint) {
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)';
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+            }
           }}
         >
-          PROGRADE (+X) <span>▶</span>
-        </span>
+          ?
+        </button>
+
+        {/* Reset button (↻) */}
+        <button
+          type="button"
+          onClick={onReset}
+          title="Reset Level [R]"
+          style={{
+            width: '28px',
+            height: '28px',
+            borderRadius: '50%',
+            border: '1px solid rgba(255, 255, 255, 0.25)',
+            background: 'rgba(255, 255, 255, 0.05)',
+            color: '#FFFFFF',
+            fontFamily: '"Instrument Sans", "Inter", sans-serif',
+            fontSize: '15px',
+            fontWeight: 700,
+            cursor: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.15s ease',
+            padding: 0,
+            lineHeight: 1,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = 'var(--pink, #FF2D95)';
+            e.currentTarget.style.background = 'rgba(255, 45, 149, 0.25)';
+            e.currentTarget.style.color = 'var(--pink, #FF2D95)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)';
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+            e.currentTarget.style.color = '#FFFFFF';
+          }}
+        >
+          ↻
+        </button>
       </div>
 
-      {/* Top-Right: Delta-V Budget Frosted Pill */}
+      {/* Retrograde / Prograde Compass Cue */}
       <div
         style={{
           position: 'fixed',
-          top: '28px',
-          right: '32px',
+          top: '76px',
+          left: '50%',
+          transform: 'translateX(-50%)',
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
-          padding: '8px 20px',
-          ...FROSTED_PILL,
+          padding: '4px 16px',
+          ...ALPHA_FROSTED_PILL,
+          fontFamily: '"Instrument Sans", "Inter", sans-serif',
+          fontSize: '10px',
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          pointerEvents: 'none',
+          opacity: 0.85,
         }}
       >
-        <div
-          style={{
-            fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-            fontSize: '11px',
-            fontWeight: 700,
-            color: 'rgba(255, 255, 255, 0.8)',
-            letterSpacing: '0.1em',
-          }}
-        >
-          DELTA-V
-        </div>
-        <div
-          style={{
-            width: '140px',
-            height: '8px',
-            background: 'rgba(255, 255, 255, 0.1)',
-            borderRadius: '9999px',
-            overflow: 'hidden',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            boxSizing: 'border-box',
-          }}
-        >
-          <div
-            ref={fuelBarRef}
-            style={{
-              width: '100%',
-              height: '100%',
-              background: 'var(--sky)',
-              boxShadow: '0 0 10px var(--sky)',
-              borderRadius: '9999px',
-              transition: 'width 0.05s linear',
-            }}
-          />
-        </div>
+        <span style={{ color: 'var(--sky, #38BDF8)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span>◀</span> RETROGRADE (CLEAN)
+        </span>
+        <span style={{ color: 'rgba(255, 255, 255, 0.2)' }}>|</span>
+        <span style={{ color: 'var(--pink, #FF2D95)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          PROGRADE (HAZARD) <span>▶</span>
+        </span>
       </div>
 
-      {/* Bottom-Left: Target Data Panel (Frosted Glass Card) */}
+      {/* Target Data Panel: Visible only when grabbed == true */}
       <div
         ref={targetPanelRef}
         style={{
           position: 'fixed',
-          bottom: '36px',
+          bottom: '32px',
           left: '32px',
-          width: '290px',
-          padding: '20px 24px',
-          background: 'rgba(6, 13, 31, 0.6)',
+          width: '280px',
+          padding: '18px 22px',
+          background: 'rgba(6, 17, 32, 0.82)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
+          border: '1px solid rgba(255, 255, 255, 0.25)',
           borderRadius: '24px',
           boxSizing: 'border-box',
           boxShadow:
-            '0 16px 40px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.15)',
+            '0 16px 40px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
           display: 'none',
           flexDirection: 'column',
-          gap: '12px',
+          gap: '10px',
+          pointerEvents: 'none',
         }}
       >
         <div
           style={{
-            fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+            fontFamily: '"Instrument Sans", "Inter", sans-serif',
             fontSize: '11px',
             fontWeight: 700,
-            color: 'var(--sky)',
+            color: 'var(--sky, #38BDF8)',
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             display: 'flex',
-            alignItems: 'center',
             justifyContent: 'space-between',
           }}
         >
-          <span>TARGET TELEMETRY</span>
-          <span
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: 'var(--sky)',
-              boxShadow: '0 0 8px var(--sky)',
-            }}
-          />
+          <span>TARGET LOCK</span>
+          <span style={{ color: '#FFFFFF' }}>ACTIVE</span>
         </div>
 
-        <div
-          style={{
-            height: '1px',
-            background: 'rgba(255, 255, 255, 0.12)',
-          }}
-        />
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '90px 1fr',
-            rowGap: '8px',
-            fontFamily: 'var(--font-body, "Inter", sans-serif)',
-            fontSize: '13px',
-          }}
-        >
-          <span style={{ color: 'rgba(255, 255, 255, 0.5)' }}>NORAD ID</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontFamily: '"Instrument Sans", "Inter", sans-serif', fontSize: '12px', color: 'rgba(255, 255, 255, 0.6)' }}>
+            OBJECT ID
+          </span>
           <span
             ref={noradRef}
             style={{
+              fontFamily: 'ui-monospace, monospace',
+              fontSize: '13px',
+              fontWeight: 700,
               color: '#FFFFFF',
-              fontWeight: 600,
-              fontFamily: 'var(--font-numeric, monospace)',
             }}
           >
-            -
+            SAT-01
           </span>
+        </div>
 
-          <span style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Mass</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontFamily: '"Instrument Sans", "Inter", sans-serif', fontSize: '12px', color: 'rgba(255, 255, 255, 0.6)' }}>
+            PAYLOAD MASS
+          </span>
           <span
             ref={massRef}
             style={{
-              color: '#FFFFFF',
-              fontWeight: 600,
-              fontFamily: 'var(--font-numeric, monospace)',
+              fontFamily: 'ui-monospace, monospace',
+              fontSize: '13px',
+              fontWeight: 700,
+              color: 'var(--sky, #38BDF8)',
             }}
           >
-            -
+            25 kg
           </span>
+        </div>
 
-          <span style={{ color: 'rgba(255, 255, 255, 0.5)' }}>Lifetime</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontFamily: '"Instrument Sans", "Inter", sans-serif', fontSize: '12px', color: 'rgba(255, 255, 255, 0.6)' }}>
+            TRAJECTORY
+          </span>
           <span
             ref={lifetimeRef}
             style={{
-              color: 'var(--sky)',
+              fontFamily: '"Instrument Sans", "Inter", sans-serif',
+              fontSize: '12px',
               fontWeight: 700,
+              color: 'var(--sky, #38BDF8)',
             }}
           >
-            0 Years
+            0 Years (Deorbit)
           </span>
         </div>
       </div>

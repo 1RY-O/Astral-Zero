@@ -16,6 +16,8 @@ export default function LevelModal({
   const currentDef = LEVEL_DEFS.find((l) => l.id === currentLevel) || LEVEL_DEFS[0];
   const isEndState = state === 'cleared' || state === 'failed';
   const fuelBonus = Math.round(500 * fuel);
+  const displayName =
+    currentDef.id === 2 ? 'Two-Body Problem: Gravity Assist' : currentDef.name;
 
   return (
     <div
@@ -23,9 +25,9 @@ export default function LevelModal({
         position: 'fixed',
         inset: 0,
         zIndex: 200,
-        background: 'rgba(6, 13, 31, 0.85)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
+        background: 'rgba(6, 17, 32, 0.75)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -36,12 +38,15 @@ export default function LevelModal({
       <div
         style={{
           width: '520px',
-          maxWidth: '100%',
-          background: 'var(--night)',
-          border: '2px solid var(--sky)',
-          borderRadius: '24px',
+          maxWidth: 'calc(100vw - 32px)',
+          background: 'rgba(6, 17, 32, 0.88)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.25)',
+          borderRadius: '28px',
           padding: '36px',
-          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.25)',
+          boxShadow:
+            '0 24px 64px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
           display: 'flex',
           flexDirection: 'column',
           gap: '20px',
@@ -52,10 +57,10 @@ export default function LevelModal({
           <div>
             <div
               style={{
-                fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+                fontFamily: '"Instrument Sans", "Inter", sans-serif',
                 fontSize: '11px',
                 fontWeight: 700,
-                color: 'var(--sky)',
+                color: 'var(--sky, #38BDF8)',
                 letterSpacing: '0.14em',
                 marginBottom: '4px',
               }}
@@ -64,10 +69,11 @@ export default function LevelModal({
             </div>
             <h2
               style={{
-                fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-                fontSize: '28px',
-                fontWeight: 700,
-                color: 'var(--white)',
+                fontFamily: '"Instrument Sans", "Inter", sans-serif',
+                fontSize: '26px',
+                fontWeight: 800,
+                color: '#FFFFFF',
+                letterSpacing: '-0.03em',
                 margin: 0,
               }}
             >
@@ -75,7 +81,7 @@ export default function LevelModal({
                 ? state === 'cleared'
                   ? 'MISSION SUCCESSFUL'
                   : 'MISSION ABORTED'
-                : currentDef.name}
+                : displayName}
             </h2>
           </div>
 
@@ -84,9 +90,9 @@ export default function LevelModal({
               type="button"
               onClick={onClose}
               style={{
-                background: 'transparent',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: 'var(--white)',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.25)',
+                color: '#FFFFFF',
                 borderRadius: '50%',
                 width: '32px',
                 height: '32px',
@@ -94,6 +100,14 @@ export default function LevelModal({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                fontSize: '14px',
+                transition: 'border-color 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.25)';
               }}
             >
               ✕
@@ -106,42 +120,43 @@ export default function LevelModal({
           <div
             style={{
               background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
-              borderRadius: '16px',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '20px',
               padding: '20px',
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
+              fontFamily: '"Instrument Sans", "Inter", sans-serif',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Operation Score</span>
-              <span style={{ color: 'var(--white)', fontWeight: 700, fontSize: '18px' }}>
+              <span style={{ color: 'rgba(255, 255, 255, 0.65)' }}>Operation Score</span>
+              <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '18px' }}>
                 {score}
               </span>
             </div>
             {state === 'cleared' && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Delta-V Fuel Bonus</span>
-                <span style={{ color: 'var(--sky)', fontWeight: 700 }}>+{fuelBonus} PTS</span>
+                <span style={{ color: 'rgba(255, 255, 255, 0.65)' }}>Delta-V Fuel Bonus</span>
+                <span style={{ color: 'var(--sky, #38BDF8)', fontWeight: 700 }}>+{fuelBonus} PTS</span>
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Rule Compliance</span>
-              <span style={{ color: 'var(--sky)', fontWeight: 700 }}>NASA 25-Year Standard</span>
+              <span style={{ color: 'rgba(255, 255, 255, 0.65)' }}>Rule Compliance</span>
+              <span style={{ color: 'var(--sky, #38BDF8)', fontWeight: 700 }}>NASA 25-Year Standard</span>
             </div>
           </div>
         ) : (
           <div
             style={{
-              fontFamily: 'var(--font-body, "Inter", sans-serif)',
+              fontFamily: '"Instrument Sans", "Inter", sans-serif',
               fontSize: '14px',
               color: 'rgba(255, 255, 255, 0.85)',
               lineHeight: 1.6,
             }}
           >
             <p style={{ margin: '0 0 10px 0' }}>{currentDef.hint}</p>
-            <div style={{ fontSize: '12px', color: 'var(--sky)' }}>
+            <div style={{ fontSize: '12px', color: 'var(--sky, #38BDF8)', fontWeight: 600 }}>
               Delta-V Allocation: {currentDef.fuelMax} kg/s
             </div>
           </div>
@@ -151,10 +166,10 @@ export default function LevelModal({
         <div>
           <div
             style={{
-              fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+              fontFamily: '"Instrument Sans", "Inter", sans-serif',
               fontSize: '11px',
               fontWeight: 700,
-              color: 'rgba(255, 255, 255, 0.5)',
+              color: 'rgba(255, 255, 255, 0.65)',
               letterSpacing: '0.08em',
               marginBottom: '10px',
             }}
@@ -177,16 +192,22 @@ export default function LevelModal({
                   onClick={() => onSelectLevel(lvl.id)}
                   style={{
                     padding: '10px 8px',
-                    borderRadius: '12px',
-                    border: active ? '2px solid var(--sky)' : '1px solid rgba(255, 255, 255, 0.15)',
-                    background: active ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.03)',
-                    color: active ? 'var(--sky)' : 'var(--white)',
-                    fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+                    borderRadius: '16px',
+                    border: active ? '1.5px solid var(--sky, #38BDF8)' : '1px solid rgba(255, 255, 255, 0.2)',
+                    background: active ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255, 255, 255, 0.04)',
+                    color: active ? 'var(--sky, #38BDF8)' : '#FFFFFF',
+                    fontFamily: '"Instrument Sans", "Inter", sans-serif',
                     fontSize: '13px',
                     fontWeight: 700,
                     cursor: 'none',
                     textAlign: 'center',
                     transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!active) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
                   }}
                 >
                   0{lvl.id}
@@ -198,45 +219,92 @@ export default function LevelModal({
 
         {/* Action Buttons */}
         <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
-          {isEndState && state === 'cleared' && currentLevel < 8 ? (
-            <button
-              type="button"
-              onClick={onNextLevel}
-              style={{
-                flex: 1,
-                padding: '14px',
-                borderRadius: '99px',
-                border: 'none',
-                background: 'var(--pink)',
-                color: 'var(--white)',
-                fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
-                fontSize: '15px',
-                fontWeight: 700,
-                cursor: 'none',
-                letterSpacing: '0.04em',
-              }}
-            >
-              NEXT MISSION →
-            </button>
+          {isEndState ? (
+            <>
+              <button
+                type="button"
+                onClick={onRetry}
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  borderRadius: '9999px',
+                  border: '1px solid rgba(255, 255, 255, 0.25)',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: '#FFFFFF',
+                  fontFamily: '"Instrument Sans", "Inter", sans-serif',
+                  fontSize: '15px',
+                  fontWeight: 700,
+                  cursor: 'none',
+                  transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                }}
+              >
+                RETRY
+              </button>
+              {state === 'cleared' && currentLevel < 8 && (
+                <button
+                  type="button"
+                  onClick={onNextLevel}
+                  style={{
+                    flex: 1,
+                    padding: '14px',
+                    borderRadius: '9999px',
+                    border: 'none',
+                    background: '#FF2D95',
+                    color: '#FFFFFF',
+                    fontFamily: '"Instrument Sans", "Inter", sans-serif',
+                    fontSize: '15px',
+                    fontWeight: 700,
+                    cursor: 'none',
+                    boxShadow: '0 8px 24px rgba(255, 45, 149, 0.45)',
+                    transition: 'transform 0.15s ease, filter 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.02)';
+                    e.currentTarget.style.filter = 'brightness(1.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                    e.currentTarget.style.filter = 'none';
+                  }}
+                >
+                  NEXT MISSION
+                </button>
+              )}
+            </>
           ) : (
             <button
               type="button"
-              onClick={onRetry}
+              onClick={onClose}
               style={{
-                flex: 1,
+                width: '100%',
                 padding: '14px',
-                borderRadius: '99px',
+                borderRadius: '9999px',
                 border: 'none',
-                background: isEndState && state === 'failed' ? 'var(--pink)' : 'var(--sky)',
-                color: isEndState && state === 'failed' ? 'var(--white)' : 'var(--night)',
-                fontFamily: 'var(--font-display, "Space Grotesk", sans-serif)',
+                background: '#FF2D95',
+                color: '#FFFFFF',
+                fontFamily: '"Instrument Sans", "Inter", sans-serif',
                 fontSize: '15px',
                 fontWeight: 700,
                 cursor: 'none',
-                letterSpacing: '0.04em',
+                boxShadow: '0 8px 24px rgba(255, 45, 149, 0.45)',
+                transition: 'transform 0.15s ease, filter 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.02)';
+                e.currentTarget.style.filter = 'brightness(1.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.filter = 'none';
               }}
             >
-              {isEndState ? 'RETRY MISSION' : 'DEPLOY TUG'}
+              RESUME MISSION
             </button>
           )}
         </div>

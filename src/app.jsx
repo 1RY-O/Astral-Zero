@@ -55,16 +55,25 @@ export default function App() {
   const massRef = useRef(null);
   const lifetimeRef = useRef(null);
 
-  // Default to inGame = true so player can immediately interact, grab, and swing
-  const [inGame, setInGame] = useState(true);
-  const inGameRef = useRef(true);
+  // Default to landing page overlay unless autoplay is specified in URL query
+  const [inGame, setInGame] = useState(() => {
+    return parseParams().autoplay;
+  });
+  const inGameRef = useRef(false);
 
-  const [currentLevel, setCurrentLevel] = useState(1);
+  const [currentLevel, setCurrentLevel] = useState(() => {
+    return parseParams().level || 1;
+  });
   const [levelModalOpen, setLevelModalOpen] = useState(false);
   const [modalState, setModalState] = useState(null); // 'cleared' | 'failed' | null
   const [endScore, setEndScore] = useState(0);
   const [endFuel, setEndFuel] = useState(1);
-  const [levelIntroTitle, setLevelIntroTitle] = useState('FIRST CONTACT');
+  const [levelIntroTitle, setLevelIntroTitle] = useState(() => {
+    const lvl = parseParams().level || 1;
+    if (lvl === 2) return 'TWO-BODY PROBLEM: GRAVITY ASSIST';
+    const def = getLevelDef(lvl);
+    return def ? def.name.toUpperCase() : 'FIRST CONTACT';
+  });
   const [showIntro, setShowIntro] = useState(true);
   const [showHint, setShowHint] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(1); // 1: Grab, 2: Thrust, 3: Release
@@ -113,6 +122,11 @@ export default function App() {
     setShowIntro(true);
     loadLevel(1);
   }, [loadLevel]);
+
+  const handleStartMissionRef = useRef(handleStartMission);
+  useEffect(() => {
+    handleStartMissionRef.current = handleStartMission;
+  }, [handleStartMission]);
 
   const handleNextLevel = useCallback(() => {
     loadLevel(currentLevel + 1);
@@ -326,6 +340,7 @@ export default function App() {
 
     let lastClickTime = 0;
     function onPointerDown(e) {
+      if (!inGameRef.current) return;
       if (e.button !== undefined && e.button !== 0) return;
       if (e.target && typeof e.target.closest === 'function' && e.target.closest('button, a')) {
         return;
@@ -363,6 +378,19 @@ export default function App() {
     function onKeyDown(e) {
       if (keysRef.current.has(e.code)) return;
       keysRef.current.add(e.code);
+
+      if (!inGameRef.current) {
+        if (e.code === 'Space' || e.code === 'KeyE' || e.code === 'Enter') {
+          handleStartMissionRef.current?.();
+          if (e.code === 'KeyE') {
+            world.grabNearest();
+          } else if (e.code === 'Space') {
+            world.setThrusting(true);
+          }
+          e.preventDefault();
+          return;
+        }
+      }
 
       if (e.code === 'Space') {
         world.setThrusting(true);
@@ -448,7 +476,7 @@ export default function App() {
       {/* Custom Cursor */}
       <Cursor />
 
-      {/* Main Menu with MicroSlats Background */}
+      {/* Main Menu (Alpha Project Landing Page Overlay) */}
       <MainMenu onStart={handleStartMission} visible={!inGame} />
 
       {/* In-Game HUD */}
@@ -538,6 +566,7 @@ export default function App() {
           width: '100vw',
           height: '100vh',
           opacity: inGame ? 1 : 0,
+          pointerEvents: inGame ? 'auto' : 'none',
           transition: 'opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       />

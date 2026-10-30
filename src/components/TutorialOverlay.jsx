@@ -47,13 +47,13 @@ const LEVEL_HINTS = {
 };
 
 const FROSTED_PILL = {
-  background: 'rgba(6, 13, 31, 0.75)',
+  background: 'rgba(6, 17, 32, 0.82)',
   backdropFilter: 'blur(16px)',
   WebkitBackdropFilter: 'blur(16px)',
-  border: '1px solid rgba(255, 255, 255, 0.15)',
-  borderRadius: '20px',
+  border: '1px solid rgba(255, 255, 255, 0.25)',
+  borderRadius: '24px',
   boxShadow:
-    '0 12px 36px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.15)',
+    '0 16px 40px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.2)',
 };
 
 const TutorialOverlay = forwardRef(function TutorialOverlay(

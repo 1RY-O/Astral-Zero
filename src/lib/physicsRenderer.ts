@@ -105,7 +105,7 @@ void main() {
     color = mix(color, C_PINK, u_flashPink * 0.6);
   }
 
-  float bgAlpha = d < 0.0 ? 1.0 : 0.65;
+  float bgAlpha = d < 0.0 ? 1.0 : 0.35;
   gl_FragColor = vec4(color, bgAlpha);
 }
 `;

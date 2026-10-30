@@ -14,17 +14,16 @@ export default function MainMenu({ onStart, visible = true }) {
         justifyContent: 'center',
         overflow: 'hidden',
         userSelect: 'none',
-        background:
-          'radial-gradient(circle at center, rgba(6, 17, 32, 0.3) 0%, rgba(6, 17, 32, 0.75) 100%)',
+        background: 'transparent',
       }}
     >
       {/* Alpha Project Frosted Glass Panel */}
       <div
         style={{
-          width: '520px',
-          maxWidth: 'calc(100vw - 40px)',
-          padding: '44px 40px',
-          background: 'rgba(6, 17, 32, 0.82)',
+          width: '560px',
+          maxWidth: 'calc(100vw - 36px)',
+          padding: '48px 44px',
+          background: 'rgba(6, 17, 32, 0.78)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
           border: '1px solid rgba(255, 255, 255, 0.25)',
@@ -38,16 +37,17 @@ export default function MainMenu({ onStart, visible = true }) {
           alignItems: 'center',
         }}
       >
-        {/* Challenge Eyebrow */}
+        {/* Challenge Eyebrow (Locked NASA phrasing) */}
         <div
           style={{
             fontFamily: '"Instrument Sans", "Inter", sans-serif',
             fontSize: '11px',
             fontWeight: 700,
             color: 'var(--sky, #38BDF8)',
-            letterSpacing: '0.14em',
+            letterSpacing: '0.12em',
             textTransform: 'uppercase',
-            marginBottom: '12px',
+            marginBottom: '16px',
+            whiteSpace: 'nowrap',
           }}
         >
           built for the NASA International Space Apps Challenge 2026.
@@ -57,14 +57,15 @@ export default function MainMenu({ onStart, visible = true }) {
         <h1
           style={{
             fontFamily: '"Instrument Sans", "Inter", sans-serif',
-            fontSize: 'clamp(46px, 6vw, 68px)',
+            fontSize: 'clamp(44px, 5.5vw, 64px)',
             fontWeight: 800,
             color: '#FFFFFF',
             textTransform: 'uppercase',
             letterSpacing: '-0.04em',
-            lineHeight: 1.02,
+            lineHeight: 1.05,
             margin: '0 0 8px 0',
             textShadow: '0 6px 24px rgba(0, 0, 0, 0.6)',
+            whiteSpace: 'nowrap',
           }}
         >
           DEBRIS DERBY
@@ -73,11 +74,11 @@ export default function MainMenu({ onStart, visible = true }) {
         <div
           style={{
             fontFamily: '"Instrument Sans", "Inter", sans-serif',
-            fontSize: '18px',
+            fontSize: '16px',
             fontWeight: 500,
             color: 'var(--sky, #38BDF8)',
             letterSpacing: '-0.02em',
-            marginBottom: '22px',
+            marginBottom: '24px',
           }}
         >
           Orbital Kinetic Remediation
@@ -91,7 +92,7 @@ export default function MainMenu({ onStart, visible = true }) {
             color: 'rgba(255, 255, 255, 0.85)',
             lineHeight: 1.6,
             letterSpacing: '-0.01em',
-            margin: '0 0 32px 0',
+            margin: '0 0 34px 0',
             textAlign: 'center',
           }}
         >

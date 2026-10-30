@@ -27,8 +27,8 @@ export default function Cursor() {
       if (shouldHover) {
         // Alpha Project: scale ring to 1.16 and show "Enter" label
         ring.style.transform = 'translate(-50%, -50%) scale(1.16)';
-        ring.style.borderColor = 'rgba(255, 255, 255, 0.85)';
-        ring.style.backgroundColor = 'rgba(255, 255, 255, 0.12)';
+        ring.style.borderColor = 'rgba(255, 255, 255, 0.75)';
+        ring.style.backgroundColor = 'rgba(6, 17, 32, 0.65)';
         dot.style.opacity = '0';
         dot.style.transform = 'translate(-50%, -50%) scale(0.2)';
         label.style.opacity = '1';
@@ -37,7 +37,7 @@ export default function Cursor() {
         // Alpha Project: default 36x36px ring and 12x12px dot
         ring.style.transform = 'translate(-50%, -50%) scale(1)';
         ring.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-        ring.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+        ring.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
         dot.style.opacity = '1';
         dot.style.transform = 'translate(-50%, -50%) scale(1)';
         label.style.opacity = '0';
@@ -135,7 +135,7 @@ export default function Cursor() {
           height: '36px',
           borderRadius: '50%',
           border: '1px solid rgba(255, 255, 255, 0.4)',
-          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+          backgroundColor: 'rgba(255, 255, 255, 0.04)',
           backdropFilter: 'blur(3px)',
           WebkitBackdropFilter: 'blur(3px)',
           transform: 'translate(-50%, -50%) scale(1)',

@@ -251,11 +251,11 @@ const HUD = forwardRef(function HUD(
         </button>
       </div>
 
-      {/* Retrograde / Prograde Compass Cue */}
+      {/* Retrograde / Prograde Compass Cue placed cleanly at bottom center */}
       <div
         style={{
           position: 'fixed',
-          top: '76px',
+          bottom: '24px',
           left: '50%',
           transform: 'translateX(-50%)',
           display: 'flex',
@@ -285,8 +285,8 @@ const HUD = forwardRef(function HUD(
         ref={targetPanelRef}
         style={{
           position: 'fixed',
-          bottom: '32px',
-          left: '32px',
+          bottom: '24px',
+          left: '24px',
           width: '280px',
           padding: '18px 22px',
           background: 'rgba(6, 17, 32, 0.82)',

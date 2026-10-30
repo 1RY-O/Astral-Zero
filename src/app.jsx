@@ -16,6 +16,7 @@ import { initAudio } from './game/audio.js';
 import { getLevelDef, LEVEL_DEFS } from './game/levels.js';
 
 import Cursor from './components/Cursor.jsx';
+import Aurora from './components/Aurora.jsx';
 import Particles from './components/Particles.jsx';
 import MainMenu from './components/MainMenu.jsx';
 import HUD from './components/HUD.jsx';
@@ -464,12 +465,26 @@ export default function App() {
         userSelect: 'none',
       }}
     >
-      {/* ReactBits WebGL Background Component (drifting 3D celestial particle field) */}
+      {/* ReactBits WebGL Background Component (Aurora + Drifting Particles) */}
+      <Aurora
+        colorStops={['#061120', '#38BDF8', '#FF2D95', '#38BDF8', '#061120']}
+        amplitude={1.2}
+        blend={0.6}
+        speed={0.6}
+        height={0.85}
+        glow={0.8}
+        layers={2}
+        style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}
+      />
       <Particles
-        particleCount={280}
-        particleSpread={12}
+        particleCount={180}
+        particleSpread={14}
         speed={0.06}
-        particleColors={['#FFFFFF', '#38BDF8', '#7DD3FC', '#FF2D95', '#FFFFFF']}
+        particleColors={['#FFFFFF', '#7DD3FC', '#FFFFFF']}
+        alphaParticles={false}
+        particleBaseSize={70}
+        glow={0.5}
+        twinkle={0.5}
         style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}
       />
 

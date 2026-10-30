@@ -1,4 +1,4 @@
-# HELIOS PROTOCOL: Space Weather Superhero Tycoon
+# KESSLER TYCOON: Orbital Debris Management Simulator
 
 > **Built for the NASA International Space Apps Challenge 2026.**
 
@@ -11,80 +11,71 @@
 
 ---
 
-## ☀️ The Pitch
+## 🚀 The Pitch
 
-**HELIOS PROTOCOL** is an addictive idle-tycoon game where you step into the shoes of the Director of an international space-protection agency. Your mission: defend Earth’s power grids, satellite constellations, and astronauts from catastrophic space-weather threats driven by **Solar Cycle 25**.
+**KESSLER TYCOON** is an addictive visual space-management idle-tycoon game where you play as an orbital debris contractor hired by a rogue, corrupted NASA flight AI. 
 
-Blending the tactile satisfaction of *Cash Inc.* and *Roblox Tycoons* with high-stakes space science, HELIOS puts you in charge of three superhero divisions. Manage your **Funding Credits**, keep Earth’s **Magnetosphere Integrity** above critical collapse levels, and endure scathing commentary from a corrupted, hostile NASA Mission Control AI assistant that berates your financial decisions while solar flares melt your capacitors.
+Low Earth Orbit (LEO), Medium Earth Orbit (MEO), and Geostationary Orbit (GEO) are rapidly congesting with defunct satellites, rocket stages, and hypervelocity shrapnel. Your goal: deploy orbital tugs to clear debris, earn contract bounties, grind for automated tug upgrades, and prevent a runaway **Kessler Cascade** before Mission Control terminates your contract or your budget collapses into bankruptcy.
 
 ```
 +-----------------------------------------------------------------------------------+
-|  [HELIOS PROTOCOL // NASA INTERNATIONAL SPACE APPS CHALLENGE 2026]                |
+|  [LIVE ORBITAL RADAR — EARTH LEO / MEO / GEO RINGS]                               |
 |                                                                                   |
-|    (EARTH)                                                               (THE SUN)|
-|    [###]=====>  [HERO CRAFT IN FLIGHT]  =====>  [ABSORBS FLARE]  =====>  ( * * * )|
-|    SHIELD: 94%                                                          SDO: X5.4 |
+|                   . - ~ ~ - .      (GEO RING - HOT PINK)                          |
+|               . '     . - ~ ~ - .                                                 |
+|             /     . '   . - ~ - .   \  (MEO RING - PURPLE)                        |
+|            /     /    . '       ' .  \                                            |
+|           |     |    |   (EARTH)   |  | (LEO RING - SKY BLUE)                     |
+|           |     |    |   [#####]   |  |                                           |
+|            \     \    \  ^--|>     /  /  <== [GLOWING TUG LAUNCHING OUT]          |
+|             \     . '   ' - ~ - ' . /          [ZAPS DEBRIS WITH LASER]           |
+|               . '     . - ~ ~ - . '            [RETURNS WITH +$350 CASH]          |
+|                   ' - ~ ~ - '                                                     |
 |                                                                                   |
 |  +-------------------------+ +-------------------------+ +----------------------+ |
-|  | SOLAR OBSERVATION CTR   | | RESEARCH LAB            | | SAT DEFENSE DIVISION | |
-|  | [LIVE OBSERVATION]      | | [SCIENTIFIC FORECAST]   | | [HERO MISSION]       | |
-|  | NASA SDO AIA Flares     | | NASA DONKI CMEs         | | NOAA SWPC Kp Storms  | |
-|  | [DEPLOY INTERCEPTOR]    | | [DEPLOY HARVESTER]      | | [DEPLOY CRUISER]     | |
-|  | ⚙ AUTO-DEPLOY ACTIVE    | | ⚙ AUTOMATE ($1,200)     | | ⚙ AUTOMATE ($2,500)  | |
+|  | LOW EARTH ORBIT (LEO)   | | MEDIUM EARTH ORBIT(MEO) | | GEOSTATIONARY (GEO)  | |
+|  | DEBRIS: 14              | | DEBRIS: 18              | | DEBRIS: 25           | |
+|  | PAYOUT: +$350           | | PAYOUT: +$550           | | PAYOUT: +$900        | |
+|  | [🚀 DEPLOY TUG ($200)]  | | [🚀 DEPLOY TUG ($200)]  | | [🚀 DEPLOY TUG ($200)]| |
+|  | NEXT: AUTO-TUG ($1,500) | | NEXT: AUTO-TUG ($3,000) | | NEXT: AUTO-TUG ($5,000)| |
 |  +-------------------------+ +-------------------------+ +----------------------+ |
 +-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 🛰 How HELIOS Uses NASA Data
+## 🛰 Core Visual Feedback & Gameplay Loop
 
-HELIOS PROTOCOL bridges real-world heliophysics data pipelines into gamified tycoon mechanics. In the command dashboard, operations are strictly categorized into three transparent tiers:
+### 1. Central Orbital Radar Canvas
+- **Planet Earth at Center:** An illuminated Earth sphere rendered at the center of the orbital arena.
+- **Three Concentric Orbital Rings:**
+  - **LEO Ring (Sky Blue):** 160 – 2,000 km.
+  - **MEO Ring (Purple):** 2,000 – 35,786 km.
+  - **GEO Ring (Hot Pink):** 35,786 km.
+- **Dynamic Orbiting Debris:** Real debris dots orbit each ring at realistic relative velocities. The visible dot count directly tracks active debris in that orbital band.
+- **Visible Flying Tugs & Laser Zaps:**
+  - Clicking **DEPLOY TUG** launches a glowing triangular tug craft from Earth.
+  - The tug flies along a forward trajectory straight to the designated ring and targets a debris dot.
+  - On arrival, the tug fires a laser zap beam at the debris, triggering an explosion of sparks and vaporizing the dot.
+  - Crystalline payout chimes sound and floating text (`+$350`, `+1 CLEARED`) floats up from the zap location.
+  - The tug maneuvers around and flies back to dock with Earth.
 
-| Simulation Pillar | Scientific Agency / Instrument | Real-World Concept Simulating | Gameplay Mechanic |
-|---|---|---|---|
-| **`[LIVE OBSERVATION]`** | **NASA SDO** (Solar Dynamics Observatory) AIA 131Å / 171Å / 304Å | Extreme Ultraviolet (EUV) solar flares and Active Region coronal loops | High-speed manual clicks; rapid flare interception and immediate credit rewards. |
-| **`[SCIENTIFIC FORECAST]`** | **NASA DONKI** (Space Weather Database of Notifications, Knowledge, Information) | Coronal Mass Ejections (CMEs), WSA-Enlil 3D solar wind modeling, interplanetary shock transit (15–72h) | Mid-range generation; deflecting plasma fronts and automated research revenue. |
-| **`[SIMULATED HERO MISSION]`** | **NOAA SWPC** (Space Weather Prediction Center) | Planetary K-index ($Kp = 0\text{--}9$), G1–G5 storm scales, and Magnetopause Bow Shock compression ($10\,R_E \to <6.6\,R_E$) | Heavy superhero defense cruisers; repairing dipole shield integrity and grid defense. |
+### 2. Roblox Tycoon Progression Loop
+- **Grind & Upgrade Goals:** Each orbital sector clearly displays its next upgrade goal (e.g. `NEXT UPGRADE: AUTO-TUG ($1,500)`).
+- **Automation Unlocks:** The button is grayed out until the player earns enough budget. Once purchased, the sector unlocks `⚡ AUTO-TUG ACTIVE`, automatically dispatching tugs and banking cash on autopilot.
+- **Fleet Speed Upgrades:** Upgrade tug engines (MK-1 to MK-5) to cut transit times and boost contract payouts across all zones.
 
-### In-Game Science Telemetry Modal
-Players and judges can click the **`[🛰 NASA DATA & SOURCES]`** button in the HUD to open the interactive `ScienceAndSources.jsx` telemetry modal, which outlines the exact data sources, formulas, and references underpinning the game.
-
----
-
-## 🧠 Educational Value
-
-HELIOS PROTOCOL turns abstract solar-terrestrial physics into palpable cause-and-effect gameplay:
-
-1. **Solar Flares vs. Coronal Mass Ejections (CMEs):** Players learn that solar flares travel at light speed ($c \approx 8.3\text{ minutes}$ to Earth), causing immediate high-frequency radio blackouts (R-scale), whereas CMEs are magnetized plasma clouds that take 15 to 72 hours to arrive, driving severe geomagnetic storms.
-2. **Earth's Magnetosphere as a Living Shield:** The game visually models Earth’s dipole magnetic field and dayside bow shock standoff distance. When coronal mass ejections exert high dynamic pressure, the magnetopause compresses inside geostationary orbit ($6.6\,R_E$), exposing satellites directly to solar wind plasma.
-3. **Geomagnetically Induced Currents (GICs):** If Magnetosphere Integrity drops to 0%, the game illustrates how extreme space storms induce electrical currents in ground high-voltage transformers, triggering widespread planetary power blackouts.
-4. **Automation & Resource Allocation:** Teaches the real-world operational challenges space agencies face: balancing limited funding credits between rapid manual intervention and long-term automated space-weather observation networks.
-
----
-
-## 🎮 Core Gameplay Mechanics & Juice
-
-### 1. The Cash Inc. Visual Upgrade
-- **Tactile 3D Buttons:** Chunky, beveled arcade buttons with responsive physical depression, custom hover states, and chromatic glitch effects.
-- **Interplanetary Flight Corridor:** Deploying a hero craft spawns a glowing ship that journeys across the 1-AU corridor between Earth and the Sun, absorbs solar flare plasma at the corona, and flies back to Earth.
-- **Celebratory Audio & Floating Rewards:** Returning hero craft trigger crystalline Cash Inc. arpeggiated chimes (`playCashChime`) and floating neon `+Credits` and `+Integrity` particles.
-- **Tycoon Automation:** Each department can be upgraded with automated drone deployment (`⚙ AUTOMATE`), generating passive revenue and continuous shield repairs.
-
-### 2. The Hostile AI Assistant
-An unhinged, sarcastic NASA Mission Control AI assistant monitors your performance via WebSocket telemetry:
-- Berates you when you idle while Solar Cycle 25 peaks.
-- Sounds high-intensity red alerts and violently shakes the CRT screen when Magnetosphere Integrity drops below 35%.
-- Mocks your balance sheet when you flirt with corporate insolvency.
+### 3. Sarcastic Corrupted NASA AI
+- Monitors contractor performance via real-time WebSocket events.
+- Taunts the player when idle, berates failed financial bets, and triggers high-intensity red alert screen shakes when Kessler Risk exceeds 80%.
 
 ---
 
 ## 🛠 Tech Stack
 
-- **Frontend:** React 18, Vite 7.3, WebGL Canvas (MicroSlats shader background), Web Audio API (procedural retro synthesis).
+- **Frontend:** React 18, Vite 7.3, WebGL Canvas (MicroSlats shader background), 2D Canvas orbital radar (rAF loop), Web Audio API (procedural retro synthesis).
 - **Backend:** Node.js (v20+), Express 4, Socket.IO 4.8.4.
 - **Architecture:** Separated client/server monorepo with real-time bidirectional WebSocket state synchronization.
-- **Design Tokens & Styling:** Corrupted CRT scanlines, chromatic aberration shaders, phosphor wireframes, and responsive tactile controls.
 
 ---
 
@@ -95,10 +86,9 @@ An unhinged, sarcastic NASA Mission Control AI assistant monitors your performan
 - npm $\ge 9.0.0$
 
 ### 1. Installation
-Clone the repository and install dependencies across the monorepo:
 ```bash
-git clone https://github.com/1RY-O/Astral-Zero.git helios-protocol
-cd helios-protocol
+git clone https://github.com/1RY-O/Astral-Zero.git kessler-tycoon
+cd kessler-tycoon
 npm install
 ```
 
@@ -115,13 +105,13 @@ npm run dev
   ```bash
   npm run dev:server
   ```
-  *Starts the Express + Socket.IO space weather server on `http://localhost:3000`.*
+  *Starts the Express + Socket.IO server on `http://localhost:3000`.*
 
 - **Terminal 2 (Vite Frontend):**
   ```bash
   npm run dev:client
   ```
-  *Starts the Vite React development server on `http://localhost:5173` (proxied to backend).*
+  *Starts the Vite React development server on `http://localhost:5173`.*
 
 ### 3. Production Build
 Verify all production build targets:
@@ -131,37 +121,5 @@ npm run build
 
 ---
 
-## 📂 Project Architecture
-
-```
-helios-protocol/
-├── client/                     # Vite + React 18 Frontend
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Landing.jsx            # WebGL MicroSlats cosmic landing page
-│   │   │   ├── TycoonDashboard.jsx    # HELIOS command console & flight corridor
-│   │   │   ├── ScienceAndSources.jsx  # NASA DONKI/SDO/NOAA scientific modal
-│   │   │   └── RageNotifications.jsx  # Corrupted AI boss taunt banner
-│   │   ├── audio.js                   # Procedural Web Audio API sound engine
-│   │   ├── styles/glitch.css          # CRT scanlines & tactile button styles
-│   │   └── App.jsx                    # Root client router & socket orchestration
-│   └── package.json
-├── server/                     # Node.js + Express + Socket.IO Backend
-│   ├── routes/
-│   │   ├── missions.js                # Space weather sectors & classifications
-│   │   └── telemetry.js               # Simulated live SDO/DONKI/NOAA feed
-│   ├── index.js                       # Authoritative game simulation tick & AI
-│   └── package.json
-├── shared/                     # Shared constants, economy & science specs
-│   └── constants.js
-└── README.md
-```
-
----
-
-## 📜 Citations & Scientific Integrity
-
-- **NASA Solar Dynamics Observatory (SDO):** Atmospheric Imaging Assembly (AIA) multi-wavelength extreme ultraviolet imaging.
-- **NASA DONKI:** Space Weather Database of Notifications, Knowledge, Information (Space Weather Analysis Center & Community Coordinated Modeling Center).
-- **NOAA SWPC:** Space Weather Prediction Center Planetary K-index & Space Weather Scales (NOAA-SWPC-G/S/R).
-- **Compliance:** Built strictly for the **NASA International Space Apps Challenge 2026**. Free of banned instruments or secondary unverified metrics.
+## 📜 Compliance
+Built for the **NASA International Space Apps Challenge 2026**. Free of banned instruments or secondary unverified metrics.

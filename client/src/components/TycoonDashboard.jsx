@@ -1,25 +1,30 @@
 /**
- * HELIOS PROTOCOL: Space Weather Superhero Tycoon
- * TycoonDashboard.jsx — Master Corrupted CRT Dashboard & Cash Inc Visual Feedback
+ * Kessler Tycoon — Dashboard Component
+ * Corrupted CRT terminal with central real-time orbital canvas & Roblox Tycoon progression.
  * Built for the NASA International Space Apps Challenge 2026.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import ScienceAndSources from './ScienceAndSources.jsx';
 import {
   playCashChime,
-  playHeroLaunch,
-  playFlareAbsorption,
+  playTugLaunch,
+  playZap,
   playUpgradeDing,
-  playShieldOvercharge,
+  playPurgeAlarm,
 } from '../audio.js';
 import '../styles/glitch.css';
 
-export const getIntegrityColor = (integrity) => {
-  const val = parseFloat(integrity);
-  if (val > 65) return '#4CAF50';
-  if (val >= 35) return '#FFC107';
+export const getKesslerColor = (risk) => {
+  const val = parseFloat(risk);
+  if (val < 50) return '#4CAF50';
+  if (val < 80) return '#FFC107';
   return '#FF2D95';
+};
+
+const RING_CONFIG = {
+  LEO: { r: 75, color: '#38BDF8', speed: 0.018 },
+  MEO: { r: 125, color: '#818CF8', speed: 0.010 },
+  GEO: { r: 175, color: '#FF2D95', speed: 0.005 },
 };
 
 export default function TycoonDashboard({
@@ -29,145 +34,136 @@ export default function TycoonDashboard({
 }) {
   const [gameState, setGameState] = useState({
     budget: 1000,
-    fundingCredits: 1000,
-    magnetosphereIntegrity: 100.0,
-    departments: {
-      solar_obs: {
-        id: 'solar_obs',
-        name: 'Solar Observation Centre',
-        role: 'Rapid Flare Interception & Manual Response',
-        classification: 'LIVE OBSERVATION',
-        scienceSource: 'NASA SDO AIA',
-        threatName: 'X-Class & M-Class Solar Flares',
-        threatCount: 6,
-        level: 1,
-        automated: false,
-        baseCost: 150,
-        basePayout: 320,
-        baseIntegrityRestore: 2.8,
-        baseDuration: 3.0,
-        autoCost: 600,
-        upgradeCost: 400,
-      },
-      research_lab: {
-        id: 'research_lab',
-        name: 'Space Weather Research Lab',
-        role: 'Automated CME Trajectory & Plasma Analysis',
-        classification: 'SCIENTIFIC FORECAST',
-        scienceSource: 'NASA DONKI / Enlil Model',
-        threatName: 'Coronal Mass Ejections (CMEs)',
-        threatCount: 4,
-        level: 1,
-        automated: false,
-        baseCost: 350,
-        basePayout: 750,
-        baseIntegrityRestore: 5.5,
-        baseDuration: 5.0,
-        autoCost: 1200,
-        upgradeCost: 800,
-      },
-      sat_defense: {
-        id: 'sat_defense',
-        name: 'Satellite Protection Division',
-        role: 'Geomagnetic Deflection & Orbital Grid Defense',
-        classification: 'SIMULATED HERO MISSION',
-        scienceSource: 'NOAA SWPC K-Index',
-        threatName: 'Geomagnetic Storm Shockwaves',
-        threatCount: 3,
-        level: 1,
-        automated: false,
-        baseCost: 700,
-        basePayout: 1600,
-        baseIntegrityRestore: 10.0,
-        baseDuration: 7.0,
-        autoCost: 2500,
-        upgradeCost: 1500,
-      },
+    kesslerRisk: 10.0,
+    fleetLevel: 1,
+    deployTimeSeconds: 5,
+    upgradeCost: 500,
+    zones: {
+      LEO: { id: 'LEO', name: 'Low Earth Orbit (LEO)', altitude: '160 - 2,000 km', debris: 12, basePayout: 350, autoTug: false, autoCost: 1500 },
+      MEO: { id: 'MEO', name: 'Medium Earth Orbit (MEO)', altitude: '2,000 - 35,786 km', debris: 18, basePayout: 550, autoTug: false, autoCost: 3000 },
+      GEO: { id: 'GEO', name: 'Geostationary Orbit (GEO)', altitude: '35,786 km', debris: 25, basePayout: 900, autoTug: false, autoCost: 5000 },
     },
-    activeMissions: [],
+    activeTugs: [],
     gameOver: false,
     gameOverReason: null,
-    totalEventsMitigated: 0,
-    totalCreditsEarned: 1000,
-    solarTelemetry: {
-      sdoFlareClass: 'M5.4',
-      donkiCmeSpeed: '1,320 km/s',
-      noaaKpIndex: 6.4,
-      stormStatus: 'G3 (STRONG STORM)',
-      solarWindSpeed: '590 km/s',
-      cyclePhase: 'Solar Cycle 25 Maximum',
-    },
+    totalCleared: 0,
   });
 
-  const [localMissionProgress, setLocalMissionProgress] = useState({});
   const [screenFlashed, setScreenFlashed] = useState(false);
-  const [showScienceModal, setShowScienceModal] = useState(false);
   const [floatingTexts, setFloatingTexts] = useState([]);
-  const [absorbedMissions, setAbsorbedMissions] = useState(new Set());
   const canvasRef = useRef(null);
 
-  // Floating text spawn helper
-  const spawnFloatingReward = (text, color = '#4CAF50') => {
+  // Persistent visual simulation state in ref (debris angles, active tug visuals, laser sparks)
+  const simRef = useRef({
+    debrisByZone: {
+      LEO: Array.from({ length: 12 }, (_, i) => ({ id: `leo-${i}`, theta: (i / 12) * Math.PI * 2 })),
+      MEO: Array.from({ length: 18 }, (_, i) => ({ id: `meo-${i}`, theta: (i / 18) * Math.PI * 2 })),
+      GEO: Array.from({ length: 25 }, (_, i) => ({ id: `geo-${i}`, theta: (i / 25) * Math.PI * 2 })),
+    },
+    tugVisuals: new Map(), // tugId -> { zoneId, startedAt, duration, targetTheta, zapped: false }
+    sparks: [], // laser zap spark particles
+    time: 0,
+  });
+
+  // Spawn floating reward text
+  const spawnFloatingReward = (text, x, y, color = '#4CAF50') => {
     const id = `float-${Date.now()}-${Math.random()}`;
-    const xOffset = (Math.random() - 0.5) * 80;
     setFloatingTexts((prev) => [
       ...prev,
-      { id, text, color, x: 140 + xOffset, y: 110 },
+      { id, text, color, x: x || 250, y: y || 140 },
     ]);
 
     setTimeout(() => {
       setFloatingTexts((prev) => prev.filter((item) => item.id !== id));
-    }, 1400);
+    }, 1300);
   };
+
+  // Sync debris dot counts in simRef when gameState.zones updates
+  useEffect(() => {
+    Object.entries(gameState.zones).forEach(([zoneId, zone]) => {
+      const currentList = simRef.current.debrisByZone[zoneId] || [];
+      const targetCount = Math.max(0, zone.debris);
+
+      if (currentList.length < targetCount) {
+        // Add new debris dots
+        const toAdd = targetCount - currentList.length;
+        for (let i = 0; i < toAdd; i++) {
+          currentList.push({
+            id: `${zoneId.toLowerCase()}-${Date.now()}-${Math.random()}`,
+            theta: Math.random() * Math.PI * 2,
+          });
+        }
+      } else if (currentList.length > targetCount) {
+        // Remove excess
+        currentList.length = targetCount;
+      }
+      simRef.current.debrisByZone[zoneId] = currentList;
+    });
+  }, [gameState.zones]);
+
+  // Sync active tugs into simRef
+  useEffect(() => {
+    const existing = simRef.current.tugVisuals;
+    const activeIds = new Set(gameState.activeTugs.map((t) => t.tugId));
+
+    // Remove finished tugs
+    for (const [id] of existing) {
+      if (!activeIds.has(id)) {
+        existing.delete(id);
+      }
+    }
+
+    // Add new tugs
+    gameState.activeTugs.forEach((tug) => {
+      if (!existing.has(tug.tugId)) {
+        // Assign target debris angle in that zone
+        const debrisList = simRef.current.debrisByZone[tug.zoneId] || [];
+        const targetTheta = debrisList.length > 0 ? debrisList[0].theta : Math.random() * Math.PI * 2;
+        existing.set(tug.tugId, {
+          zoneId: tug.zoneId,
+          startedAt: tug.startedAt,
+          duration: tug.duration,
+          targetTheta,
+          zapped: false,
+        });
+      }
+    });
+  }, [gameState.activeTugs]);
 
   // Socket state listeners
   useEffect(() => {
     if (!socket) return;
 
     function handleState(payload) {
-      setGameState((prev) => {
-        const nextBudget = payload.fundingCredits !== undefined ? payload.fundingCredits : payload.budget;
-        const nextIntegrity = payload.magnetosphereIntegrity !== undefined
-          ? payload.magnetosphereIntegrity
-          : (payload.kesslerRisk !== undefined ? Math.max(0, 100 - payload.kesslerRisk) : prev.magnetosphereIntegrity);
-
-        return {
-          ...prev,
-          ...payload,
-          budget: nextBudget !== undefined ? nextBudget : prev.budget,
-          fundingCredits: nextBudget !== undefined ? nextBudget : prev.fundingCredits,
-          magnetosphereIntegrity: nextIntegrity,
-          departments: payload.departments || prev.departments,
-          activeMissions: payload.activeMissions || payload.activeTugs || prev.activeMissions,
-          totalEventsMitigated: payload.totalEventsMitigated !== undefined ? payload.totalEventsMitigated : prev.totalEventsMitigated,
-        };
-      });
+      setGameState((prev) => ({
+        ...prev,
+        ...payload,
+        zones: payload.zones || prev.zones,
+        activeTugs: payload.activeTugs || prev.activeTugs,
+      }));
     }
 
-    function handleMissionSuccess(payload) {
+    function handleTugSuccess(payload) {
       playCashChime();
       setScreenFlashed(true);
-      setTimeout(() => setScreenFlashed(false), 200);
+      setTimeout(() => setScreenFlashed(false), 150);
 
-      const payout = payload.payout || 320;
-      const integrity = payload.integrityGain || 2.5;
-      spawnFloatingReward(`+${payout} CREDITS`, '#4CAF50');
-      spawnFloatingReward(`+${integrity}% SHIELD`, '#38BDF8');
+      const payout = payload?.payout || 350;
+      spawnFloatingReward(`+$${payout}`, 260 + (Math.random() - 0.5) * 60, 120, '#4CAF50');
+      spawnFloatingReward(`+1 CLEARED`, 260 + (Math.random() - 0.5) * 60, 145, '#38BDF8');
     }
 
-    function handleShieldSuccess() {
-      playShieldOvercharge();
+    function handlePurgeSuccess() {
+      playPurgeAlarm();
       setScreenFlashed(true);
-      setTimeout(() => setScreenFlashed(false), 400);
-      spawnFloatingReward(`+20% DIPOLE SHIELD`, '#7DD3FC');
+      setTimeout(() => setScreenFlashed(false), 350);
+      spawnFloatingReward(`ORBIT PURGED!`, 250, 130, '#FF2D95');
     }
 
     socket.on('init_game', handleState);
     socket.on('state_update', handleState);
-    socket.on('mission_success', handleMissionSuccess);
-    socket.on('tug_success', handleMissionSuccess); // compatibility
-    socket.on('shield_success', handleShieldSuccess);
-    socket.on('purge_success', handleShieldSuccess);
+    socket.on('tug_success', handleTugSuccess);
+    socket.on('purge_success', handlePurgeSuccess);
     socket.on('game_over', (payload) => {
       setGameState((prev) => ({
         ...prev,
@@ -179,40 +175,13 @@ export default function TycoonDashboard({
     return () => {
       socket.off('init_game', handleState);
       socket.off('state_update', handleState);
-      socket.off('mission_success', handleMissionSuccess);
-      socket.off('tug_success', handleMissionSuccess);
-      socket.off('shield_success', handleShieldSuccess);
-      socket.off('purge_success', handleShieldSuccess);
+      socket.off('tug_success', handleTugSuccess);
+      socket.off('purge_success', handlePurgeSuccess);
       socket.off('game_over');
     };
   }, [socket]);
 
-  // Client-side visual progress timer for active hero missions & solar flare absorption check
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const nextProgress = {};
-
-      for (const m of gameState.activeMissions) {
-        const id = m.missionId || m.tugId;
-        const elapsed = (now - m.startedAt) / 1000;
-        const pct = Math.min(100, Math.round((elapsed / m.duration) * 100));
-        nextProgress[id] = pct;
-
-        // When hero reaches 50% (the Sun), trigger solar flare absorption sound & effect
-        if (pct >= 50 && !absorbedMissions.has(id)) {
-          absorbedMissions.add(id);
-          playFlareAbsorption();
-        }
-      }
-
-      setLocalMissionProgress(nextProgress);
-    }, 50);
-
-    return () => clearInterval(interval);
-  }, [gameState.activeMissions, absorbedMissions]);
-
-  // Canvas visual rendering for interplanetary Earth-to-Sun corridor
+  // Central Visual Canvas rendering loop (Earth + 3 Orbital Rings + Debris Dots + Flying Tugs + Zap Lasers)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -220,215 +189,229 @@ export default function TycoonDashboard({
     if (!ctx) return;
 
     let animId;
-    let particleTime = 0;
 
     const render = () => {
       animId = requestAnimationFrame(render);
-      particleTime += 0.025;
+      simRef.current.time += 0.016;
 
       const w = canvas.width;
       const h = canvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+
       ctx.clearRect(0, 0, w, h);
 
-      // 1. Draw Starfield & Space Background
+      // 1. Deep Space background with subtle ambient stars
       ctx.fillStyle = '#061120';
       ctx.fillRect(0, 0, w, h);
 
-      // Subtle solar wind stream particles flowing from Sun (right) to Earth (left)
-      ctx.fillStyle = 'rgba(255, 184, 0, 0.25)';
-      for (let i = 0; i < 28; i++) {
-        const px = ((1000 - (particleTime * 120 + i * 36)) % (w - 180)) + 90;
-        const py = (Math.sin(particleTime + i) * 0.5 + 0.5) * (h - 40) + 20;
-        ctx.fillRect(px, py, 2.5, 1.5);
+      // Ambient faint stars
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+      for (let i = 0; i < 40; i++) {
+        const sx = (i * 97) % w;
+        const sy = (i * 61) % h;
+        ctx.fillRect(sx, sy, 1.5, 1.5);
       }
 
-      // 2. Draw Earth (Left side at x = 70, y = h/2)
-      const earthX = 70;
-      const earthY = h / 2;
-      const earthR = 32;
+      // 2. Draw 3 Concentric Orbital Rings (LEO, MEO, GEO)
+      Object.entries(RING_CONFIG).forEach(([zoneId, config]) => {
+        ctx.save();
+        ctx.strokeStyle = `${config.color}55`;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, config.r, 0, Math.PI * 2);
+        ctx.stroke();
 
-      // Earth Body
-      const earthGrad = ctx.createRadialGradient(earthX - 8, earthY - 8, 4, earthX, earthY, earthR);
+        // Ring name tag
+        ctx.setLineDash([]);
+        ctx.fillStyle = config.color;
+        ctx.font = '10px ui-monospace, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(zoneId, cx - config.r - 6, cy + 4);
+        ctx.restore();
+      });
+
+      // 3. Draw Debris Dots orbiting around Earth
+      Object.entries(simRef.current.debrisByZone).forEach(([zoneId, debrisList]) => {
+        const config = RING_CONFIG[zoneId];
+        if (!config) return;
+
+        debrisList.forEach((debris) => {
+          debris.theta += config.speed; // rotate with orbital speed
+          const dx = cx + Math.cos(debris.theta) * config.r;
+          const dy = cy + Math.sin(debris.theta) * config.r;
+
+          // Draw small glowing debris dot
+          ctx.save();
+          ctx.fillStyle = '#E2E8F0';
+          ctx.shadowColor = config.color;
+          ctx.shadowBlur = 4;
+          ctx.beginPath();
+          ctx.arc(dx, dy, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
+      });
+
+      // 4. Draw Center Planet Earth
+      const earthR = 34;
+      const earthGrad = ctx.createRadialGradient(cx - 8, cy - 8, 4, cx, cy, earthR);
       earthGrad.addColorStop(0, '#38BDF8');
       earthGrad.addColorStop(0.5, '#0284C7');
-      earthGrad.addColorStop(1, '#0C4A6E');
+      earthGrad.addColorStop(1, '#082F49');
+
+      // Atmosphere glow
+      ctx.save();
+      ctx.shadowColor = '#38BDF8';
+      ctx.shadowBlur = 16;
       ctx.beginPath();
-      ctx.arc(earthX, earthY, earthR, 0, Math.PI * 2);
+      ctx.arc(cx, cy, earthR + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Earth body
+      ctx.beginPath();
+      ctx.arc(cx, cy, earthR, 0, Math.PI * 2);
       ctx.fillStyle = earthGrad;
       ctx.fill();
 
-      // Earth Continent accents
+      // Continents
       ctx.fillStyle = '#10B981';
       ctx.beginPath();
-      ctx.ellipse(earthX - 4, earthY - 6, 8, 12, 0.4, 0, Math.PI * 2);
+      ctx.ellipse(cx - 6, cy - 8, 8, 12, 0.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.ellipse(earthX + 8, earthY + 6, 6, 9, -0.3, 0, Math.PI * 2);
+      ctx.ellipse(cx + 8, cy + 8, 7, 10, -0.3, 0, Math.PI * 2);
       ctx.fill();
 
-      // Magnetosphere Shield (Dynamic Dipole Field Lines)
-      const integrity = gameState.magnetosphereIntegrity;
-      const shieldColor = getIntegrityColor(integrity);
-      const pulse = Math.sin(particleTime * 4) * 3;
-
-      ctx.save();
-      ctx.strokeStyle = shieldColor;
-      ctx.lineWidth = 2.5;
-      ctx.shadowColor = shieldColor;
-      ctx.shadowBlur = 12 + pulse;
-
-      // Bow Shock curve facing the Sun
-      ctx.beginPath();
-      ctx.arc(earthX, earthY, earthR + 16 + pulse, -Math.PI * 0.45, Math.PI * 0.45);
-      ctx.stroke();
-
-      // Dipole field line loops
-      ctx.strokeStyle = `${shieldColor}66`;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(earthX, earthY, earthR + 24, earthR + 12, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // Earth Label
+      // Earth label
       ctx.fillStyle = '#FFFFFF';
       ctx.font = '10px ui-monospace, monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('EARTH', earthX, earthY + earthR + 20);
-      ctx.fillStyle = shieldColor;
-      ctx.fillText(`${integrity}% SHIELD`, earthX, earthY + earthR + 32);
-
-      // 3. Draw The Sun (Right side at x = w - 75, y = h/2)
-      const sunX = w - 75;
-      const sunY = h / 2;
-      const sunR = 44;
-
-      // Pulsing Solar Corona
-      const coronaGrad = ctx.createRadialGradient(sunX, sunY, sunR * 0.6, sunX, sunY, sunR + 35 + pulse);
-      coronaGrad.addColorStop(0, 'rgba(255, 215, 0, 0.9)');
-      coronaGrad.addColorStop(0.4, 'rgba(255, 87, 34, 0.6)');
-      coronaGrad.addColorStop(0.8, 'rgba(255, 45, 149, 0.3)');
-      coronaGrad.addColorStop(1, 'rgba(255, 45, 149, 0)');
-
-      ctx.beginPath();
-      ctx.arc(sunX, sunY, sunR + 35 + pulse, 0, Math.PI * 2);
-      ctx.fillStyle = coronaGrad;
-      ctx.fill();
-
-      // Sun Body
-      const sunBodyGrad = ctx.createRadialGradient(sunX - 10, sunY - 10, 8, sunX, sunY, sunR);
-      sunBodyGrad.addColorStop(0, '#FFFFFF');
-      sunBodyGrad.addColorStop(0.3, '#FDE047');
-      sunBodyGrad.addColorStop(0.7, '#EA580C');
-      sunBodyGrad.addColorStop(1, '#991B1B');
-
-      ctx.beginPath();
-      ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-      ctx.fillStyle = sunBodyGrad;
-      ctx.fill();
-
-      // Solar flare prominences / CME loops
-      ctx.save();
-      ctx.strokeStyle = '#FDE047';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = '#FF2D95';
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(sunX - sunR + 4, sunY - 18, 14, 0, Math.PI * 1.5);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(sunX - sunR + 6, sunY + 16, 18, -Math.PI * 0.4, Math.PI * 0.8);
-      ctx.stroke();
+      ctx.fillText('EARTH', cx, cy + 3);
       ctx.restore();
 
-      // Sun Label
-      ctx.fillStyle = '#FDE047';
-      ctx.font = '10px ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('SOLAR CORONA', sunX, sunY + sunR + 20);
-      ctx.fillStyle = '#FF5FB0';
-      ctx.fillText(`FLARE: ${gameState.solarTelemetry.sdoFlareClass}`, sunX, sunY + sunR + 32);
+      // 5. Draw Active Tugs Flying Earth ⇄ Ring + Laser Zap Effect
+      const now = Date.now();
+      simRef.current.tugVisuals.forEach((tug, tugId) => {
+        const config = RING_CONFIG[tug.zoneId] || RING_CONFIG.LEO;
+        const elapsed = (now - tug.startedAt) / 1000;
+        const pct = Math.min(1.0, elapsed / tug.duration);
 
-      // 4. Draw Active Hero Ships Flying Earth ⇄ Sun
-      const corridorStart = earthX + earthR + 10;
-      const corridorEnd = sunX - sunR - 10;
-      const corridorDist = corridorEnd - corridorStart;
-
-      gameState.activeMissions.forEach((m, idx) => {
-        const id = m.missionId || m.tugId;
-        const pct = localMissionProgress[id] || 0;
-
-        // Position: 0% to 50% = Earth to Sun; 50% to 100% = Sun to Earth
-        let shipX;
+        let currentR;
+        let currentAngle;
+        let headingAngle;
         let isReturning = false;
-        if (pct < 50) {
-          // Outbound
-          const subPct = pct / 50;
-          shipX = corridorStart + corridorDist * subPct;
-          isReturning = false;
+
+        if (pct < 0.45) {
+          // Outbound flight from Earth to Ring
+          const t = pct / 0.45;
+          currentR = earthR + (config.r - earthR) * t;
+          currentAngle = tug.targetTheta;
+          headingAngle = currentAngle; // facing outward
+        } else if (pct < 0.55) {
+          // At destination: Zap Phase!
+          currentR = config.r;
+          currentAngle = tug.targetTheta;
+          headingAngle = currentAngle;
+
+          // Trigger Zap sound and sparks on first frame of zap phase
+          if (!tug.zapped) {
+            tug.zapped = true;
+            playZap();
+
+            // Spawn laser spark particles at zap location
+            const zx = cx + Math.cos(currentAngle) * currentR;
+            const zy = cy + Math.sin(currentAngle) * currentR;
+            for (let s = 0; s < 8; s++) {
+              simRef.current.sparks.push({
+                x: zx,
+                y: zy,
+                vx: (Math.random() - 0.5) * 4,
+                vy: (Math.random() - 0.5) * 4,
+                life: 1.0,
+                color: config.color,
+              });
+            }
+
+            // Remove one debris dot visually
+            const debrisList = simRef.current.debrisByZone[tug.zoneId];
+            if (debrisList && debrisList.length > 0) {
+              debrisList.shift();
+            }
+          }
+
+          // Draw Laser Zap Beam from Tug to Debris
+          const tx = cx + Math.cos(currentAngle) * currentR;
+          const ty = cy + Math.sin(currentAngle) * currentR;
+          ctx.save();
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2.5;
+          ctx.shadowColor = config.color;
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.moveTo(tx, ty);
+          ctx.lineTo(tx + (Math.random() - 0.5) * 12, ty + (Math.random() - 0.5) * 12);
+          ctx.stroke();
+          ctx.restore();
         } else {
-          // Returning with absorbed solar flare
-          const subPct = (pct - 50) / 50;
-          shipX = corridorEnd - corridorDist * subPct;
+          // Inbound flight from Ring back to Earth
+          const t = (pct - 0.55) / 0.45;
+          currentR = config.r - (config.r - earthR) * t;
+          currentAngle = tug.targetTheta;
+          headingAngle = currentAngle + Math.PI; // facing inward back to Earth
           isReturning = true;
         }
 
-        // Distinct flight corridor lane based on index
-        const laneOffset = ((idx % 3) - 1) * 22;
-        const shipY = earthY + laneOffset;
+        const tugX = cx + Math.cos(currentAngle) * currentR;
+        const tugY = cy + Math.sin(currentAngle) * currentR;
 
-        // Draw Ship Thruster Trail
+        // Draw Small Glowing Triangle (The Tug)
         ctx.save();
-        ctx.strokeStyle = isReturning ? '#FDE047' : '#38BDF8';
-        ctx.lineWidth = 3;
-        ctx.shadowColor = isReturning ? '#FF5722' : '#0284C7';
+        ctx.translate(tugX, tugY);
+        ctx.rotate(headingAngle);
+
+        // Thruster glow trail
+        ctx.fillStyle = isReturning ? '#FFC107' : config.color;
+        ctx.shadowColor = config.color;
         ctx.shadowBlur = 8;
         ctx.beginPath();
-        ctx.moveTo(shipX + (isReturning ? 14 : -14), shipY);
-        ctx.lineTo(shipX + (isReturning ? 30 : -30), shipY);
-        ctx.stroke();
-
-        // Draw Hero Ship Icon
-        ctx.fillStyle = isReturning ? '#FBBF24' : '#FFFFFF';
-        ctx.beginPath();
-        if (!isReturning) {
-          // Facing Right (towards Sun)
-          ctx.moveTo(shipX + 12, shipY);
-          ctx.lineTo(shipX - 8, shipY - 7);
-          ctx.lineTo(shipX - 3, shipY);
-          ctx.lineTo(shipX - 8, shipY + 7);
-        } else {
-          // Facing Left (towards Earth) carrying absorbed flare
-          ctx.moveTo(shipX - 12, shipY);
-          ctx.lineTo(shipX + 8, shipY - 7);
-          ctx.lineTo(shipX + 3, shipY);
-          ctx.lineTo(shipX + 8, shipY + 7);
-        }
+        ctx.moveTo(8, 0); // nose pointing in heading direction
+        ctx.lineTo(-7, -5);
+        ctx.lineTo(-4, 0);
+        ctx.lineTo(-7, 5);
         ctx.closePath();
         ctx.fill();
 
-        // If returning, draw captured glowing plasma orb
-        if (isReturning) {
-          ctx.fillStyle = '#FF2D95';
-          ctx.shadowColor = '#FF2D95';
-          ctx.shadowBlur = 12;
-          ctx.beginPath();
-          ctx.arc(shipX, shipY, 5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        // Ship text label
-        ctx.fillStyle = isReturning ? '#FDE047' : '#7DD3FC';
+        // Tug label
+        ctx.restore();
+        ctx.fillStyle = config.color;
         ctx.font = '9px ui-monospace, monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(
-          isReturning ? 'PLASMA CONTAINED' : m.heroName || 'HERO CRAFT',
-          shipX,
-          shipY - 12
-        );
-        ctx.restore();
+        ctx.fillText(isReturning ? 'RETURNING' : 'TUG', tugX, tugY - 9);
       });
+
+      // 6. Draw Laser Spark Particles
+      for (let i = simRef.current.sparks.length - 1; i >= 0; i--) {
+        const sp = simRef.current.sparks[i];
+        sp.x += sp.vx;
+        sp.y += sp.vy;
+        sp.life -= 0.04;
+
+        if (sp.life <= 0) {
+          simRef.current.sparks.splice(i, 1);
+        } else {
+          ctx.save();
+          ctx.fillStyle = sp.color;
+          ctx.globalAlpha = sp.life;
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
     };
 
     render();
@@ -436,30 +419,30 @@ export default function TycoonDashboard({
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [gameState.magnetosphereIntegrity, gameState.activeMissions, localMissionProgress, gameState.solarTelemetry]);
+  }, []);
 
   // Actions
-  const handleDeployMission = (deptId) => {
+  const handleDeployTug = (zoneId) => {
     if (!socket || gameState.gameOver) return;
-    playHeroLaunch();
-    socket.emit('deploy_mission', { deptId });
+    playTugLaunch();
+    socket.emit('deploy_tug', { zone: zoneId });
   };
 
-  const handleUpgradeDept = (deptId) => {
+  const handleBuyAutoTug = (zoneId) => {
     if (!socket || gameState.gameOver) return;
     playUpgradeDing();
-    socket.emit('upgrade_department', { deptId });
+    socket.emit('buy_auto_tug', { zoneId });
   };
 
-  const handleBuyAutomation = (deptId) => {
+  const handleUpgradeFleet = () => {
     if (!socket || gameState.gameOver) return;
     playUpgradeDing();
-    socket.emit('buy_automation', { deptId });
+    socket.emit('upgrade_fleet');
   };
 
-  const handleEmergencyShield = () => {
+  const handleEmergencyPurge = (zoneId) => {
     if (!socket || gameState.gameOver) return;
-    socket.emit('emergency_shield');
+    socket.emit('emergency_purge', { zone: zoneId });
   };
 
   const handleRestart = () => {
@@ -467,16 +450,15 @@ export default function TycoonDashboard({
     socket.emit('restart_game');
   };
 
-  const integrity = gameState.magnetosphereIntegrity;
-  const isCriticalIntegrity = integrity <= 35;
-  const integrityColor = getIntegrityColor(integrity);
-  const credits = gameState.fundingCredits !== undefined ? gameState.fundingCredits : gameState.budget;
-  const isBroke = credits < 150;
-  const isNegative = credits < 0;
+  const risk = gameState.kesslerRisk;
+  const isHighRisk = risk >= 80;
+  const riskColor = getKesslerColor(risk);
+  const isBroke = gameState.budget < 200;
+  const isNegative = gameState.budget < 0;
 
   return (
     <div
-      className={`crt-overlay ${isCriticalIntegrity && !gameState.gameOver ? 'violent-shake' : ''}`}
+      className={`crt-overlay ${isHighRisk && !gameState.gameOver ? 'violent-shake' : ''}`}
       style={{
         position: 'relative',
         width: '100vw',
@@ -507,7 +489,7 @@ export default function TycoonDashboard({
         />
       )}
 
-      {/* Floating Cash Reward Elements */}
+      {/* Floating Cash Reward Text Elements */}
       {floatingTexts.map((f) => (
         <div
           key={f.id}
@@ -523,7 +505,7 @@ export default function TycoonDashboard({
         </div>
       ))}
 
-      {/* TOP HEADER: Director Identity, Telemetry Feed & Science Modal Trigger */}
+      {/* TOP HEADER: Contractor Status, Budget & Fleet Specs */}
       <div
         style={{
           display: 'flex',
@@ -555,21 +537,21 @@ export default function TycoonDashboard({
                 letterSpacing: '1px',
               }}
             >
-              {systemOnline ? 'HELIOS ONLINE' : 'DISCONNECTED'}
+              {systemOnline ? 'SYSTEM ONLINE' : 'DISCONNECTED'}
             </span>
           </div>
 
           <span style={{ color: 'rgba(255, 255, 255, 0.4)' }}>|</span>
           <span style={{ fontSize: '0.85rem', color: '#7DD3FC' }}>
-            DIRECTOR ROLE: SPACE WEATHER DEFENSE
+            KESSLER TYCOON // CONTRACTOR #ODPO-2026-X
           </span>
           <span style={{ color: 'rgba(255, 255, 255, 0.4)' }}>|</span>
           <span style={{ fontSize: '0.85rem', color: '#4CAF50' }}>
-            SOLAR THREATS MITIGATED: {gameState.totalEventsMitigated}
+            TOTAL DEBRIS CLEARED: {gameState.totalCleared}
           </span>
         </div>
 
-        {/* Financial Readout & Science Modal Trigger */}
+        {/* Financial & Fleet Readout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div
             className="wireframe-box"
@@ -578,9 +560,7 @@ export default function TycoonDashboard({
               borderColor: isNegative ? '#FF2D95' : isBroke ? '#FFC107' : '#4CAF50',
             }}
           >
-            <span style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.7)' }}>
-              FUNDING CREDITS:{' '}
-            </span>
+            <span style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.7)' }}>BUDGET: </span>
             <span
               style={{
                 fontSize: '1.15rem',
@@ -588,22 +568,40 @@ export default function TycoonDashboard({
                 color: isNegative ? '#FF2D95' : isBroke ? '#FFC107' : '#4CAF50',
               }}
             >
-              ${credits.toLocaleString()}
+              ${gameState.budget.toLocaleString()}
             </span>
           </div>
 
-          <button
-            onClick={() => setShowScienceModal(true)}
-            className="chunky-tactile-btn"
+          <div
+            className="wireframe-box"
             style={{
               padding: '6px 14px',
-              fontSize: '0.75rem',
-              borderColor: '#38BDF8',
-              letterSpacing: '1px',
+              borderColor: '#6d4aff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
             }}
           >
-            🛰 NASA DATA & SOURCES
-          </button>
+            <span style={{ fontSize: '0.75rem', color: '#38BDF8' }}>
+              FLEET SPEED: MK-{gameState.fleetLevel} ({gameState.deployTimeSeconds}s)
+            </span>
+            <button
+              onClick={handleUpgradeFleet}
+              disabled={gameState.budget < gameState.upgradeCost || gameState.fleetLevel >= 5}
+              style={{
+                background: '#6d4aff',
+                color: '#FFFFFF',
+                border: 'none',
+                padding: '4px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 800,
+                cursor: gameState.budget < gameState.upgradeCost || gameState.fleetLevel >= 5 ? 'not-allowed' : 'pointer',
+                opacity: gameState.budget < gameState.upgradeCost || gameState.fleetLevel >= 5 ? 0.45 : 1,
+              }}
+            >
+              {gameState.fleetLevel >= 5 ? 'MAX' : `UPGRADE ($${gameState.upgradeCost})`}
+            </button>
+          </div>
 
           <button
             onClick={onBackToMenu}
@@ -621,44 +619,14 @@ export default function TycoonDashboard({
         </div>
       </div>
 
-      {/* LIVE SCIENTIFIC TELEMETRY TICKER */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          backgroundColor: 'rgba(6, 17, 32, 0.85)',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
-          padding: '6px 14px',
-          marginBottom: '0.8rem',
-          fontSize: '0.72rem',
-          color: 'rgba(255, 255, 255, 0.8)',
-          flexWrap: 'wrap',
-          gap: '8px',
-        }}
-      >
-        <div>
-          <span style={{ color: '#38BDF8', fontWeight: 700 }}>[SDO AIA 131Å]: </span>
-          <span>FLARE CLASS {gameState.solarTelemetry.sdoFlareClass} (ACTIVE REGION 3664)</span>
-        </div>
-        <div>
-          <span style={{ color: '#FBBF24', fontWeight: 700 }}>[DONKI CME]: </span>
-          <span>SPEED {gameState.solarTelemetry.donkiCmeSpeed} // 1 AU SHOCK FRONT</span>
-        </div>
-        <div>
-          <span style={{ color: '#FF5FB0', fontWeight: 700 }}>[NOAA SWPC]: </span>
-          <span>Kp-INDEX {gameState.solarTelemetry.noaaKpIndex} — {gameState.solarTelemetry.stormStatus}</span>
-        </div>
-      </div>
-
-      {/* MASSIVE MAGNETOSPHERE INTEGRITY METER */}
+      {/* TOP KESSLER RISK METER */}
       <div
         className="wireframe-box"
         style={{
-          padding: '14px 20px',
+          padding: '12px 18px',
           marginBottom: '1rem',
-          borderColor: integrityColor,
-          boxShadow: `0 0 20px ${integrityColor}40`,
+          borderColor: riskColor,
+          boxShadow: `0 0 20px ${riskColor}40`,
         }}
       >
         <div
@@ -673,27 +641,27 @@ export default function TycoonDashboard({
         >
           <span
             style={{
-              fontSize: '0.98rem',
+              fontSize: '0.95rem',
               fontWeight: 900,
               letterSpacing: '2px',
-              color: integrityColor,
+              color: riskColor,
             }}
           >
-            EARTH MAGNETOSPHERE INTEGRITY: {integrity}%
+            GLOBAL KESSLER CASCADE RISK: {risk}%
           </span>
           <span
             style={{
               fontSize: '0.75rem',
-              color: isCriticalIntegrity ? '#FF2D95' : 'rgba(255, 255, 255, 0.65)',
+              color: isHighRisk ? '#FF2D95' : 'rgba(255, 255, 255, 0.65)',
             }}
           >
-            {isCriticalIntegrity
-              ? '⚠ CRITICAL ALERT: BOW SHOCK BREACH IMMINENT (0% = PLANETARY COLLAPSE)'
-              : 'DEFENSE TARGET: > 65% // INSOLVENCY LIMIT: -$500 CREDITS'}
+            {isHighRisk
+              ? '⚠ CRITICAL THRESHOLD: COLLAPSE IMMINENT (BLENDER PROTOCOL)'
+              : 'LIMIT: 100% COLLAPSE // INSOLVENCY LIMIT: -$500'}
           </span>
         </div>
 
-        {/* Magnetosphere integrity progress bar */}
+        {/* Progress bar */}
         <div
           style={{
             width: '100%',
@@ -701,28 +669,28 @@ export default function TycoonDashboard({
             backgroundColor: 'rgba(255, 255, 255, 0.1)',
             borderRadius: '2px',
             overflow: 'hidden',
-            border: `1px solid ${integrityColor}88`,
+            border: `1px solid ${riskColor}88`,
           }}
         >
           <div
-            className={isCriticalIntegrity ? 'progress-active' : ''}
+            className={isHighRisk ? 'progress-active' : ''}
             style={{
-              width: `${Math.min(100, integrity)}%`,
+              width: `${Math.min(100, risk)}%`,
               height: '100%',
-              backgroundColor: integrityColor,
-              boxShadow: `0 0 16px ${integrityColor}`,
+              backgroundColor: riskColor,
+              boxShadow: `0 0 16px ${riskColor}`,
               transition: 'width 0.3s ease, background-color 0.3s ease',
             }}
           />
         </div>
       </div>
 
-      {/* CASH INC VISUAL UPGRADE: INTERPLANETARY FLIGHT ARENA (EARTH ⇄ SUN) */}
+      {/* CENTRAL VISUAL AREA: ORBITAL RADAR CANVAS (EARTH + 3 RINGS + TUGS + ZAP LASERS) */}
       <div
         className="wireframe-box"
         style={{
           marginBottom: '1.2rem',
-          padding: '8px',
+          padding: '6px',
           borderColor: '#6d4aff',
           boxShadow: '0 0 20px rgba(109, 74, 255, 0.3)',
           overflow: 'hidden',
@@ -733,52 +701,52 @@ export default function TycoonDashboard({
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            padding: '2px 8px 6px 8px',
+            padding: '4px 10px 6px 10px',
             borderBottom: '1px solid rgba(109, 74, 255, 0.3)',
             fontSize: '0.72rem',
           }}
         >
           <span style={{ color: '#38BDF8', fontWeight: 800 }}>
-            [HELIOS 1-AU INTERPLANETARY DEFENSE CORRIDOR]
+            [LIVE ORBITAL RADAR — EARTH LEO / MEO / GEO RINGS]
           </span>
           <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
-            HEROES FLY TO SUN → ABSORB SOLAR FLARES → RETURN WITH CREDITS
+            CLICK "DEPLOY TUG" TO LAUNCH INTERCEPTOR & CLEAR DEBRIS
           </span>
         </div>
+
         <canvas
           ref={canvasRef}
           width={920}
-          height={180}
+          height={300}
           style={{
             width: '100%',
-            height: '180px',
+            height: '300px',
             display: 'block',
             backgroundColor: '#061120',
           }}
         />
       </div>
 
-      {/* THE THREE HEROES & DEPARTMENTS */}
+      {/* THE 3 ORBITAL ZONE CARDS: LEO, MEO, GEO */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))',
           gap: '16px',
           flex: 1,
           marginBottom: '1rem',
         }}
       >
-        {Object.values(gameState.departments).map((dept) => {
-          const activeInDept = gameState.activeMissions.filter(
-            (m) => m.deptId === dept.id || m.zoneId === dept.id
-          );
-          const isSolar = dept.id === 'solar_obs';
-          const isResearch = dept.id === 'research_lab';
-          const accentColor = isSolar ? '#38BDF8' : isResearch ? '#FBBF24' : '#FF2D95';
+        {Object.values(gameState.zones).map((zone) => {
+          const activeInZone = gameState.activeTugs.filter((t) => t.zoneId === zone.id);
+          const isLeo = zone.id === 'LEO';
+          const isMeo = zone.id === 'MEO';
+          const accentColor = isLeo ? '#38BDF8' : isMeo ? '#818CF8' : '#FF2D95';
+          const canAffordAuto = gameState.budget >= zone.autoCost;
 
           return (
             <div
-              key={dept.id}
+              key={zone.id}
               className="wireframe-box"
               style={{
                 padding: '16px',
@@ -790,175 +758,120 @@ export default function TycoonDashboard({
               }}
             >
               <div>
-                {/* Department Header & NASA Classification Label */}
+                {/* Zone Header */}
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    alignItems: 'flex-start',
+                    alignItems: 'baseline',
                     borderBottom: `1px solid ${accentColor}44`,
                     paddingBottom: '8px',
-                    marginBottom: '10px',
+                    marginBottom: '12px',
                   }}
                 >
-                  <div>
-                    <span
-                      className={
-                        isSolar
-                          ? 'badge-live-obs'
-                          : isResearch
-                            ? 'badge-scientific-forecast'
-                            : 'badge-hero-mission'
-                      }
-                      style={{ display: 'inline-block', marginBottom: '4px' }}
-                    >
-                      {dept.classification}
-                    </span>
-                    <h3
-                      style={{
-                        margin: 0,
-                        fontSize: '1rem',
-                        fontWeight: 900,
-                        color: '#FFFFFF',
-                        letterSpacing: '1px',
-                      }}
-                    >
-                      {dept.name}
-                    </h3>
-                  </div>
-
-                  {/* Level & Automation Status */}
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '0.75rem', color: accentColor, fontWeight: 800 }}>
-                      MK-{dept.level}
-                    </div>
-                    {dept.automated ? (
-                      <div className="auto-badge-active">⚙ AUTO ACTIVE</div>
-                    ) : (
-                      <button
-                        className="auto-upgrade-btn"
-                        onClick={() => handleBuyAutomation(dept.id)}
-                        disabled={credits < dept.autoCost || gameState.gameOver}
-                      >
-                        ⚙ AUTOMATE (${dept.autoCost})
-                      </button>
-                    )}
-                  </div>
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: '1.05rem',
+                      fontWeight: 900,
+                      color: '#FFFFFF',
+                      letterSpacing: '1px',
+                    }}
+                  >
+                    {zone.name}
+                  </h3>
+                  <span style={{ fontSize: '0.72rem', color: accentColor, fontWeight: 700 }}>
+                    {zone.altitude}
+                  </span>
                 </div>
 
-                {/* Science Source & Threat Readout */}
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.55)', marginBottom: '4px' }}>
-                    DATA SOURCE: {dept.scienceSource}
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginTop: '6px' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.7)' }}>{dept.threatName}:</span>
+                {/* Simplified Stats (Clean & High Contrast) */}
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.7)' }}>
+                      DEBRIS:
+                    </span>
                     <span
                       style={{
-                        fontSize: '1.15rem',
+                        fontSize: '1.6rem',
                         fontWeight: 900,
-                        color: dept.threatCount > 8 ? '#FF2D95' : '#FFC107',
+                        color: zone.debris > 20 ? '#FF2D95' : zone.debris > 10 ? '#FFC107' : '#4CAF50',
                       }}
                     >
-                      {dept.threatCount}
+                      {zone.debris}
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '4px' }}>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.5)' }}>MISSION PAYOUT:</span>
-                    <span style={{ color: '#4CAF50', fontWeight: 800 }}>
-                      +${Math.round(dept.basePayout * (1 + (dept.level - 1) * 0.45))} (+{dept.baseIntegrityRestore}% SHIELD)
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginTop: '4px',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.8rem', color: 'rgba(255, 255, 255, 0.55)' }}>
+                      PAYOUT:
+                    </span>
+                    <span style={{ fontSize: '1rem', color: '#4CAF50', fontWeight: 800 }}>
+                      +${Math.round(zone.basePayout * (1 + (gameState.fleetLevel - 1) * 0.4))}
                     </span>
                   </div>
-                </div>
 
-                {/* Active Hero Deployments */}
-                {activeInDept.length > 0 && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <div style={{ fontSize: '0.7rem', color: accentColor, marginBottom: '4px' }}>
-                      ACTIVE HERO CRAFT IN FLIGHT ({activeInDept.length}):
+                  {activeInZone.length > 0 && (
+                    <div style={{ marginTop: '8px', fontSize: '0.72rem', color: accentColor }}>
+                      ⚡ {activeInZone.length} TUG{activeInZone.length > 1 ? 'S' : ''} ACTIVE IN FLIGHT
                     </div>
-                    {activeInDept.map((m) => {
-                      const id = m.missionId || m.tugId;
-                      const pct = localMissionProgress[id] || 0;
-                      return (
-                        <div key={id} style={{ marginBottom: '6px' }}>
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              fontSize: '0.65rem',
-                              color: 'rgba(255, 255, 255, 0.8)',
-                            }}
-                          >
-                            <span>{pct < 50 ? 'TRANSIT TO SUN' : 'FLARE CONTAINED // RETURNING'}</span>
-                            <span>{pct}%</span>
-                          </div>
-                          <div
-                            style={{
-                              width: '100%',
-                              height: '6px',
-                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                              borderRadius: '2px',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: `${pct}%`,
-                                height: '100%',
-                                backgroundColor: accentColor,
-                                boxShadow: `0 0 8px ${accentColor}`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
-              {/* Action Buttons (Chunky & Tactile) */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+              {/* Actions & Progression (Tycoon Loop) */}
+              <div>
+                {/* Large Responsive "Deploy Tug" Button */}
                 <button
                   className={
-                    isSolar
-                      ? 'chunky-tactile-btn'
-                      : isResearch
-                        ? 'chunky-tactile-btn chunky-gold-btn'
-                        : 'chunky-tactile-btn chunky-pink-btn'
+                    isLeo
+                      ? 'chunky-deploy-btn'
+                      : isMeo
+                        ? 'chunky-deploy-btn chunky-deploy-meo'
+                        : 'chunky-deploy-btn chunky-deploy-geo'
                   }
-                  onClick={() => handleDeployMission(dept.id)}
-                  disabled={credits < dept.baseCost || gameState.gameOver}
+                  onClick={() => handleDeployTug(zone.id)}
+                  disabled={gameState.budget < 200 || zone.debris === 0 || gameState.gameOver}
+                  style={{ width: '100%', marginBottom: '8px' }}
                 >
-                  ⚡ DEPLOY MISSION (${dept.baseCost}) [{Math.max(1, dept.baseDuration - (dept.level - 1) * 0.4)}s]
+                  🚀 DEPLOY TUG ($200) [{gameState.deployTimeSeconds}s]
                 </button>
 
-                <button
-                  onClick={() => handleUpgradeDept(dept.id)}
-                  disabled={credits < dept.upgradeCost || dept.level >= 5 || gameState.gameOver}
-                  style={{
-                    background: 'rgba(109, 74, 255, 0.2)',
-                    border: '1px solid #6d4aff',
-                    color: '#FFFFFF',
-                    padding: '6px 12px',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    cursor: credits < dept.upgradeCost || dept.level >= 5 ? 'not-allowed' : 'pointer',
-                    opacity: credits < dept.upgradeCost || dept.level >= 5 ? 0.45 : 1,
-                  }}
-                >
-                  {dept.level >= 5 ? 'MAX HARDWARE (MK-5)' : `UPGRADE HARDWARE ($${dept.upgradeCost})`}
-                </button>
+                {/* Progression Display: Next Upgrade */}
+                {zone.autoTug ? (
+                  <div className="auto-badge-pulse">
+                    ⚡ AUTO-TUG ACTIVE (AUTO-CLEARING)
+                  </div>
+                ) : (
+                  <div className={`upgrade-goal-box ${canAffordAuto ? '' : 'locked'}`}>
+                    <div style={{ fontSize: '0.72rem', marginBottom: '6px', fontWeight: 700 }}>
+                      NEXT UPGRADE: AUTO-TUG (${zone.autoCost.toLocaleString()})
+                    </div>
+                    <button
+                      className="upgrade-goal-btn"
+                      onClick={() => handleBuyAutoTug(zone.id)}
+                      disabled={!canAffordAuto || gameState.gameOver}
+                    >
+                      {canAffordAuto
+                        ? `BUY AUTO-TUG ($${zone.autoCost.toLocaleString()})`
+                        : `LOCKED: NEED $${zone.autoCost.toLocaleString()}`}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* EMERGENCY PLANETARY DEFENSE BAR */}
+      {/* EMERGENCY PURGE ACTION */}
       <div
         className="wireframe-box"
         style={{
@@ -973,24 +886,26 @@ export default function TycoonDashboard({
       >
         <div>
           <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#FF5FB0' }}>
-            EMERGENCY DIPOLE COIL OVERCHARGE
+            EMERGENCY ORBITAL PURGE
           </div>
           <div style={{ fontSize: '0.72rem', color: 'rgba(255, 255, 255, 0.65)' }}>
-            Instantly restores +20% Magnetosphere Integrity & clears 50% of active solar threats.
+            Instantly vaporizes all debris in an orbital zone with a high-energy laser burn. Spikes Kessler Risk by +20%.
           </div>
         </div>
 
-        <button
-          className="action-danger-btn"
-          onClick={handleEmergencyShield}
-          disabled={credits < 800 || gameState.gameOver}
-        >
-          ⚡ OVERCHARGE DIPOLE ($800)
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {['LEO', 'MEO', 'GEO'].map((z) => (
+            <button
+              key={z}
+              className="action-danger-btn"
+              onClick={() => handleEmergencyPurge(z)}
+              disabled={gameState.budget < 1000 || gameState.gameOver}
+            >
+              PURGE {z} ($1,000)
+            </button>
+          ))}
+        </div>
       </div>
-
-      {/* SCIENCE AND SOURCES MODAL */}
-      <ScienceAndSources isOpen={showScienceModal} onClose={() => setShowScienceModal(false)} />
 
       {/* GAME OVER SCREEN WITH CRT SHUTDOWN ANIMATION */}
       {gameState.gameOver && (
@@ -1029,31 +944,29 @@ export default function TycoonDashboard({
                   fontWeight: 700,
                 }}
               >
-                [MISSION FAILED // PROTOCOL TERMINATED]
+                [TERMINATION PROTOCOL EXECUTED // NASA FLIGHT CONTROL]
               </div>
 
               <h1
                 style={{
-                  fontSize: '2.2rem',
+                  fontSize: '2.4rem',
                   color: '#FFFFFF',
                   margin: '0 0 1rem 0',
                   textShadow: '-2px 0 #FF2D95, 2px 0 #6d4aff',
                 }}
               >
-                {gameState.gameOverReason?.includes('MAGNETOSPHERE')
-                  ? 'MAGNETOSPHERE COLLAPSE'
-                  : 'AGENCY INSOLVENCY'}
+                CONTRACTOR TERMINATED
               </h1>
 
               <div
                 style={{
-                  fontSize: '0.95rem',
+                  fontSize: '1rem',
                   color: '#FFC107',
                   marginBottom: '1.2rem',
                   lineHeight: 1.5,
                 }}
               >
-                {gameState.gameOverReason}
+                REASON: {gameState.gameOverReason}
               </div>
 
               <div
@@ -1063,7 +976,7 @@ export default function TycoonDashboard({
                   marginBottom: '1.8rem',
                 }}
               >
-                Total Solar Events Mitigated: <strong>{gameState.totalEventsMitigated}</strong>
+                Total Debris Cleared Before Collapse: <strong>{gameState.totalCleared}</strong>
               </div>
 
               <button
@@ -1077,7 +990,7 @@ export default function TycoonDashboard({
                   fontSize: '1.1rem',
                 }}
               >
-                REBOOT HELIOS PROTOCOL ($1,000 SEED)
+                REAPPLY FOR CONTRACT ($1,000 SEED)
               </button>
             </div>
           </div>

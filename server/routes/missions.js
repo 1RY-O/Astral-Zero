@@ -5,43 +5,24 @@ const router = express.Router();
 const MISSIONS = [
   {
     id: 1,
-    name: 'Sector 01: Solar Flare Intercept (NASA SDO)',
-    classification: 'LIVE OBSERVATION',
-    taunt: 'Active Region 3664 has erupted with an X-class flare. Deploy interceptors before high-frequency radio blackouts spread.',
-    eventCount: 6,
-    threatLevel: 'M4.2 - X1.0 Solar Flare',
-    payout: 320,
-    scienceSource: 'NASA Solar Dynamics Observatory (SDO) Atmospheric Imaging Assembly',
+    name: 'Sector 01: Low Earth Orbit (LEO)',
+    taunt: 'Calibrate your tug. 160-2000 km altitude is dense with spent rocket boosters.',
+    debrisCount: 12,
+    basePayout: 350,
   },
   {
     id: 2,
-    name: 'Sector 02: Coronal Mass Ejection Deflection (NASA DONKI)',
-    classification: 'SCIENTIFIC FORECAST',
-    taunt: 'DONKI telemetry confirms a halo CME traveling at 1,450 km/s. Deflect the interplanetary plasma front.',
-    eventCount: 4,
-    threatLevel: 'Fast CME Shock Front',
-    payout: 750,
-    scienceSource: 'NASA DONKI (Space Weather Database of Notifications, Knowledge, Information)',
+    name: 'Sector 02: Medium Earth Orbit (MEO)',
+    taunt: 'Navigation constellation corridor. High-velocity orbital junk hazards.',
+    debrisCount: 18,
+    basePayout: 550,
   },
   {
     id: 3,
-    name: 'Sector 03: Magnetosphere Dipole Reinforcement (NOAA SWPC)',
-    classification: 'SIMULATED HERO MISSION',
-    taunt: 'NOAA SWPC reports Kp 7.6. Dayside magnetopause compressed below geosynchronous orbit. Reinforce Earth dipole shields.',
-    eventCount: 3,
-    threatLevel: 'G3 Strong Geomagnetic Storm',
-    payout: 1600,
-    scienceSource: 'NOAA Space Weather Prediction Center (SWPC) Planetary K-Index',
-  },
-  {
-    id: 4,
-    name: 'Sector 04: Carrington-Scale Superflare Protocol',
-    classification: 'EMERGENCY PROTOCOL',
-    taunt: 'Superstorm telemetry confirmed. Extreme radiation belt storm. All HELIOS superhero divisions converge!',
-    eventCount: 12,
-    threatLevel: 'G5 Extreme Solar Storm / Carrington Event',
-    payout: 5000,
-    scienceSource: 'NASA Heliophysics System Observatory & NOAA SWPC Combined Feed',
+    name: 'Sector 03: Geostationary Orbit (GEO)',
+    taunt: 'High-value communications belt. Clear derelicts before catastrophic cascade.',
+    debrisCount: 25,
+    basePayout: 900,
   },
 ];
 
@@ -49,8 +30,7 @@ const MISSIONS = [
 router.get('/', (req, res) => {
   res.json({
     status: 'ok',
-    aiPersona: 'HELIOS_MISSION_CONTROL_AI_V5',
-    agency: 'HELIOS International Space-Protection Protocol',
+    aiPersona: 'CORRUPTED_NASA_FLIGHT_CONTROLLER_V4',
     missions: MISSIONS,
   });
 });
@@ -61,7 +41,7 @@ router.get('/:id', (req, res) => {
   if (!mission) {
     return res.status(404).json({
       error: 'MISSION_NOT_FOUND',
-      message: 'Specified space weather sector corrupted or purged from HELIOS telemetry.',
+      message: 'Specified orbital sector corrupted or purged from memory.',
     });
   }
   return res.json({ status: 'ok', mission });

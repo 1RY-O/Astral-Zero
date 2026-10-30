@@ -1,7 +1,7 @@
 {
-  "name": "helios-protocol",
+  "name": "kessler-tycoon",
   "version": "2.0.0",
-  "description": "HELIOS PROTOCOL: Space Weather Superhero Tycoon — Built for the NASA International Space Apps Challenge 2026.",
+  "description": "Kessler Tycoon — Visual orbital debris management simulator. Built for the NASA International Space Apps Challenge 2026.",
   "type": "module",
   "private": true,
   "workspaces": [

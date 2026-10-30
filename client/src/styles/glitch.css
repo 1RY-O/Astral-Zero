@@ -1,4 +1,4 @@
-/* Debris Darling / HELIOS PROTOCOL — Corrupted Glitch, CRT & Cash Inc Tycoon CSS */
+/* Kessler Tycoon — Corrupted Glitch, CRT & Tactile Tycoon CSS */
 
 @keyframes scanline {
   0% {
@@ -162,10 +162,10 @@
 }
 
 /* =========================================================
-   CASH INC. / ROBLOX TYCOON CHUNKY & TACTILE BUTTONS
+   ROBLOX TYCOON / CASH INC CHUNKY & TACTILE BUTTONS
    ========================================================= */
 
-.chunky-tactile-btn {
+.chunky-deploy-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -174,119 +174,133 @@
   color: #FFFFFF;
   border: 2px solid #7DD3FC;
   border-radius: 6px;
-  padding: 12px 18px;
+  padding: 14px 18px;
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-weight: 900;
-  font-size: 0.92rem;
+  font-size: 1rem;
   letter-spacing: 1.5px;
   cursor: pointer;
   text-transform: uppercase;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   box-shadow: 0 5px 0 #0369A1, 0 8px 16px rgba(56, 189, 248, 0.4);
   transform: translateY(0);
   transition: all 0.08s ease;
   user-select: none;
 }
 
-.chunky-tactile-btn:hover:not(:disabled) {
+.chunky-deploy-btn:hover:not(:disabled) {
   filter: brightness(1.15);
-  box-shadow: 0 6px 0 #0369A1, 0 10px 22px rgba(56, 189, 248, 0.6);
+  box-shadow: 0 6px 0 #0369A1, 0 10px 20px rgba(56, 189, 248, 0.6);
 }
 
-.chunky-tactile-btn:active:not(:disabled) {
+.chunky-deploy-btn:active:not(:disabled) {
   transform: translateY(4px);
   box-shadow: 0 1px 0 #0369A1, 0 2px 6px rgba(56, 189, 248, 0.3);
 }
 
-.chunky-tactile-btn:disabled {
+.chunky-deploy-btn:disabled {
   background: #334155;
   border-color: #475569;
   color: #94A3B8;
   box-shadow: 0 3px 0 #1E293B;
   cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Zone MEO Deploy Button (Purple) */
+.chunky-deploy-meo {
+  background: linear-gradient(180deg, #818CF8 0%, #4F46E5 100%);
+  border-color: #C7D2FE;
+  box-shadow: 0 5px 0 #3730A3, 0 8px 16px rgba(129, 140, 248, 0.4);
+}
+
+.chunky-deploy-meo:hover:not(:disabled) {
+  box-shadow: 0 6px 0 #3730A3, 0 10px 20px rgba(129, 140, 248, 0.6);
+}
+
+.chunky-deploy-meo:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 #3730A3, 0 2px 6px rgba(129, 140, 248, 0.3);
+}
+
+/* Zone GEO Deploy Button (Hot Pink) */
+.chunky-deploy-geo {
+  background: linear-gradient(180deg, #FF5FB0 0%, #E11D48 100%);
+  border-color: #FDA4AF;
+  box-shadow: 0 5px 0 #9F1239, 0 8px 16px rgba(255, 95, 176, 0.4);
+}
+
+.chunky-deploy-geo:hover:not(:disabled) {
+  box-shadow: 0 6px 0 #9F1239, 0 10px 20px rgba(255, 95, 176, 0.6);
+}
+
+.chunky-deploy-geo:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 #9F1239, 0 2px 6px rgba(255, 95, 176, 0.3);
+}
+
+/* Next Upgrade Tycoon Box / Button */
+.upgrade-goal-box {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px dashed #10B981;
+  border-radius: 6px;
+  padding: 10px 12px;
+  text-align: center;
+  margin-top: 10px;
+}
+
+.upgrade-goal-box.locked {
+  background: rgba(71, 85, 105, 0.15);
+  border-color: #475569;
+  color: #94A3B8;
+}
+
+.upgrade-goal-btn {
+  background: linear-gradient(180deg, #10B981 0%, #059669 100%);
+  border: 1px solid #6EE7B7;
+  color: #FFFFFF;
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-weight: 800;
+  font-size: 0.8rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  width: 100%;
+  box-shadow: 0 3px 0 #047857;
+  transform: translateY(0);
+  transition: all 0.08s ease;
+}
+
+.upgrade-goal-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 4px 0 #047857;
+}
+
+.upgrade-goal-btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #047857;
+}
+
+.upgrade-goal-btn:disabled {
+  background: #334155;
+  border-color: #475569;
+  color: #94A3B8;
+  box-shadow: none;
+  cursor: not-allowed;
   opacity: 0.6;
 }
 
-/* Secondary Gold / Research Button */
-.chunky-gold-btn {
-  background: linear-gradient(180deg, #FBBF24 0%, #D97706 100%);
-  border-color: #FDE68A;
-  color: #111827;
-  text-shadow: none;
-  box-shadow: 0 5px 0 #B45309, 0 8px 16px rgba(251, 191, 36, 0.35);
-}
-
-.chunky-gold-btn:hover:not(:disabled) {
-  filter: brightness(1.15);
-  box-shadow: 0 6px 0 #B45309, 0 10px 22px rgba(251, 191, 36, 0.55);
-}
-
-.chunky-gold-btn:active:not(:disabled) {
-  transform: translateY(4px);
-  box-shadow: 0 1px 0 #B45309, 0 2px 6px rgba(251, 191, 36, 0.3);
-}
-
-/* Magenta / Satellite Defense Button */
-.chunky-pink-btn {
-  background: linear-gradient(180deg, #FF5FB0 0%, #E11D48 100%);
-  border-color: #FDA4AF;
-  color: #FFFFFF;
-  box-shadow: 0 5px 0 #BE123C, 0 8px 16px rgba(255, 95, 176, 0.4);
-}
-
-.chunky-pink-btn:hover:not(:disabled) {
-  filter: brightness(1.15);
-  box-shadow: 0 6px 0 #BE123C, 0 10px 22px rgba(255, 95, 176, 0.6);
-}
-
-.chunky-pink-btn:active:not(:disabled) {
-  transform: translateY(4px);
-  box-shadow: 0 1px 0 #BE123C, 0 2px 6px rgba(255, 95, 176, 0.3);
-}
-
-/* Automation Button */
-.auto-upgrade-btn {
-  background: rgba(16, 185, 129, 0.15);
-  border: 1px solid #10B981;
-  color: #10B981;
-  padding: 6px 12px;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-weight: 800;
-  font-size: 0.75rem;
-  letter-spacing: 1px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.auto-upgrade-btn:hover:not(:disabled) {
-  background: #10B981;
-  color: #061120;
-  box-shadow: 0 0 14px rgba(16, 185, 129, 0.6);
-}
-
-.auto-upgrade-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  border-color: #475569;
-  color: #64748B;
-}
-
-.auto-badge-active {
+.auto-badge-pulse {
   background: rgba(16, 185, 129, 0.25);
   border: 1px solid #10B981;
   color: #34D399;
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-radius: 4px;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 1px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  text-align: center;
   animation: pulse-auto 2s infinite ease-in-out;
 }
 
@@ -305,12 +319,12 @@
     opacity: 1;
     transform: translateY(0) scale(0.9);
   }
-  40% {
-    transform: translateY(-24px) scale(1.15);
+  30% {
+    transform: translateY(-20px) scale(1.2);
   }
   100% {
     opacity: 0;
-    transform: translateY(-56px) scale(1.0);
+    transform: translateY(-50px) scale(1.0);
   }
 }
 
@@ -322,7 +336,7 @@
   letter-spacing: 1px;
   pointer-events: none;
   z-index: 1000;
-  animation: float-reward-anim 1.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: float-reward-anim 1.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 /* Dangerous Action Button (Hot Pink) */
@@ -353,6 +367,34 @@
   color: #888;
 }
 
+/* Safe Action Button (Sky Blue) */
+.action-safe-btn {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38BDF8;
+  border: 1px solid #38BDF8;
+  padding: 10px 16px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+.action-safe-btn:hover:not(:disabled) {
+  background: #38BDF8;
+  color: #061120;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
+}
+
+.action-safe-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: #555;
+  color: #888;
+}
+
 /* Glitch Title text effects */
 .glitch-text {
   position: relative;
@@ -372,35 +414,4 @@
 
 .progress-active {
   animation: pulse-bar 1s infinite alternate;
-}
-
-/* NASA Classification Badges */
-.badge-live-obs {
-  background: rgba(56, 189, 248, 0.18);
-  border: 1px solid #38BDF8;
-  color: #7DD3FC;
-  padding: 2px 8px;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 1px;
-}
-
-.badge-scientific-forecast {
-  background: rgba(251, 191, 36, 0.18);
-  border: 1px solid #FBBF24;
-  color: #FDE68A;
-  padding: 2px 8px;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 1px;
-}
-
-.badge-hero-mission {
-  background: rgba(255, 45, 149, 0.18);
-  border: 1px solid #FF2D95;
-  color: #FF5FB0;
-  padding: 2px 8px;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 1px;
 }

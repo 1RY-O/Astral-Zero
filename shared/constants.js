@@ -1,59 +1,47 @@
 /**
- * HELIOS PROTOCOL: Space Weather Superhero Tycoon — Shared Constants & Types
+ * Kessler Tycoon — Shared Constants & Types
  * Built for the NASA International Space Apps Challenge 2026.
  */
 
 export const ECONOMY = {
   INITIAL_BUDGET: 1000,
+  TUG_COST: 200,
+  UPGRADE_COST: 500,
+  PURGE_COST: 1000,
+  PURGE_RISK_SPIKE: 20.0,
   INSOLVENCY_LIMIT: -500,
-  INITIAL_MAGNETOSPHERE: 100.0,
-  COLLAPSE_LIMIT: 0.0,
-  EMERGENCY_SHIELD_COST: 800,
-  EMERGENCY_SHIELD_RESTORE: 20.0,
 };
 
-export const DEPARTMENTS = {
-  SOLAR_OBS: {
-    id: 'solar_obs',
-    name: 'Solar Observation Centre',
-    role: 'Rapid Flare Interception & Manual Response',
-    classification: 'LIVE OBSERVATION',
-    scienceSource: 'NASA SDO (Atmospheric Imaging Assembly 131Å / 171Å)',
-    description: 'Tracks extreme ultraviolet flares and active solar regions. High-speed interceptors.',
-    baseCost: 150,
-    basePayout: 320,
-    baseIntegrityRestore: 2.8,
-    baseDuration: 3.0,
-    autoCost: 600,
-    upgradeCost: 400,
+export const ZONES = {
+  LEO: {
+    id: 'LEO',
+    name: 'Low Earth Orbit (LEO)',
+    altitude: '160 - 2,000 km',
+    baseDebris: 12,
+    basePayout: 350,
+    autoCost: 1500,
+    color: '#38BDF8',
+    ringRadius: 65,
   },
-  RESEARCH_LAB: {
-    id: 'research_lab',
-    name: 'Space Weather Research Lab',
-    role: 'Automated CME Trajectory & Plasma Analysis',
-    classification: 'SCIENTIFIC FORECAST',
-    scienceSource: 'NASA DONKI (Space Weather Database / WSA-Enlil Solar Wind)',
-    description: 'Predicts interplanetary coronal mass ejection shock waves and plasma density.',
-    baseCost: 350,
-    basePayout: 750,
-    baseIntegrityRestore: 5.5,
-    baseDuration: 5.0,
-    autoCost: 1200,
-    upgradeCost: 800,
+  MEO: {
+    id: 'MEO',
+    name: 'Medium Earth Orbit (MEO)',
+    altitude: '2,000 - 35,786 km',
+    baseDebris: 18,
+    basePayout: 550,
+    autoCost: 3000,
+    color: '#6d4aff',
+    ringRadius: 105,
   },
-  SAT_DEFENSE: {
-    id: 'sat_defense',
-    name: 'Satellite Protection Division',
-    role: 'Geomagnetic Deflection & Orbital Grid Defense',
-    classification: 'SIMULATED HERO MISSION',
-    scienceSource: 'NOAA SWPC (Planetary K-index / Space Weather Scales G1-G5)',
-    description: 'Dispatches heavy shield cruisers to absorb geomagnetic storm radiation belts.',
-    baseCost: 700,
-    basePayout: 1600,
-    baseIntegrityRestore: 10.0,
-    baseDuration: 7.0,
-    autoCost: 2500,
-    upgradeCost: 1500,
+  GEO: {
+    id: 'GEO',
+    name: 'Geostationary Orbit (GEO)',
+    altitude: '35,786 km',
+    baseDebris: 25,
+    basePayout: 900,
+    autoCost: 5000,
+    color: '#FF2D95',
+    ringRadius: 145,
   },
 };
 
@@ -66,19 +54,14 @@ export const COLORS = {
   GREEN: '#4CAF50',
   AMBER: '#FFC107',
   WHITE: '#FFFFFF',
-  SUN_GOLD: '#FFB800',
-  SOLAR_ORANGE: '#FF5722',
 };
 
 export const AI_BOSS_TAUNTS = {
-  GREETING: "HELIOS AI online. Solar Cycle 25 is peaking, Director. Try not to let Earth's atmosphere evaporate today.",
-  BANKRUPT: "You're bankrupt, Director. My solar panels produce more net value than your entire agency.",
-  CRITICAL_MAGNETOSPHERE: "Magnetosphere integrity under 35%! Aurora is visible in the tropics! That's not a light show, that's planetary failure!",
-  IDLE: "Are you observing the sun, Director, or taking a nap under a sunlamp? Deploy an interceptor!",
-  AUTOMATION_PURCHASED: "Autonomous spotters activated. Finally, machines are handling what biological leadership botched.",
-  UPGRADE: "New hardware requisition approved. Let's see if you can utilize it without frying our capacitors.",
-  HERO_DEPLOYED: "Hero mission launched into the solar wind. Godspeed, or whatever passes for physics in your head.",
-  CME_ALERT: "NASA DONKI reports CME shock wave traveling at 1,600 km/s. Brace for bow-shock compression!",
-  SOLAR_FLARE: "NASA SDO AIA detected an X-class solar flare! Ionizing radiation arriving in T-minus 8 minutes!",
-  SUCCESS: "Solar event mitigated and plasma contained. Bare minimum achieved. Don't expect NASA to give you a medal.",
+  GREETING: "NASA privatization protocol active. Don't bankrupt us on your first day.",
+  BANKRUPT: "You're bankrupt. My toaster has more processing power than your company.",
+  HIGH_RISK: "Orbit is turning into a blender. Do your job.",
+  IDLE: "Are you dead, or just incompetent? Deploy a tug.",
+  FLEET_UPGRADE: "Oh look, you bought a shiny new toy. Too bad you're still bad at your job.",
+  AUTO_TUG: "Auto-tug acquired. Finally, automated hardware to compensate for human reaction times.",
+  ZONE_CLEARED: "Finally. You did the bare minimum. Don't expect a raise.",
 };

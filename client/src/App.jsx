@@ -1,5 +1,5 @@
 /**
- * HELIOS PROTOCOL: Space Weather Superhero Tycoon — Main Client App
+ * Kessler Tycoon — Main Client App
  * Built for the NASA International Space Apps Challenge 2026.
  */
 
@@ -60,7 +60,7 @@ export default function App() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('[HELIOS PROTOCOL] Connected to space weather AI server:', socket.id);
+      console.log('[Kessler Tycoon] Connected to flight AI server:', socket.id);
       setSocketConnected(true);
       setSystemOnline(true);
     });
@@ -78,7 +78,7 @@ export default function App() {
           triggerShake(600);
           triggerHotPinkFlash(400);
         }
-        addNotification(payload.message, isCritical ? 'rage' : 'taunt', 4800);
+        addNotification(payload.message, isCritical ? 'rage' : 'taunt', 4500);
       }
     });
 
@@ -104,7 +104,7 @@ export default function App() {
         />
       )}
 
-      {/* Corrupted NASA AI Hostile Taunts Popup Overlay */}
+      {/* Corrupted NASA AI Rage Taunts Popup Overlay */}
       <RageNotifications notifications={notifications} isFlashActive={isFlashActive} />
     </div>
   );

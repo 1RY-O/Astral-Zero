@@ -39,16 +39,19 @@ this sandbox.
     `setState`. Fixed-step 60 Hz accumulator, max 5 substeps per frame.
     Device-pixel-ratio canvas sizing, resize handling, visibility pause.
     Pointer (GRAB on down / RELEASE on up) and keyboard (`E` grab,
-    `Space` hold thrust, `Q` release) input wired to the physics world.
-  - `src/physics/world.js` — Verlet integrator, position-based distance
-    constraints (12 iterations per fixed step), tether with fixed anchor
-    / rest length / max length / rope slack behaviour / tension readout,
-    planet-limb collision with bounce, seeded debug scenario (7 debris
-    masses + limb, constant gravity, `?seed=` URL param), deterministic
-    mulberry32 RNG. Zero allocations in the hot step loop; runs under
-    Node for tests.
+    `Space` hold thrust, `Q` release) input wired to the physics world,
+    with try/catch on all handlers and error display in the debug overlay.
+  - `src/physics/world.js` — Zero-g Verlet integrator (no constant
+    downward gravity), position-based distance constraints (12 iterations
+    per fixed step), tether with fixed anchor / rest length / max length /
+    rope slack behaviour / tension readout, seeded debug scenario (7 debris
+    masses, constant-gravity-free void, `?seed=` URL param), deterministic
+    mulberry32 RNG. Planet limb removed for Phase 3 — pure zero-g void.
+    Zero allocations in the hot step loop; runs under Node for tests.
   - `src/physics/render.js` — Canvas 2D renderer; colours exclusively
-    from `src/ui/tokens.js`.
+    from `src/ui/tokens.js`. Velocity vector arrow drawn from the grabbed
+    body (shows release trajectory), highlight ring around grabbed body,
+    tether drawn under the grabbed body.
   - `src/ui/tokens.js` — added `planetFill`/`planetStroke` tokens only
     (raw literals stay in the token modules).
   - `tests/physics.test.mjs` — determinism (same seed => same trace),
@@ -57,6 +60,7 @@ this sandbox.
   - `index.html` — stripped to the bare React mount point; title/meta now
     Debris Derby. Legacy Solar Sentinel client files remain on disk,
     untouched and lint-ignored, until Phase 5 replaces them.
+  - `npm test` (31/31), `npm run lint`, `npm run build` all green.
 
 ## Phase 2 preconditions
 - **F1:** chain-detection window corrected to **900 ms** in docs/SPEC.md

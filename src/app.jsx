@@ -65,7 +65,7 @@ function resize(canvas, ctx, world) {
   world.setSize(rect.width, rect.height);
 }
 
-function paintDebug(debug, world, fpsRef, now) {
+function paintDebug(debug, world, fpsRef, now, loopError) {
   const state = fpsRef.current;
   state.frames += 1;
   if (now - state.t >= 1000) {
@@ -83,7 +83,7 @@ function paintDebug(debug, world, fpsRef, now) {
     `grabbed: ${world.grabbed ? 'yes' : 'no'}`,
     `objects: ${world.particles.length}`,
     '',
-    'click / E   grab   ·   hold Space   thrust   ·   Q / release',
+    loopError ? `ERROR: ${loopError}` : 'click / E   grab   ·   hold Space   thrust   ·   Q / release',
     '?seed=   rerolls the debris swarm',
   ];
   debug.textContent = lines.join('\n');
@@ -120,25 +120,31 @@ export default function App() {
     resize(canvas, ctx, world);
 
     let last = performance.now();
+    let loopError = null;
     function loop(now) {
       if (!activeRef.current) return;
 
-      const dt = Math.min((now - last) / 1000, 0.1);
-      last = now;
+      try {
+        const dt = Math.min((now - last) / 1000, 0.1);
+        last = now;
 
-      if (!pausedRef.current) {
-        accRef.current += dt;
-        let substeps = 0;
-        while (accRef.current >= FIXED_DT && substeps < MAX_SUBSTEPS) {
-          world.step();
-          accRef.current -= FIXED_DT;
-          substeps += 1;
+        if (!pausedRef.current) {
+          accRef.current += dt;
+          let substeps = 0;
+          while (accRef.current >= FIXED_DT && substeps < MAX_SUBSTEPS) {
+            world.step();
+            accRef.current -= FIXED_DT;
+            substeps += 1;
+          }
+          world.substeps = substeps;
         }
-        world.substeps = substeps;
-      }
 
-      drawWorld(ctx, world, canvas.clientWidth, canvas.clientHeight);
-      paintDebug(debug, world, fpsRef, now);
+        drawWorld(ctx, world, canvas.clientWidth, canvas.clientHeight);
+        paintDebug(debug, world, fpsRef, now, loopError);
+      } catch (err) {
+        loopError = err.message;
+        paintDebug(debug, world, fpsRef, now, loopError);
+      }
 
       rafRef.current = requestAnimationFrame(loop);
     }
@@ -147,24 +153,38 @@ export default function App() {
     rafRef.current = requestAnimationFrame(loop);
 
     const onPointerDown = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      world.grab(event.clientX - rect.left, event.clientY - rect.top);
+      try {
+        const rect = canvas.getBoundingClientRect();
+        world.grab(event.clientX - rect.left, event.clientY - rect.top);
+      } catch (err) {
+        loopError = err.message;
+      }
     };
-    const onPointerUp = () => world.release();
+    const onPointerUp = () => {
+      try { world.release(); } catch (err) { loopError = err.message; }
+    };
     const onKeyDown = (event) => {
-      if (event.key === ' ') {
-        event.preventDefault();
-        world.setThrusting(true);
-      } else if (event.key === 'e' || event.key === 'E') {
-        world.grabNearest();
-      } else if (event.key === 'q' || event.key === 'Q') {
-        world.release();
+      try {
+        if (event.key === ' ') {
+          event.preventDefault();
+          world.setThrusting(true);
+        } else if (event.key === 'e' || event.key === 'E') {
+          world.grabNearest();
+        } else if (event.key === 'q' || event.key === 'Q') {
+          world.release();
+        }
+      } catch (err) {
+        loopError = err.message;
       }
     };
     const onKeyUp = (event) => {
-      if (event.key === ' ') {
-        event.preventDefault();
-        world.setThrusting(false);
+      try {
+        if (event.key === ' ') {
+          event.preventDefault();
+          world.setThrusting(false);
+        }
+      } catch (err) {
+        loopError = err.message;
       }
     };
     const onResize = () => resize(canvas, ctx, world);

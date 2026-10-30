@@ -7,12 +7,11 @@
  * at scenario spawn; the hot step loop mutates in place and allocates
  * nothing.
  *
- * Debug world (Phase 3 only): a flat 2D space with a fixed anchor (the
- * player tug) at the top centre, a planet limb curving across the
- * bottom, and a handful of seeded debris masses under constant gravity.
- * The tether is a rope constraint between the anchor and one grabbed
- * body: slack below rest length, taut toward rest length, hard-capped
- * at max length.
+ * Debug world (Phase 3 only): a zero-g void with a fixed anchor (the
+ * player tug) at the top centre and a handful of seeded debris masses
+ * drifting under their own initial velocity. The tether is a rope
+ * constraint between the anchor and one grabbed body: slack below rest
+ * length, taut toward rest length, hard-capped at max length.
  */
 
 const FIXED_DT = 1 / 60;
@@ -20,16 +19,13 @@ const MAX_SUBSTEPS = 5;
 const CONSTRAINT_ITERATIONS = 12;
 const DT2 = FIXED_DT * FIXED_DT;
 
-const GRAVITY = 520; // px / s^2, downward
-
 // Tether
 const TETHER_REST = 160; // px: slack below this length
 const TETHER_MAX = 300; // px: hard reach cap
 const GRAB_RADIUS = 24; // px: pointer radius test for GRAB
 const ANCHOR_RADIUS = 7;
 
-// Planet limb (bottom of the debug world)
-const PLANET_RADIUS_FRAC = 0.9;
+// Debris swarm
 const PARTICLE_COUNT = 7;
 const SPAWN_MIN_R = 70;
 const SPAWN_MAX_R = 210;
@@ -37,7 +33,6 @@ const SPAWN_MAX_R = 210;
 // Thrust / fuel
 const THRUST_ACC = 960; // px / s^2 along the tether normal, outward
 const FUEL_DRAIN = 0.22; // fuel per second of thrust
-const RESTITUTION = 0.4; // planet-limb bounce
 
 const DEFAULT_SEED = 2026;
 const TAU = Math.PI * 2;
@@ -103,7 +98,6 @@ export class World {
     this.tether = null; // { rest, max } while a body is grabbed
     this.grabbed = null;
     this.anchor = null;
-    this.planet = { x: 0, y: 0, radius: 0 };
 
     this.fuel = 1;
     this.thrusting = false;
@@ -121,9 +115,6 @@ export class World {
     const anchorY = this.height * 0.22;
 
     this.anchor = makeFixedParticle(cx, anchorY, ANCHOR_RADIUS);
-    this.planet.radius = this.height * PLANET_RADIUS_FRAC;
-    this.planet.x = cx;
-    this.planet.y = this.height + this.planet.radius * 0.5;
 
     this.particles = [];
     for (let i = 0; i < PARTICLE_COUNT; i += 1) {
@@ -131,7 +122,7 @@ export class World {
       const reach = SPAWN_MIN_R + this.rng() * (SPAWN_MAX_R - SPAWN_MIN_R);
       let x = cx + Math.cos(angle) * reach;
       let y = anchorY + Math.sin(angle) * reach;
-      // Keep debris on screen and clear of the limb at spawn.
+      // Keep debris on screen at spawn.
       x = Math.min(Math.max(x, 40), this.width - 40);
       y = Math.min(Math.max(y, 40), this.height * 0.5);
 
@@ -158,11 +149,6 @@ export class World {
     if (this.anchor) {
       this.anchor.x = width * 0.5;
       this.anchor.y = height * 0.22;
-    }
-    if (this.planet) {
-      this.planet.radius = height * PLANET_RADIUS_FRAC;
-      this.planet.x = width * 0.5;
-      this.planet.y = height + this.planet.radius * 0.5;
     }
   }
 
@@ -245,11 +231,7 @@ export class World {
     const particles = this.particles;
     const dt2 = DT2;
 
-    // 1. Forces: gravity plus thrust along the tether normal.
-    for (const p of particles) {
-      if (p.fixed) continue;
-      p.ay += GRAVITY;
-    }
+    // 1. Forces: thrust along the tether normal.
     if (this.thrusting && this.grabbed && this.fuel > 0) {
       const g = this.grabbed;
       const a = this.anchor;
@@ -279,7 +261,6 @@ export class World {
     // 3. Position-based constraints.
     for (let it = 0; it < CONSTRAINT_ITERATIONS; it += 1) {
       if (this.tether && this.grabbed) this.solveTether();
-      for (const p of particles) this.resolvePlanet(p);
     }
   }
 
@@ -314,35 +295,6 @@ export class World {
     g.y -= dy * correction * share;
 
     this.tension = d - target;
-  }
-
-  resolvePlanet(p) {
-    const pl = this.planet;
-    let dx = p.x - pl.x;
-    let dy = p.y - pl.y;
-    let d = Math.sqrt(dx * dx + dy * dy);
-    const minDist = pl.radius + p.radius;
-    if (d >= minDist) return;
-
-    if (d === 0) {
-      dx = 0;
-      dy = 1;
-    } else {
-      dx /= d;
-      dy /= d;
-    }
-
-    // Position correction: push the body out of the limb.
-    p.x = pl.x + dx * minDist;
-    p.y = pl.y + dy * minDist;
-
-    // Reflect the implicit velocity (verlet previous position) so the
-    // body bounces/slides with restitution.
-    const vx = p.x - p.px;
-    const vy = p.y - p.py;
-    const vn = vx * dx + vy * dy;
-    p.px = p.x - (vx - 2 * vn * dx) * RESTITUTION;
-    p.py = p.y - (vy - 2 * vn * dy) * RESTITUTION;
   }
 }
 

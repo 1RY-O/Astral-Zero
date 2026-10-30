@@ -16,6 +16,7 @@ import { initAudio } from './game/audio.js';
 import { getLevelDef, LEVEL_DEFS } from './game/levels.js';
 
 import Cursor from './components/Cursor.jsx';
+import Particles from './components/Particles.jsx';
 import MainMenu from './components/MainMenu.jsx';
 import HUD from './components/HUD.jsx';
 import TutorialOverlay from './components/TutorialOverlay.jsx';
@@ -65,6 +66,7 @@ export default function App() {
   const [endFuel, setEndFuel] = useState(1);
   const [levelIntroTitle, setLevelIntroTitle] = useState('FIRST CONTACT');
   const [showIntro, setShowIntro] = useState(true);
+  const [showHint, setShowHint] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(1); // 1: Grab, 2: Thrust, 3: Release
   const [isTouchDevice] = useState(() => {
     return (
@@ -91,11 +93,13 @@ export default function App() {
     const target = Math.max(1, Math.min(8, lvlId));
     setCurrentLevel(target);
     const def = getLevelDef(target);
-    setLevelIntroTitle(def.name);
+    const title = target === 2 ? 'TWO-BODY PROBLEM: GRAVITY ASSIST' : def.name;
+    setLevelIntroTitle(title);
     setShowIntro(true);
     setModalState(null);
     setLevelModalOpen(false);
     setTutorialStep(1);
+    setShowHint(target > 1);
 
     if (worldRef.current) {
       worldRef.current.loadLevel(target);
@@ -117,6 +121,11 @@ export default function App() {
   const handleRetry = useCallback(() => {
     loadLevel(currentLevel);
   }, [currentLevel, loadLevel]);
+
+  const handleRetryRef = useRef(handleRetry);
+  useEffect(() => {
+    handleRetryRef.current = handleRetry;
+  }, [handleRetry]);
 
   // Mobile virtual joystick thrust callback
   const handleThrustChange = useCallback((thrusting, dir = null) => {
@@ -336,6 +345,14 @@ export default function App() {
       const pt = canvasCoords(e);
       world.pointer.x = pt.x;
       world.pointer.y = pt.y;
+
+      const isHoveringDebris = world.particles.some((p) => {
+        if (p.fixed) return false;
+        return Math.hypot(p.x - pt.x, p.y - pt.y) <= 2.5 * p.radius;
+      });
+      if (typeof window !== 'undefined') {
+        window.__dd_debrisHover = isHoveringDebris;
+      }
     }
 
     function onPointerUp(e) {
@@ -357,6 +374,12 @@ export default function App() {
         e.preventDefault();
       } else if (e.code === 'KeyQ') {
         world.release();
+        e.preventDefault();
+      } else if (e.code === 'KeyR') {
+        handleRetryRef.current?.();
+        e.preventDefault();
+      } else if (e.code === 'KeyH') {
+        setShowHint((prev) => !prev);
         e.preventDefault();
       } else if (e.code === 'Escape') {
         setLevelModalOpen((prev) => !prev);
@@ -413,6 +436,15 @@ export default function App() {
         userSelect: 'none',
       }}
     >
+      {/* ReactBits WebGL Background Component (drifting 3D celestial particle field) */}
+      <Particles
+        particleCount={280}
+        particleSpread={12}
+        speed={0.06}
+        particleColors={['#FFFFFF', '#38BDF8', '#7DD3FC', '#FF2D95', '#FFFFFF']}
+        style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}
+      />
+
       {/* Custom Cursor */}
       <Cursor />
 
@@ -430,14 +462,18 @@ export default function App() {
         currentLevel={currentLevel}
         levelName={levelDef.name}
         onOpenLevelModal={() => setLevelModalOpen(true)}
+        onReset={handleRetry}
+        onToggleHint={() => setShowHint((prev) => !prev)}
+        showHint={showHint}
         visible={inGame}
       />
 
-      {/* Level 1 Step-by-Step Tutorial Overlay */}
+      {/* Tutorial / Mission Hint Overlay */}
       <TutorialOverlay
         levelId={currentLevel}
         step={tutorialStep}
-        visible={inGame && currentLevel === 1}
+        visible={inGame && (currentLevel === 1 || showHint)}
+        onClose={() => setShowHint(false)}
       />
 
       {/* Level Intro Typography Banner */}
@@ -495,6 +531,9 @@ export default function App() {
       <canvas
         ref={canvasRef}
         style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 1,
           display: 'block',
           width: '100vw',
           height: '100vh',

@@ -494,9 +494,33 @@ export class World {
         }
         this.burnedCount += 1;
 
-        // Points, scoring popups and cascade effects disabled for testing per user request
+        // Scoring logic: Level 1 testing has points disabled; Levels 2-8 implement 25-Year Rule
         const isRetrograde = p.releaseDot < 0;
-        this.score = 0;
+
+        if (this.levelId === 1) {
+          this.score = 0;
+        } else {
+          // Cascade window check (900ms)
+          if (this.lastDeorbitTime !== null && atMs - this.lastDeorbitTime <= CHAIN_WINDOW_MS) {
+            this.chain += 1;
+          } else {
+            this.chain = 1;
+          }
+          this.lastDeorbitTime = atMs;
+          if (this.chain > this.maxChain) this.maxChain = this.chain;
+
+          // Scoring: Retrograde (+80) vs Prograde (-150)
+          const objectValue = 50 * Math.min(4, Math.max(0.5, p.mass / 10));
+          const multiplier = (this.chain * (this.chain + 1)) / 2;
+          const gainedScore = Math.round(objectValue * multiplier + (isRetrograde ? 80 : -150));
+          this.score = Math.max(0, this.score + gainedScore);
+
+          if (isRetrograde) {
+            this.addFloatingText(`+${gainedScore} CLEAN (${this.chain}x)`, p.x, p.y - 10, PALETTE.clean);
+          } else {
+            this.addFloatingText(`-${Math.abs(gainedScore)} PROGRADE`, p.x, p.y - 10, PALETTE.danger);
+          }
+        }
 
         this.deorbits.push({
           objectId: p.id,
@@ -532,7 +556,8 @@ export class World {
 
     // Win condition check
     if (this.levelId !== null && this.state === 'playing') {
-      if (this.particles.length === 0) {
+      const active = this.particles.filter((p) => !p.fixed);
+      if (active.length === 0) {
         this.state = 'cleared';
         // Fuel bonus on level clear
         const fuelBonus = Math.round(500 * this.fuel);

@@ -105,7 +105,8 @@ void main() {
     color = mix(color, C_PINK, u_flashPink * 0.6);
   }
 
-  gl_FragColor = vec4(color, 1.0);
+  float bgAlpha = d < 0.0 ? 1.0 : 0.65;
+  gl_FragColor = vec4(color, bgAlpha);
 }
 `;
 
@@ -199,7 +200,7 @@ export class WebGLPhysicsRenderer {
     this.canvas = canvas;
     const gl =
       (canvas.getContext('webgl', {
-        alpha: false,
+        alpha: true,
         antialias: true,
         powerPreference: 'high-performance',
       }) as WebGLRenderingContext | null) ||
@@ -340,7 +341,7 @@ export class WebGLPhysicsRenderer {
 
     const dpr = window.devicePixelRatio || 1;
     gl.viewport(0, 0, width * dpr, height * dpr);
-    gl.clearColor(NIGHT[0], NIGHT[1], NIGHT[2], 1.0);
+    gl.clearColor(0.0, 0.0, 0.0, 0.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     // Parallax update based on ship / anchor position and thrust
@@ -415,6 +416,20 @@ export class WebGLPhysicsRenderer {
           this.drawCircle(simX, simY, 5.0, trajColor, alpha * 0.25, 8);
         }
       }
+    }
+
+    // Celestial Moon: Rendered in Level 2 for "Two-Body Problem: Gravity Assist"
+    if (world.levelId === 2) {
+      const moonX = width * 0.76;
+      const moonY = height * 0.18;
+      const moonR = 26;
+      this.drawCircle(moonX, moonY, moonR + 12, SKY, 0.12, 24);
+      this.drawCircle(moonX, moonY, moonR + 4, WHITE, 0.22, 24);
+      this.drawCircle(moonX, moonY, moonR, [0.88, 0.92, 0.96], 0.95, 28);
+      this.drawCircle(moonX - 7, moonY - 6, 5, [0.72, 0.76, 0.82], 0.65, 12);
+      this.drawCircle(moonX + 8, moonY + 7, 6, [0.72, 0.76, 0.82], 0.65, 12);
+      this.drawCircle(moonX - 4, moonY + 9, 3.5, [0.72, 0.76, 0.82], 0.65, 12);
+      this.drawCircle(moonX + 4, moonY - 8, 3.5, [0.72, 0.76, 0.82], 0.65, 12);
     }
 
     // B. Tether: Glowing --sky line connecting ship to grabbed debris

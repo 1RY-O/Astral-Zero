@@ -1,10 +1,16 @@
 # Status — Debris Derby
 
-## Current Phase: Phase 3 — Bare Canvas + Tether Physics (User Sandbox Verification)
+## Current Phase: Final Visual & Architecture Specification (Complete)
 
 Built for the **NASA International Space Apps Challenge 2026**.
 
-The client has been reset to the raw Phase 3 zero-g physics sandbox per instructions. All UI chrome, navigation headers, and Phase 4/5 features are held until explicit user approval of the physics sandbox.
+The client has been upgraded to the final visual and WebGL architecture specification:
+- **Design Tokens:** Strict `--night` (#060D1F), `--sky` (#38BDF8), `--pink` (#FF2D95), and `--white` (#FFFFFF). Space Grotesk & Inter via @fontsource.
+- **Custom Cursor:** 36x36px ring with 12x12px white dot lerped at 0.2 smoothing; scales to 1.16x and turns `--sky` over interactive elements.
+- **Main Menu:** High-end agency presentation with `<MicroSlats />` background (swell preset, pink slats, sky glint, deep space substrate), frosted 400px glass card, Space Grotesk 80px headline, Serif italic 92px subheadline, and "INITIATE MISSION" transition CTA.
+- **WebGL Physics Renderer (`src/lib/physicsRenderer.ts`):** Massive curved Earth limb with Rayleigh-style atmospheric rim glow, parallax starfield, faceted grey polygon debris with subtle white outlines, glowing tether, and dotted prograde/retrograde trajectory preview.
+- **In-Game HUD:** Space Grotesk SCORE, DELTA-V BUDGET bar, central Prograde/Retrograde compass, and bottom-left Target Telemetry card (visible when grabbed).
+- **Physics Math:** Zero-g Low Earth Orbit, Newton's recoil impulse on release, and tether snap with screen flash on over-extension.
 
 ---
 

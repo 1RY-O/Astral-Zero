@@ -12,6 +12,12 @@
 :root {
   color-scheme: dark;
 
+  /* Strict Tokens --------------------------------------------------------- */
+  --night: #060D1F;
+  --sky: #38BDF8;
+  --pink: #FF2D95;
+  --white: #FFFFFF;
+
   /* Brand palette -------------------------------------------------------- */
   --sky-300: #7DD3FC;
   --sky-400: #38BDF8;
@@ -19,7 +25,6 @@
   --pink-400: #FF5FB0;
   --pink-500: #FF2D95;
   --pink-500-text-on-light: #E01A7A;
-  --white: #FFFFFF;
 
   /* Supporting neutrals -------------------------------------------------- */
   --canvas-dark: #060D1F;
@@ -226,4 +231,26 @@
     --duration-standard: 0.01ms;
     --duration-entrance: 0.01ms;
   }
+}
+
+/* Global Reset & Base Typography ----------------------------------------- */
+html, body, *, *::before, *::after {
+  cursor: none !important;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--night);
+  color: var(--white);
+  font-family: var(--font-body);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6, .headline {
+  font-family: var(--font-display);
+  letter-spacing: -0.035em;
+  margin: 0;
 }

@@ -95,6 +95,7 @@ export class World {
     this.tether = null;
     this.grabbed = null;
     this.anchor = null;
+    this.flashPink = 0;
 
     this.fuelMax = 100;
     this.fuel = 1; // 0..1 ratio of fuelMax
@@ -310,8 +311,21 @@ export class World {
       const vy = (released.y - released.py) / FIXED_DT;
       const speed = Math.hypot(vx, vy);
       // Horizontal component defines retrograde vs prograde
+      released.isPrograde = vx > 0;
+      released.isRetrograde = vx < 0;
       released.releaseDot = speed > 0 ? -vx / speed : -1;
       released.releasedAt = this.gameTime;
+
+      // NEWTON'S RECOIL: On release, apply an opposite impulse to the ship based on the object's mass
+      if (this.anchor) {
+        const shipMass = 120; // tug ship mass in kg
+        const ratio = Math.min(1.5, released.mass / shipMass);
+        const recoilVx = -vx * ratio * 0.4;
+        const recoilVy = -vy * ratio * 0.4;
+        this.anchor.recoilVx = (this.anchor.recoilVx || 0) + recoilVx;
+        this.anchor.recoilVy = (this.anchor.recoilVy || 0) + recoilVy;
+      }
+
       playWhip();
     }
     this.tether = null;
@@ -354,6 +368,27 @@ export class World {
       if (this.slowMoTimer <= 0) {
         this.timeScale = 1.0;
       }
+    }
+
+    // Tether flash decay
+    if (this.flashPink > 0) {
+      this.flashPink = Math.max(0, this.flashPink - FIXED_DT * 2.5);
+    }
+
+    // Anchor recoil & restoring spring to station
+    if (this.anchor) {
+      const defaultX = this.width * 0.5;
+      const defaultY = this.height * 0.22;
+      if (this.anchor.recoilVx || this.anchor.recoilVy) {
+        this.anchor.x += (this.anchor.recoilVx || 0) * FIXED_DT;
+        this.anchor.y += (this.anchor.recoilVy || 0) * FIXED_DT;
+        this.anchor.recoilVx *= 0.92;
+        this.anchor.recoilVy *= 0.92;
+        if (Math.abs(this.anchor.recoilVx) < 0.1) this.anchor.recoilVx = 0;
+        if (Math.abs(this.anchor.recoilVy) < 0.1) this.anchor.recoilVy = 0;
+      }
+      this.anchor.x += (defaultX - this.anchor.x) * 0.05;
+      this.anchor.y += (defaultY - this.anchor.y) * 0.05;
     }
 
     const dt = FIXED_DT * this.timeScale;
@@ -530,6 +565,15 @@ export class World {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const dist = Math.hypot(dx, dy) || 1e-6;
+
+    // TETHER SNAP: If distance > maxLength, snap the tether and flash the screen --pink
+    if (dist > maxLength + 5) {
+      this.release();
+      this.flashPink = 1.0;
+      this.screenShake = 16;
+      this.addFloatingText('TETHER SNAPPED!', a.x, a.y + 30, PALETTE.pink500);
+      return;
+    }
 
     if (dist <= restLength) {
       this.tension = 0;

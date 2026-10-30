@@ -10,6 +10,10 @@
  */
 
 export const PALETTE = Object.freeze({
+  // Strict design system tokens
+  night: '#060D1F',
+  sky: '#38BDF8',
+  pink: '#FF2D95',
   sky300: '#7DD3FC',
   sky400: '#38BDF8',
   sky500: '#0EA5E9',

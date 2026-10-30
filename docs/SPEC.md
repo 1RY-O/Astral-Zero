@@ -167,9 +167,13 @@ the client in Phase 3.
 - One `setInterval` at **500 ms (2 Hz)**, `.unref()`ed.
 - Each tick: propagate cached TLEs with SGP4, build the ambient catalog,
   broadcast it.
-- TLE source: Celestrak/NORAD GP data. Cache for 30 minutes; keep the last
-  good catalog on fetch failure; if no live data has ever arrived, serve
-  the clearly labelled fallback catalog.
+- TLE source: the Celestrak GP JSON endpoint
+  `https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json`.
+  Cache for 30 minutes. Attribute Celestrak in every payload.
+- **No silent fallback.** On HTTP non-200, timeout, parse failure, or
+  network error: log the error loudly and set `catalogStatus` to `stale`
+  (serving the previous successful cache) or `unavailable` (empty object
+  list). Never serve bundled historical TLEs.
 - Exports: `ensureCatalog(io, events)`, `tickOnce(now)`, `stats()`,
   `stopCatalog()`.
 - **No** energy, score, waves, collisions, cascades, proximity timers,
@@ -207,11 +211,11 @@ surviving version string. `1.0.0-solar-sentinel`, `1.5.0-s14`, and the bare
 
 | Event | Direction | Payload |
 |---|---|---|
-| `connected` | S → C | `{ socketId, game: 'Debris Derby', socketEventsVersion, serverTime, catalog: { tickHz: 2, objects, source } }` |
-| `ambient_catalog` | S → C, 2 Hz | `{ tick, timestamp, source: 'celestrak'\|'fallback', objects: [{ id, name, noradId, latDeg, lonDeg, altKm, inclinationDeg, isDebris }] }` |
-| `run_submit` | C → S, ack | `{ levelId, seed, durationMs, fuelUsed, deorbits: [{ objectId, massKg, releaseDot }], lingers, clientScore }` |
+| `connected` | S → C | `{ socketId, game: 'Debris Derby', socketEventsVersion, serverTime, catalog: { tickHz, objects, catalogStatus, sourceUrl, attribution, lastUpdatedAt } }` |
+| `ambient_catalog` | S → C, 2 Hz | `{ tick, timestamp, catalogStatus: 'live'\|'stale'\|'unavailable', sourceUrl, attribution, lastUpdatedAt, objects: [{ id, name, noradId, latDeg, lonDeg, altKm, inclinationDeg, isDebris }] }` |
+| `run_submit` | C → S, ack | `{ levelId, callsign, seed, durationMs, fuelUsed, deorbits: [{ objectId, massKg, releaseDot, atMs }], lingers, clientScore }` |
 | `leaderboard_update` | S → C | `{ levelId, entries, updatedAt }` after an accepted run |
-| `server_notice` | S → C | `{ code, message, at }` for rejections and contract errors |
+| `server_notice` | S → C | `{ code, message, at }` for rejections, catalog outages, and contract errors |
 
 `run_submit` ack:
 - Success: `{ ok: true, runId, score, rank, best }`

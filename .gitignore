@@ -34,7 +34,9 @@ blob-report/
 pids/
 *.pid
 *.pid.lock
-data/
+/data/
+!client/src/data/
+scratch/
 
 # Caches
 .cache/

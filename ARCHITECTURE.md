@@ -1,83 +1,46 @@
-# Debris Derby — Architecture & System Design
+# ASTRAL ZERO — System Architecture
 
-Built for the NASA International Space Apps Challenge 2026.
+Built for the **NASA International Space Apps Challenge 2026**.
 
-## Overview
-
-Debris Derby is built on a decoupled, dual-clock architecture that separates foreground interactive physics from ambient orbital data streaming:
-1. **60 Hz Client Foreground Physics:** Simulates the cleanup tug, momentum tether, satellite bodies, collisions, and re-entry atmospheric kill-zones.
-2. **2 Hz Server Ambient Catalog:** Fetches active satellite TLEs from Celestrak, propagates them using SGP4, streams ambient coordinates over Socket.io, and authoritatively validates submitted scores.
+## 1. Overview
+ASTRAL ZERO is an authentic, pure client-side orbital salvage simulation powered by Vite, React 18, and Canvas/WebGL. The application operates with zero server dependencies, using browser `localStorage` for audio state and mission progression.
 
 ---
 
-## 1. Physics Engine (`src/physics/world.js`)
+## 2. Campaign Architecture
 
-The client simulation runs in a local **Hill's relative reference frame** (relative to the cleanup tug's circular Low Earth Orbit):
-
-* **Verlet Integration:**
-  $$\vec{x}(t + \Delta t) = \vec{x}(t) + (\vec{x}(t) - \vec{x}(t - \Delta t)) \cdot d + \vec{a}(t) \Delta t^2$$
-  where $d = 0.9995$ is numerical velocity damping. No artificial downward gravity is applied; objects drift freely in zero-g.
-* **Position-Based Distance Constraints (PBD):**
-  The momentum tether is resolved using 12 constraint iterations per step:
-  $$\Delta \vec{x}_a = \vec{n} \cdot (|\vec{x}_b - \vec{x}_a| - L_{\text{target}}) \frac{w_a}{w_a + w_b}$$
-  where $w = 1/m$ is the inverse mass. The anchor tug acts as the pendulum center ($w_{\text{tug}} = 0$). When a payload is grappled, the tether locks into a rigid distance constraint that converts linear thrust into centrifugal swing like a sling.
-* **Newtonian Recoil & Flinging:**
-  On release, the payload flies off tangentially to its circular arc with its instantaneous velocity vector. An opposite recoil impulse is applied to the cleanup tug proportional to the payload mass.
-* **Fixed Timestep Accumulator:**
-  Driven at $\Delta t = 1/60\text{ s}$ with a maximum of 5 substeps per rendered frame to prevent death spirals on frame drops.
-* **Atmospheric Kill-Zone:**
-  The bottom boundary represents Earth's upper atmospheric re-entry limb. Objects penetrating the limb are vaporized and deorbited immediately without bouncing or sliding.
-* **Circle-Circle Collision & Destructible Fragmentation:**
-  Transverse high-speed collisions ($v_{\text{rel}} > 75\text{ px/s}$) trigger fragmentation of destructible objects into 3 smaller daughter fragments with distributed masses and momentum conservation.
+- **Act 1 — Training (Contract 0 Drill):** Step-gated orbital rigger drill teaching magnetic mooring, rotation matching, tangential swing pumping, and retrograde atmospheric deorbit. Includes diegetic `[T]` skip option.
+- **Act 2 — Contracts (Missions 1 to 3):**
+  - Mission 1: `SL-16 BOOSTER` — routine retrieval in decaying orbit.
+  - Mission 2: `DELTA-K UPPER STAGE` — heavy spin with mouse-wheel cable reel-in mechanic ($65\text{m} \leftrightarrow 150\text{m}$).
+  - Mission 3: `COSMOS RESIDUAL` — cascade risk with active $75\text{s}$ hypervelocity conjunction timer.
+  - Interstitial pacing: 3-second black card between missions reporting rank and $\Delta v$ consumption.
+- **Act 3 — Credits & Dedication:**
+  - High-impact cinematic credits sequence rendered over the starfield and acid-wave glow.
+  - Dedicated cards for NASA Space Apps 2026, educational attributions (NASA Orbital Debris Program Office), salvage team credits, and MEG stream sign-off (`"gg. chat, we zeroed the perigee."`).
+  - Fully skippable (`[ESC]`) and re-watchable directly from the landing page.
 
 ---
 
-## 2. WebGL Rendering Pipeline (`src/lib/physicsRenderer.ts`)
+## 3. Core Modules
 
-* **Atmospheric Earth Limb Shader:**
-  A fragment shader models Earth's curvature at the bottom of the viewport with Rayleigh atmospheric scattering glow in `--sky` (#38BDF8) and an inner substrate in `--night` (#060D1F).
-* **Parallax Starfield:**
-  Procedurally generated multi-layer starfield with dynamic parallax tracking driven by tug displacement and thruster vibration.
-* **Dynamic Geometry Batch:**
-  Instanced/batched 2D line and polygon shaders render faceted grey debris polygons with crisp `--white` outlines, glowing sky blue tethers, active engine flames, and dotted prograde/retrograde trajectory vectors.
-* **Direct DOM HUD Synchronization:**
-  React mounts the canvas once. The rAF loop updates the HUD DOM elements (`scoreRef`, `fuelBarRef`, `targetPanelRef`) directly via refs, completely bypassing React's virtual DOM and re-rendering cycles.
+### Engine Layer (`/src/engine/`)
+- `physics.js`: Fixed-timestep ($60\text{ Hz}$) Newtonian orbital dynamics, semi-implicit Euler integration, and Position-Based Dynamics (PBD) distance constraint solver for the tether. Implements orbital trajectory prediction (`predictOrbitalPath`), deorbit evaluator (`evaluateDeorbit`), and collision detection (`checkCollision`).
+- `loop.js`: Deterministic `FixedLoop` simulation decoupling $60\text{ Hz}$ physics ticks from variable refresh rate screen renders, complete with heartbeat fallback for headless test runners and background tabs.
+- `vector.js`: Zero-allocation 2D vector class (`Vec`) with chaining arithmetic.
+- `pool.js`: Lightweight object pooling utility for dynamic bodies and vectors.
 
----
+### Audio Layer (`/src/audio/`)
+- `chiptuneEngine.js`: Procedural Web Audio API engine synthesizing mechanical latch clunks, thruster pulses, rising sine-strain whines, 8-bit pentatonic supernova fanfare, bitcrushed failure noise, conjunction klaxons, and ambient space cockpit drone. Persists master mute in `localStorage`.
 
-## 2. React UI Boundary (`src/app.jsx`)
+### Game & Narrator (`/src/game/`)
+- `megNarrator.js`: Event-driven MEG pirate streamer AI with broadcast overlay dialogue pools, enforcing strict $\ge 8$s global spacing and 2-minute non-repeat history.
 
-* **Single Ref Canvas Mount:**
-  React mounts the `<canvas>` element once via `useRef`. The animation loop (`requestAnimationFrame`) executes outside React's render lifecycle: no state updates occur per frame.
-* **Decoupled HUD Throttling:**
-  Live score and fuel data are sampled at 4 Hz to drive React HUD overlays without incurring React rendering overhead.
-* **ReactBits Integration:**
-  - `SpotlightCard`: Dynamic pointer-reactive spotlight cards for main menu and level selection.
-  - `Magnet`: Magnetic physics-pull buttons for primary calls to action.
-  - `CountUp`: Smooth animated number transitions for score, chain multiplier, and fuel readouts.
-  - `SplitText`: Animated typography for mission title presentations.
+### Render Layer (`/src/render/`)
+- `spaceShader.js`: WebGL procedural acid-wave hybrid noise shader blending Terminal Riot colors (`#4DFFDF` and `#8C4DFF` / `#FF4DE1`) with sparkling star glints.
+- `ascii.js`: Shimmering block ASCII text generator with 3-band parallax displacement and scroll dissolution.
 
----
-
-## 3. Server & Ambient Catalog (`src/game/ambientCatalog.js`, `server.js`)
-
-* **Celestrak Ingestion:**
-  Ingests active satellite elements via the General Perturbations JSON API (`https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json`).
-* **Loud Failure Policy:**
-  No silent fallbacks. If Celestrak is unreachable or returns a non-200 status, the server sets `catalogStatus` to `'stale'` (serving previous cache) or `'unavailable'` (empty array). Historical TLEs are never served silently.
-* **SGP4 Propagation:**
-  On a 2 Hz interval, cached elements are evaluated at current UTC time using `satellite.js` to compute latitude, longitude, and altitude coordinates.
-* **Score Verification & Validation:**
-  The server recomputes the score for every completed mission submitted via `run_submit`. The calculation verifies retrograde deorbits ($\Delta v < 0$), causal chain windows ($900\text{ ms}$), linger counts, and remaining fuel.
-
----
-
-## 4. Audio Synthesis (`src/game/audio.js`)
-
-Procedural Web Audio API sound synthesis:
-- **Grab:** High-frequency triangular snap (600 Hz → 300 Hz).
-- **Whip:** Sine wave pitch sweep (880 Hz → 160 Hz).
-- **Thrust:** Low-frequency sawtooth pulse (90 Hz → 45 Hz).
-- **Impact:** Layered sawtooth and square wave shatter burst.
-- **Deorbit:** Two-tone harmonic confirmation bell (C5 → E5 / G5 → C6).
-- **Cascade:** Scaled exponential harmonic chime based on chain index.
+### UI & Presentation (`/src/ui/` & `/src/App.jsx`)
+- `AsciiLandingPage.jsx`: Acid-Wave Hybrid shader + animated ASCII hero title (`ASTRAL ZERO`), brand glyph `Ø`, tagline `DRIVE THE PERIGEE TO ZERO.`, 4-icon How to Play strip, and Three Laws of Cathode Salvage briefing.
+- `PixelBootPreloader.jsx`: Chunky pixel tug 4-stage assembly loader with scrolling POST log, segmented LED progress bar, and signal flare.
+- `App.jsx`: Primary state machine (`landing` $\to$ `boot` $\to$ `training` $\to$ `missions` $\to$ `credits`), HUD telemetry overlay, MEG broadcast card, dynamic saturation filter, briefing cards, and victory/credits sequence.

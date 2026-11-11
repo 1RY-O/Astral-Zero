@@ -1,54 +1,42 @@
-# Debris Derby — Design System & Visual Tokens
+# ASTRAL ZERO — Design System
 
-Built for the NASA International Space Apps Challenge 2026.
+Built for the **NASA International Space Apps Challenge 2026**.
 
-## 1. Brand Palette Discipline
+## 1. Visual Identity & Art Direction: "Cathode Salvage" (Terminal Riot)
 
-The design system enforces strict brand discipline with exactly three primary brand colours and supporting neutrals. No fourth brand colour is permitted.
+**ASTRAL ZERO** operates under the "Cathode Salvage" aesthetic: a loud, saturated, hyper-stylized deep-space pirate broadcast where the player streams salvage jobs live over jury-rigged Channel 73.
 
-| Token | Hex | Role | Usage |
-|---|---|---|---|
-| `--sky-300` | `#7DD3FC` | Primary Accent / Tether | Momentum tether line, subtle borders |
-| `--sky-400` | `#38BDF8` | Primary Interactive / Player | Player tug, clean deorbits, primary buttons |
-| `--sky-500` | `#0EA5E9` | Pressed / Active | Active state, hover emphasis, high contrast |
-| `--pink-400` | `#FF5FB0` | Danger Hover | Secondary danger hover states |
-| `--pink-500` | `#FF2D95` | Danger / Multiplier / CTA | Cascade multipliers, warnings, penalties |
-| `--pink-500-text-on-light` | `#E01A7A` | Accessible Danger Text | WCAG AA compliant text on light mode (4.57:1) |
-| `--white` | `#FFFFFF` | Core Neutral Light | Text on dark, high-luminance frames |
-| `--canvas-dark` | `#060D1F` | Dark Substrate | Default orbital void background |
-| `--canvas-light` | `#F8FAFC` | Light Substrate | Light mode background |
-| `--ink` | `#0B1220` | Core Neutral Dark | Text on light surfaces |
+The theme centers around **Zero** — driving an orbit's lowest point (perigee) down to absolute zero in Earth's atmospheric furnace.
+
+- **Tagline:** `DRIVE THE PERIGEE TO ZERO.`
+- **Brand Glyph:** `Ø` (the stroked zero — featured on tug chassis, capture zone, and broadcast lockup)
+- **Win Condition Flair:** On deorbit commitment, the live telemetry counts down to `0 KM` with an `ORBIT ZEROED · Ø` badge before the supernova burst.
 
 ---
 
-## 2. Typography
+## 2. Palette: Terminal Riot (Non-Negotiable)
 
-Self-hosted via `@fontsource` packages to guarantee offline resilience and avoid external CDN dependencies:
+1. **Vacuum** (`#0D0618`): Deep indigo-black space substrate.
+2. **Signal Cyan** (`#4DFFDF`): Primary glow, target reticles, mooring locks, and active telemetry.
+3. **Solar Flare** (`#FF9E3D`): RCS thruster particle plume, secondary warnings, propellant meters.
+4. **Plasma Magenta** (`#FF4DE1`): Projected trajectory arc, danger states, conjunction alarms, atmospheric capture horizon.
+5. **Grid Violet** (`#8C4DFF`): Coordinate tickmarks, card borders, telemetry backdrops.
+6. **Riot Lime** (`#B8FF4D`): Rare streak and combo color ONLY. Appears when maintaining high tension and opening the Re-Entry Window.
 
-* **Display Font:** `Space Grotesk` (Weight: 700, 800)
-  Used for mission titles, prominent level headers, and score numerals.
-* **Body Font:** `Inter` (Weight: 400, 500, 600)
-  Used for UI labels, descriptive briefings, instructions, and reports.
-* **Monospace Font:** `ui-monospace`, `SFMono-Regular`, `Menlo`, `monospace`
-  Used for live telemetry, fuel gauges, coordinates, and diagnostic debug HUD.
-
----
-
-## 3. Accessibility & Interaction Rules
-
-* **Touch Target Minimum:** All interactive buttons and touch controls have a minimum target size of `44px × 44px` (`--touch-target-min`).
-* **Colour Independence:** Gameplay information is never conveyed by colour alone. Highlighting rings, velocity vector arrows, trajectory lines, and badge icons provide redundant visual cues alongside chromatic indicators.
-* **WCAG AA Contrast:**
-  - Dark Mode: Sky Blue (`#38BDF8`) on `#060D1F` achieves `10.8:1`. White (`#FFFFFF`) on `#060D1F` achieves `17.4:1`.
-  - Light Mode: `#E01A7A` on `#F8FAFC` achieves `4.57:1`, exceeding the WCAG AA 4.5:1 requirement.
-* **Reduced Motion:** Components query `prefers-reduced-motion`. Physics remains continuous and accurate while decorative screen shake and camera flares are subdued.
+### Semantic & Dynamic Usage Rules:
+- **Color is the Health Bar**: The screen becomes more saturated and colorful the better the player performs (`.popping-off-sat`). When propellant is critical ($< 220$ m/s) or conjunction is imminent ($< 14$s), the frame desaturates toward grayscale static (`.failing-desat`).
+- **Supernova Celebration**: On successful deorbit, 60 colorful particles burst across all 5 palette colors.
+- **Death Collapse**: A 1-second grayscale and RGB static glitch tear (`.death-static-burst`) accompanies collision or fuel exhaustion.
 
 ---
 
-## 4. Component Manifest
+## 3. Typography Pairing
+- **Display & Telemetry:** `JetBrains Mono`, monospace (Tabular figures, high-contrast digital broadcast telemetry).
+- **Secondary:** System monospace fallback (`SF Mono`, Consolas).
 
-* `SpotlightCard`: Interactive surface with radial glow highlighting the pointer position.
-* `Magnet`: Physics spring-attracted button envelope for tactile interactive depth.
-* `CountUp`: Smooth numerical transitions for score accumulations and fuel percentages.
-* `SplitText`: Staggered letter reveal animations for level introductions.
-* `TouchControls`: Virtual joystick and action pad optimized for mobile touchscreens.
+---
+
+## 4. Name & Brand Lockup
+- **Title:** **ASTRAL ZERO** — two words, no slashes anywhere.
+- **Mark:** `ASTRAL ZERO · Ø`
+- **Fictional Context:** Channel 73 Pirate Salvage Feed, hosted by MEG AI.

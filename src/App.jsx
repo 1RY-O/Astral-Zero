@@ -343,6 +343,8 @@ export default function App() {
     sim.tetherTension = 0;
     sim.tetherRestLength = CONSTANTS.TETHER_REST_LENGTH;
     sim.screenShake = 0;
+    sim.tetherRestLength = CONSTANTS.TETHER_REST_LENGTH;
+    sim.screenShake = 0;
     sim.hulkDeorbiting = false;
     sim.hulkBurnProgress = 0;
     sim.supernovaActive = false;

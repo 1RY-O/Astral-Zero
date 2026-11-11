@@ -1,0 +1,45 @@
+# Render Blueprint Specification for Astral Zero
+# Built for the NASA International Space Apps Challenge 2026.
+#
+# NOTE ON HORIZONTAL AUTOSCALING WITH SOCKET.IO:
+# Socket.io connections use HTTP long-polling upgrades to persistent WebSockets.
+# Without an external Redis adapter or sticky session routing, horizontal autoscaling
+# causes handshake failures across multiple instances.
+# Run as a single web service instance (minInstances: 1, maxInstances: 1)
+# or configure a Redis Pub/Sub adapter (@socket.io/redis-adapter).
+
+services:
+  # 1. Astral Zero Authoritative Telemetry & Simulation Server
+  - type: web
+    name: astral-zero-server
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: cd server && npm install
+    startCommand: node server/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: ALLOWED_ORIGINS
+        value: https://astral-zero.vercel.app,http://localhost:5173
+    autoDeploy: true
+
+  # 2. Optional Static Site Deployment on Render (if not using Vercel)
+  - type: static
+    name: astral-zero-client
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_SERVER_URL
+        fromService:
+          type: web
+          name: astral-zero-server
+          property: host

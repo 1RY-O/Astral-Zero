@@ -185,6 +185,16 @@ html, body, #root {
   animation: pulse-dot 1s infinite ease-in-out;
 }
 
+.live-pill.backend-waking {
+  background: rgba(255, 158, 61, 0.18);
+  border-color: var(--solar-flare);
+  color: var(--solar-flare);
+}
+
+.live-dot.dot-amber {
+  background-color: var(--solar-flare);
+}
+
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.3; transform: scale(0.7); }

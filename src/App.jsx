@@ -130,6 +130,7 @@ export default function App() {
   const [campaignScore, setCampaignScore] = useState(null);
   const [isAudioMuted, setIsAudioMuted] = useState(chiptuneAudio.isMuted);
   const [isControlsExpanded, setIsControlsExpanded] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('checking'); // 'connected' | 'connecting' | 'offline'
 
   // Campaign flow states: Briefing Card & Interstitial Black Card
   const [activeBriefing, setActiveBriefing] = useState(() => {
@@ -238,6 +239,34 @@ export default function App() {
         tag: eventTag,
       });
     });
+  }, []);
+
+  // Poll backend health to gracefully indicate Render spin-up state (without blocking gameplay)
+  useEffect(() => {
+    const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+    let isMounted = true;
+
+    const checkBackend = async () => {
+      try {
+        const res = await fetch(`${serverUrl}/healthz`, { signal: AbortSignal.timeout(3000) });
+        if (res.ok && isMounted) {
+          setBackendStatus('connected');
+        } else if (isMounted) {
+          setBackendStatus('connecting');
+        }
+      } catch {
+        if (isMounted) {
+          setBackendStatus('connecting');
+        }
+      }
+    };
+
+    checkBackend();
+    const interval = setInterval(checkBackend, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   // 3-Layer Parallax Starfield Generator (Near: fast/bright/sparse, Mid: medium, Deep: slow/dim/dense)
@@ -1956,8 +1985,12 @@ export default function App() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <span className="live-pill">
-            <span className="live-dot" /> LIVE FEED
+          <span
+            className={`live-pill ${backendStatus === 'connecting' ? 'backend-waking' : ''}`}
+            title={backendStatus === 'connecting' ? 'Render backend waking up (free-tier spin-up delay) · Local physics simulation active' : 'Authoritative telemetry synchronized'}
+          >
+            <span className={`live-dot ${backendStatus === 'connecting' ? 'dot-amber' : ''}`} />
+            {backendStatus === 'connecting' ? 'WAKING BACKEND' : 'LIVE FEED'}
           </span>
           <span style={{ color: 'var(--signal-cyan)', fontWeight: 800, letterSpacing: '0.15em' }}>
             ASTRAL ZERO · Ø

@@ -1,0 +1,810 @@
+/**
+ * ASTRAL ZERO — "CATHODE SALVAGE" TERMINAL RIOT DESIGN SYSTEM.
+ * Built for the NASA International Space Apps Challenge 2026.
+ *
+ * Loud, saturated, terminally online pirate broadcast aesthetic.
+ * Non-negotiable palette:
+ * - Vacuum: #0D0618 (deep indigo-black)
+ * - Signal Cyan: #4DFFDF (primary glow)
+ * - Solar Flare: #FF9E3D
+ * - Plasma Magenta: #FF4DE1
+ * - Grid Violet: #8C4DFF
+ * - Riot Lime: #B8FF4D (streak/combo color ONLY)
+ */
+
+:root {
+  /* Terminal Riot Palette */
+  --vacuum: #0D0618;
+  --signal-cyan: #4DFFDF;
+  --solar-flare: #FF9E3D;
+  --plasma-magenta: #FF4DE1;
+  --grid-violet: #8C4DFF;
+  --riot-lime: #B8FF4D;
+  --titanium-white: #EDF2F7;
+  --telemetry-muted: #8E9BB0;
+
+  /* Semantic mappings */
+  --bg: var(--vacuum);
+  --fg: var(--titanium-white);
+  --accent: var(--signal-cyan);
+  --danger: var(--plasma-magenta);
+  --streak: var(--riot-lime);
+
+  /* Typography */
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--vacuum);
+  color: var(--titanium-white);
+  font-family: var(--font-mono);
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle CRT Scanline & Grain Overlay */
+.crt-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    rgba(13, 6, 24, 0) 50%,
+    rgba(0, 0, 0, 0.28) 50%
+  );
+  background-size: 100% 4px;
+  z-index: 40;
+  opacity: 0.65;
+}
+
+/* Pulsing Conjunction Screen Border Alarm */
+@keyframes conjunction-bezel {
+  0%, 100% {
+    box-shadow: inset 0 0 30px rgba(255, 77, 225, 0.45);
+  }
+  50% {
+    box-shadow: inset 0 0 75px rgba(255, 77, 225, 0.95);
+  }
+}
+
+.bezel-alert {
+  animation: conjunction-bezel 0.75s infinite ease-in-out;
+}
+
+/* Dynamic Saturation: Color is the health bar.
+   Screen gets more colorful the better you play;
+   desaturates toward grayscale static when failing. */
+.failing-desat {
+  filter: grayscale(0.85) contrast(1.3) brightness(0.8);
+  transition: filter 0.4s ease;
+}
+
+.popping-off-sat {
+  filter: saturate(1.4) brightness(1.05);
+  transition: filter 0.3s ease;
+}
+
+/* Fast 1s Death Collapse / RGB Static Tear */
+@keyframes death-collapse {
+  0% {
+    filter: invert(1) contrast(2) hue-rotate(180deg);
+  }
+  30% {
+    filter: grayscale(1) contrast(3.5) brightness(1.5);
+  }
+  70% {
+    filter: grayscale(1) contrast(2) brightness(0.7);
+  }
+  100% {
+    filter: none;
+  }
+}
+
+.death-static-burst {
+  animation: death-collapse 0.95s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Stream Broadcast Overlay Card */
+.stream-overlay-card {
+  background: rgba(13, 6, 24, 0.88);
+  border: 1px solid var(--grid-violet);
+  box-shadow: 0 0 24px rgba(140, 77, 255, 0.28);
+  backdrop-filter: blur(10px);
+  padding: 14px 18px;
+  border-radius: 4px;
+}
+
+/* Telemetry Card */
+.telemetry-overlay {
+  position: absolute;
+  top: 18px;
+  left: 20px;
+  background: rgba(13, 6, 24, 0.88);
+  border: 1px solid var(--grid-violet);
+  box-shadow: 0 0 20px rgba(140, 77, 255, 0.25);
+  backdrop-filter: blur(8px);
+  padding: 14px 18px;
+  z-index: 30;
+  font-size: 0.78rem;
+  line-height: 1.65;
+  border-radius: 4px;
+  min-width: 320px;
+}
+
+/* Controls Footer Banner */
+.controls-banner {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 6, 24, 0.92);
+  border: 1px solid var(--grid-violet);
+  box-shadow: 0 0 22px rgba(140, 77, 255, 0.3);
+  backdrop-filter: blur(10px);
+  padding: 10px 24px;
+  z-index: 30;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* Live Broadcast Badge */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 77, 225, 0.18);
+  border: 1px solid var(--plasma-magenta);
+  color: var(--plasma-magenta);
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-radius: 2px;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--plasma-magenta);
+  border-radius: 50%;
+  animation: pulse-dot 1s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.7); }
+}
+
+/* Riot Lime Streak Glow */
+.streak-active {
+  border-color: var(--riot-lime) !important;
+  box-shadow: 0 0 28px rgba(184, 255, 77, 0.45) !important;
+}
+
+/* Terminal Buttons */
+.term-btn {
+  background: transparent;
+  border: 1px solid var(--signal-cyan);
+  color: var(--signal-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+}
+
+.term-btn:hover {
+  background: var(--signal-cyan);
+  color: var(--vacuum);
+  box-shadow: 0 0 16px var(--signal-cyan);
+}
+
+.term-btn-danger {
+  border-color: var(--plasma-magenta);
+  color: var(--plasma-magenta);
+}
+
+.term-btn-danger:hover {
+  background: var(--plasma-magenta);
+  color: var(--vacuum);
+  box-shadow: 0 0 16px var(--plasma-magenta);
+}
+
+.term-btn-streak {
+  border-color: var(--riot-lime);
+  color: var(--riot-lime);
+}
+
+.term-btn-streak:hover {
+  background: var(--riot-lime);
+  color: var(--vacuum);
+  box-shadow: 0 0 16px var(--riot-lime);
+}
+
+/* ========================================================
+   PART A — COCKPIT INSTRUMENT PANEL (Terminal Riot Show, Don't Tell)
+   ======================================================== */
+
+/* 1. FUEL BAR (Left Screen Edge) */
+.fuel-gauge {
+  position: absolute;
+  left: 20px;
+  top: 90px;
+  bottom: 90px;
+  width: 18px;
+  background: rgba(13, 6, 24, 0.94);
+  border: 1.5px solid var(--signal-cyan);
+  box-shadow: 0 0 16px rgba(77, 255, 223, 0.35), inset 0 0 10px rgba(13, 6, 24, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  z-index: 35;
+  overflow: visible;
+}
+
+/* Tick marks at 25%, 50%, 75% */
+.fuel-gauge::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to top,
+    transparent 0%,
+    transparent calc(25% - 1px),
+    rgba(77, 255, 223, 0.35) calc(25% - 1px),
+    rgba(77, 255, 223, 0.35) 25%
+  );
+  z-index: 2;
+}
+
+.fuel-gauge-fill {
+  width: 100%;
+  border-radius: 2px;
+  background: linear-gradient(to top, var(--solar-flare) 0%, var(--signal-cyan) 60%, var(--riot-lime) 100%);
+  box-shadow: 0 0 14px var(--signal-cyan);
+  transition: height 0.08s linear;
+  z-index: 1;
+}
+
+.fuel-gauge-readout {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 6, 24, 0.95);
+  border: 1px solid var(--signal-cyan);
+  padding: 1px 5px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--signal-cyan);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(77, 255, 223, 0.4);
+}
+
+.fuel-gauge-icon {
+  position: absolute;
+  bottom: -34px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--signal-cyan);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+@keyframes fuel-pulse-amber {
+  0%, 100% { box-shadow: 0 0 12px rgba(255, 158, 61, 0.6), inset 0 0 8px rgba(255, 158, 61, 0.5); }
+  50% { box-shadow: 0 0 28px rgba(255, 158, 61, 1), inset 0 0 14px rgba(255, 158, 61, 0.8); }
+}
+
+@keyframes fuel-pulse-red {
+  0%, 100% { box-shadow: 0 0 14px rgba(255, 77, 225, 0.7), inset 0 0 10px rgba(255, 77, 225, 0.6); }
+  50% { box-shadow: 0 0 35px rgba(255, 77, 225, 1), inset 0 0 18px rgba(255, 77, 225, 0.9); }
+}
+
+.fuel-low-amber {
+  border-color: var(--solar-flare) !important;
+}
+
+.fuel-low-amber .fuel-gauge-fill {
+  background: var(--solar-flare) !important;
+  box-shadow: 0 0 18px var(--solar-flare) !important;
+  animation: fuel-pulse-amber 0.7s infinite ease-in-out;
+}
+
+.fuel-crit-red {
+  border-color: var(--plasma-magenta) !important;
+}
+
+.fuel-crit-red .fuel-gauge-fill {
+  background: var(--plasma-magenta) !important;
+  box-shadow: 0 0 24px var(--plasma-magenta) !important;
+  animation: fuel-pulse-red 0.35s infinite ease-in-out;
+}
+
+/* 2. PERIGEE GAUGE (Right Screen Edge) */
+.perigee-gauge {
+  position: absolute;
+  right: 20px;
+  top: 90px;
+  bottom: 90px;
+  width: 20px;
+  background: rgba(13, 6, 24, 0.94);
+  border: 1.5px solid var(--grid-violet);
+  box-shadow: 0 0 18px rgba(140, 77, 255, 0.35), inset 0 0 10px rgba(13, 6, 24, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 4px;
+  z-index: 35;
+  overflow: visible;
+}
+
+/* Altitude tick marks at 400km, 300km, 200km */
+.perigee-gauge::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent calc(17.3% - 1px),
+    rgba(140, 77, 255, 0.4) calc(17.3% - 1px),
+    rgba(140, 77, 255, 0.4) 17.3%
+  );
+  z-index: 2;
+}
+
+/* Capture Zone Band (< 100 km / bottom 22.2%) */
+.perigee-capture-zone {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 22.2%;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 158, 61, 0.25),
+    rgba(255, 158, 61, 0.25) 4px,
+    rgba(184, 255, 77, 0.28) 4px,
+    rgba(184, 255, 77, 0.28) 8px
+  );
+  border-top: 2px solid var(--solar-flare);
+  border-radius: 0 0 3px 3px;
+  z-index: 3;
+}
+
+.perigee-capture-zone-label {
+  position: absolute;
+  bottom: 4px;
+  right: 26px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: var(--solar-flare);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+@keyframes capture-zone-pulse {
+  0%, 100% {
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba(184, 255, 77, 0.6),
+      rgba(184, 255, 77, 0.6) 4px,
+      rgba(255, 158, 61, 0.7) 4px,
+      rgba(255, 158, 61, 0.7) 8px
+    );
+    box-shadow: 0 0 20px rgba(184, 255, 77, 0.8), inset 0 0 16px rgba(184, 255, 77, 0.9);
+    border-top-color: var(--riot-lime);
+  }
+  50% {
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba(184, 255, 77, 0.9),
+      rgba(184, 255, 77, 0.9) 4px,
+      rgba(255, 158, 61, 0.9) 4px,
+      rgba(255, 158, 61, 0.9) 8px
+    );
+    box-shadow: 0 0 32px rgba(184, 255, 77, 1), inset 0 0 22px rgba(184, 255, 77, 1);
+    border-top-color: var(--titanium-white);
+  }
+}
+
+.capture-zone-active {
+  animation: capture-zone-pulse 0.65s infinite ease-in-out !important;
+}
+
+/* Sliding Hulk Marker */
+.perigee-marker {
+  position: absolute;
+  left: -24px;
+  width: 44px;
+  height: 2px;
+  background: var(--titanium-white);
+  box-shadow: 0 0 10px var(--titanium-white);
+  display: flex;
+  align-items: center;
+  transition: top 0.08s linear;
+  z-index: 5;
+}
+
+.perigee-marker-dot {
+  position: absolute;
+  left: 17px;
+  width: 10px;
+  height: 10px;
+  background: var(--titanium-white);
+  border: 2px solid var(--vacuum);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--titanium-white);
+}
+
+.perigee-marker.in-capture-zone .perigee-marker-dot {
+  background: var(--riot-lime) !important;
+  box-shadow: 0 0 14px var(--riot-lime) !important;
+}
+
+.perigee-marker-tag {
+  position: absolute;
+  right: 50px;
+  background: rgba(13, 6, 24, 0.95);
+  border: 1px solid var(--grid-violet);
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--titanium-white);
+  white-space: nowrap;
+  border-radius: 3px;
+  box-shadow: 0 0 10px rgba(140, 77, 255, 0.4);
+}
+
+.perigee-marker.in-capture-zone .perigee-marker-tag {
+  border-color: var(--riot-lime) !important;
+  color: var(--riot-lime) !important;
+  box-shadow: 0 0 14px rgba(184, 255, 77, 0.6) !important;
+}
+
+/* Release Ready Floating Chip */
+@keyframes release-ready-glow {
+  0%, 100% { transform: translateY(-50%) scale(1); box-shadow: 0 0 16px rgba(184, 255, 77, 0.7); }
+  50% { transform: translateY(-50%) scale(1.06); box-shadow: 0 0 32px rgba(184, 255, 77, 1); }
+}
+
+.release-ready-chip {
+  position: absolute;
+  right: 58px;
+  bottom: 11%;
+  transform: translateY(-50%);
+  background: rgba(13, 6, 24, 0.96);
+  border: 1.5px solid var(--riot-lime);
+  color: var(--riot-lime);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  padding: 5px 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+  animation: release-ready-glow 0.7s infinite ease-in-out;
+  z-index: 36;
+}
+
+/* Boundary Soft Warning Perimeter Vignette */
+@keyframes boundary-glow {
+  0%, 100% { box-shadow: inset 0 0 45px rgba(255, 158, 61, 0.5); }
+  50% { box-shadow: inset 0 0 90px rgba(255, 158, 61, 0.85); }
+}
+
+.boundary-warning-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 28;
+  animation: boundary-glow 0.8s infinite ease-in-out;
+}
+
+/* Ship Off-Screen Indicator Edge Arrow */
+.ship-offscreen-arrow {
+  position: absolute;
+  pointer-events: none;
+  z-index: 38;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(13, 6, 24, 0.92);
+  border: 1.5px solid var(--solar-flare);
+  color: var(--solar-flare);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  box-shadow: 0 0 16px rgba(255, 158, 61, 0.7);
+  white-space: nowrap;
+}
+
+/* 3. SPIN-MATCH CONCENTRIC RINGS */
+.spin-rings-widget {
+  position: absolute;
+  right: 56px;
+  top: 56px;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 35;
+}
+
+/* 4. OBJECTIVE CHIPS (Max 4 words, Top-Center) */
+@keyframes chip-highlight {
+  0% { transform: translateX(-50%) scale(1.1); box-shadow: 0 0 28px var(--signal-cyan); }
+  100% { transform: translateX(-50%) scale(1); box-shadow: 0 0 14px rgba(77, 255, 223, 0.4); }
+}
+
+.objective-chip {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 6, 24, 0.92);
+  border: 1px solid var(--signal-cyan);
+  box-shadow: 0 0 16px rgba(77, 255, 223, 0.35);
+  backdrop-filter: blur(10px);
+  padding: 7px 22px;
+  border-radius: 20px;
+  font-size: 0.88rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--titanium-white);
+  text-transform: uppercase;
+  z-index: 36;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: chip-highlight 0.45s ease-out forwards;
+}
+
+.objective-chip.window-ready {
+  border-color: var(--riot-lime) !important;
+  color: var(--riot-lime) !important;
+  box-shadow: 0 0 24px rgba(184, 255, 77, 0.6) !important;
+}
+
+.objective-chip-skip {
+  background: rgba(255, 158, 61, 0.18);
+  border: 1px solid var(--solar-flare);
+  color: var(--solar-flare);
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  transition: all 0.2s ease;
+}
+
+.objective-chip-skip:hover {
+  background: var(--solar-flare);
+  color: var(--vacuum);
+}
+
+/* 5. CAMPAIGN BRIEFING CARD OVERLAY */
+.briefing-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 6, 24, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.25s ease-out;
+}
+
+.briefing-card {
+  max-width: 680px;
+  width: 90%;
+  background: #170E28;
+  border: 2px solid var(--grid-violet);
+  box-shadow: 0 0 35px rgba(140, 77, 255, 0.4), inset 0 0 20px rgba(140, 77, 255, 0.15);
+  padding: 32px 36px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  color: var(--titanium-white);
+}
+
+.briefing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--grid-violet);
+  padding-bottom: 10px;
+}
+
+.briefing-badge {
+  font-size: 0.76rem;
+  letter-spacing: 0.2em;
+  color: var(--signal-cyan);
+  font-weight: 800;
+}
+
+.briefing-shell {
+  font-size: 0.72rem;
+  color: var(--telemetry-muted);
+}
+
+.briefing-title {
+  font-size: 1.6rem;
+  font-weight: 900;
+  color: var(--solar-flare);
+  margin-bottom: 18px;
+  letter-spacing: 0.08em;
+}
+
+.briefing-lines {
+  background: rgba(13, 6, 24, 0.7);
+  border-left: 3px solid var(--signal-cyan);
+  padding: 16px;
+  margin-bottom: 24px;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.briefing-lines .line-target {
+  color: var(--titanium-white);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.briefing-lines .line-mission {
+  color: var(--signal-cyan);
+}
+
+.briefing-btn {
+  width: 100%;
+  padding: 14px 24px;
+  background: var(--signal-cyan);
+  border: 2px solid #FFFFFF;
+  color: var(--vacuum);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 20px rgba(77, 255, 223, 0.4);
+}
+
+.briefing-btn:hover {
+  background: #FFFFFF;
+  box-shadow: 0 0 30px var(--signal-cyan);
+  transform: scale(1.02);
+}
+
+/* 6. INTERSTITIAL BLACK CARD BETWEEN MISSIONS */
+.interstitial-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 6, 24, 0.96);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.interstitial-card {
+  max-width: 600px;
+  width: 90%;
+  text-align: center;
+  font-family: var(--font-mono);
+  padding: 30px;
+}
+
+/* 7. WIN CONDITION FLAIR (Perigee Countdown to 0 KM) */
+.win-flair-container {
+  position: absolute;
+  top: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(13, 6, 24, 0.94);
+  border: 2px solid var(--riot-lime);
+  box-shadow: 0 0 35px rgba(184, 255, 77, 0.6);
+  padding: 12px 28px;
+  border-radius: 6px;
+  z-index: 55;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.win-flair-sub {
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  color: var(--telemetry-muted);
+  margin-bottom: 4px;
+}
+
+.win-flair-ticker {
+  font-size: 2.4rem;
+  font-weight: 900;
+  color: var(--riot-lime);
+  text-shadow: 0 0 20px rgba(184, 255, 77, 0.7);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.win-flair-unit {
+  font-size: 1rem;
+  color: var(--signal-cyan);
+}
+
+.win-flair-zeroed-badge {
+  margin-top: 6px;
+  background: var(--riot-lime);
+  color: var(--vacuum);
+  font-size: 0.88rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  padding: 3px 12px;
+  border-radius: 3px;
+  animation: bounce 0.4s infinite alternate ease-in-out;
+}
+
+/* 8. MISSION 2 REEL-IN TOOLTIP (6 words max) */
+.reel-in-tooltip {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 6, 24, 0.92);
+  border: 1.5px solid var(--solar-flare);
+  box-shadow: 0 0 20px rgba(255, 158, 61, 0.5);
+  color: var(--solar-flare);
+  font-size: 0.80rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  padding: 6px 16px;
+  border-radius: 4px;
+  z-index: 36;
+  white-space: nowrap;
+  animation: pulse 1s infinite alternate;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+

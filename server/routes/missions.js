@@ -57,7 +57,14 @@ router.get('/', (_req, res) => {
 
 // GET /api/missions/:id
 router.get('/:id', (req, res) => {
-  const mission = MISSIONS.find((m) => m.id === parseInt(req.params.id, 10));
+  const missionId = parseInt(req.params.id, 10);
+  if (isNaN(missionId) || missionId < 0 || missionId > 3) {
+    return res.status(400).json({
+      error: 'INVALID_MISSION_ID',
+      message: 'Mission ID must be a valid integer between 0 and 3.',
+    });
+  }
+  const mission = MISSIONS.find((m) => m.id === missionId);
   if (!mission) {
     return res.status(404).json({
       error: 'MISSION_NOT_FOUND',

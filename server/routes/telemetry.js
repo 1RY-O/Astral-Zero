@@ -22,7 +22,8 @@ router.get('/', async (req, res) => {
 // GET /api/telemetry/tle — Validated TLE records with in-memory caching (90-min refresh)
 router.get('/tle', async (req, res) => {
   await tleCache.refreshIfExpired();
-  const limit = Math.min(200, parseInt(req.query.limit, 10) || 50);
+  const rawLimit = parseInt(req.query.limit, 10);
+  const limit = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(200, rawLimit) : 50;
   const records = tleCache.getRecords(limit);
   const stats = tleCache.getStats();
 

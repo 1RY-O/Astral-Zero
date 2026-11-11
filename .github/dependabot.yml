@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Maintain dependencies for root client project (Vite, React)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "client"
+
+  # Maintain dependencies for backend server (Express, Socket.io, Helmet)
+  - package-ecosystem: "npm"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "server"

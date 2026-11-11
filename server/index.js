@@ -15,24 +15,77 @@
 import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { Server } from 'socket.io';
 
 import missionsRouter from './routes/missions.js';
 import telemetryRouter from './routes/telemetry.js';
 import { SpatialHashGrid } from './spatialHash.js';
 import { tleCache } from './tleCache.js';
+import { validateZonePayload, socketLimiter } from './inputValidator.js';
 import { ECONOMY, ZONES, AI_BOSS_TAUNTS } from '../shared/constants.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Configurable CORS origins for production deployment
-const allowedOrigins = process.env.ALLOWED_ORIGINS
+// In production, strictly reject wildcard '*' origins to protect telemetry and session state
+const rawOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
   : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
 
-app.use(cors({ origin: allowedOrigins.includes('*') ? '*' : allowedOrigins }));
-app.use(express.json());
+const allowedOrigins = isProduction
+  ? rawOrigins.filter((origin) => origin !== '*')
+  : rawOrigins;
+
+// Security headers via helmet
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        connectSrc: ["'self'", ...allowedOrigins, 'wss:', 'ws:', 'https://celestrak.org'],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+// Global IP-based rate limiter (100 req/min per IP)
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX_PER_MINUTE, 10) || 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: 'error',
+    code: 'RATE_LIMIT_EXCEEDED',
+    message: 'Too many requests from this IP. Telemetry rate limit is 100 req/min.',
+  },
+});
+app.use('/api/', apiLimiter);
+
+// Strict CORS validation
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin && !isProduction) return callback(null, true);
+    if (allowedOrigins.includes(origin) || (!isProduction && allowedOrigins.includes('*'))) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS blocked for origin: ${origin}`));
+    }
+  },
+  methods: ['GET', 'POST'],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10kb' })); // Reject oversized payloads
 
 // Routes
 app.use('/api/missions', missionsRouter);
@@ -64,10 +117,7 @@ app.get('/api/health', (_req, res) => {
 const httpServer = http.createServer(app);
 
 const io = new Server(httpServer, {
-  cors: {
-    origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
-    methods: ['GET', 'POST'],
-  },
+  cors: corsOptions,
   perMessageDeflate: true, // Enable Socket.io gzip/deflate compression
 });
 
@@ -385,19 +435,39 @@ io.on('connection', (socket) => {
     registerPlayerTimeout(socket.id, timerId);
   }
 
-  // Socket listener: deploy_tug
+  // Guard against socket event flooding
+  function checkSocketRate() {
+    if (socketLimiter.isRateLimited(socket.id)) {
+      socket.emit('error', { code: 'SOCKET_RATE_LIMIT', message: 'Event rate limit exceeded (25/sec max).' });
+      return true;
+    }
+    return false;
+  }
+
+  // Socket listener: deploy_tug with strict zone validation
   socket.on('deploy_tug', (payload = {}) => {
-    const zoneId = payload.zone || payload.deptId || 'LEO';
-    deployTugToZone(zoneId, false);
+    if (checkSocketRate()) return;
+    const validation = validateZonePayload(payload);
+    if (!validation.valid) {
+      socket.emit('error', { code: 'INVALID_PAYLOAD', message: validation.error });
+      return;
+    }
+    deployTugToZone(validation.zone, false);
   });
 
-  // Socket listener: buy_auto_tug
+  // Socket listener: buy_auto_tug with strict zone validation
   socket.on('buy_auto_tug', (payload = {}) => {
+    if (checkSocketRate()) return;
+    const validation = validateZonePayload(payload);
+    if (!validation.valid) {
+      socket.emit('error', { code: 'INVALID_PAYLOAD', message: validation.error });
+      return;
+    }
+
     state.lastActionAt = Date.now();
     if (checkFailState()) return;
 
-    const zoneId = payload.zoneId || payload.zone || 'LEO';
-    const zone = state.zones[zoneId];
+    const zone = state.zones[validation.zone];
     if (!zone) return;
 
     if (zone.autoTug) {
@@ -406,7 +476,7 @@ io.on('connection', (socket) => {
     }
 
     if (state.budget < zone.autoCost) {
-      emitTaunt(`Auto-Tug for ${zoneId} costs $${zone.autoCost}. Keep salvaging!`, 'medium');
+      emitTaunt(`Auto-Tug for ${validation.zone} costs $${zone.autoCost}. Keep salvaging!`, 'medium');
       return;
     }
 
@@ -419,6 +489,7 @@ io.on('connection', (socket) => {
 
   // Socket listener: upgrade_fleet
   socket.on('upgrade_fleet', () => {
+    if (checkSocketRate()) return;
     state.lastActionAt = Date.now();
     if (checkFailState()) return;
 
@@ -440,14 +511,20 @@ io.on('connection', (socket) => {
     emitTaunt(AI_BOSS_TAUNTS.FLEET_UPGRADE, 'medium');
   });
 
-  // Socket listener: emergency_purge
+  // Socket listener: emergency_purge with strict zone validation
   socket.on('emergency_purge', (payload = {}) => {
+    if (checkSocketRate()) return;
+    const validation = validateZonePayload(payload);
+    if (!validation.valid) {
+      socket.emit('error', { code: 'INVALID_PAYLOAD', message: validation.error });
+      return;
+    }
+
     state.lastActionAt = Date.now();
     if (checkFailState()) return;
 
     const purgeCost = ECONOMY.PURGE_COST;
-    const zoneId = payload.zone || 'LEO';
-    const zone = state.zones[zoneId];
+    const zone = state.zones[validation.zone];
     if (!zone) return;
 
     state.budget -= purgeCost;
@@ -458,7 +535,7 @@ io.on('connection', (socket) => {
     state.kesslerRisk = Math.min(100, state.kesslerRisk + ECONOMY.PURGE_RISK_SPIKE);
 
     socket.emit('purge_success', {
-      zoneId,
+      zoneId: validation.zone,
       clearedDebris: cleared,
       riskSpike: ECONOMY.PURGE_RISK_SPIKE,
     });
@@ -474,6 +551,7 @@ io.on('connection', (socket) => {
 
   // Socket listener: restart_game (Full reset of all timeouts and game state)
   socket.on('restart_game', () => {
+    if (checkSocketRate()) return;
     console.log(`[Astral Zero Server] Resetting game for rigger: ${socket.id}`);
     clearAllPlayerTimeouts(socket.id);
 
@@ -514,6 +592,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`[Astral Zero Server] Rigger disconnected: ${socket.id}`);
+    socketLimiter.cleanup(socket.id);
     clearAllPlayerTimeouts(socket.id);
     playerTimeouts.delete(socket.id);
     players.delete(socket.id);

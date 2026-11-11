@@ -23,6 +23,7 @@ import {
   solveTetherConstraint,
   evaluateDeorbit,
   predictOrbitalPath,
+  stepOrbitalPhysics,
   checkCollision,
 } from './engine/physics.js';
 import { Vec } from './engine/vector.js';
@@ -128,6 +129,7 @@ export default function App() {
   const [finalScore, setFinalScore] = useState(null);
   const [campaignScore, setCampaignScore] = useState(null);
   const [isAudioMuted, setIsAudioMuted] = useState(chiptuneAudio.isMuted);
+  const [isControlsExpanded, setIsControlsExpanded] = useState(false);
 
   // Campaign flow states: Briefing Card & Interstitial Black Card
   const [activeBriefing, setActiveBriefing] = useState(() => {
@@ -213,6 +215,8 @@ export default function App() {
     trail: [],
     particles: [],
     spaceDust: [],
+    starLayers: null,
+    screenShake: 0,
     hazeSparks: [],
     supernovaActive: false,
     comboStreak: 0,
@@ -236,19 +240,40 @@ export default function App() {
     });
   }, []);
 
-  // Background space dust
-  const initSpaceDust = (w, h) => {
-    const dust = [];
-    for (let i = 0; i < 65; i++) {
-      dust.push({
+  // 3-Layer Parallax Starfield Generator (Near: fast/bright/sparse, Mid: medium, Deep: slow/dim/dense)
+  const initStarLayers = (w, h) => {
+    const deep = [];
+    for (let i = 0; i < 95; i++) {
+      deep.push({
         x: Math.random() * w,
         y: Math.random() * h,
-        size: Math.random() * 1.8 + 0.6,
-        speed: Math.random() * 0.35 + 0.1,
-        alpha: Math.random() * 0.6 + 0.2,
+        size: Math.random() * 0.7 + 0.6,
+        alpha: Math.random() * 0.35 + 0.15,
+        color: Math.random() > 0.4 ? '#8C4DFF' : '#EDF2F7',
       });
     }
-    return dust;
+    const mid = [];
+    for (let i = 0; i < 48; i++) {
+      mid.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        size: Math.random() * 1.0 + 1.1,
+        alpha: Math.random() * 0.35 + 0.35,
+        color: Math.random() > 0.5 ? '#4DFFDF' : '#8C4DFF',
+      });
+    }
+    const near = [];
+    for (let i = 0; i < 24; i++) {
+      near.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        size: Math.random() * 1.4 + 1.8,
+        alpha: Math.random() * 0.35 + 0.65,
+        color: Math.random() > 0.3 ? '#EDF2F7' : '#4DFFDF',
+        glint: Math.random() > 0.35,
+      });
+    }
+    return { deep, mid, near };
   };
 
   // Spawn Target Hulk
@@ -288,6 +313,7 @@ export default function App() {
     sim.isLatched = false;
     sim.tetherTension = 0;
     sim.tetherRestLength = CONSTANTS.TETHER_REST_LENGTH;
+    sim.screenShake = 0;
     sim.hulkDeorbiting = false;
     sim.hulkBurnProgress = 0;
     sim.supernovaActive = false;
@@ -561,6 +587,10 @@ export default function App() {
     const sim = simRef.current;
     if (!sim.isLatched || sim.hulkDeorbiting) return;
 
+    // Apply screen shake on release proportional to momentum and tether tension
+    const releaseMomentum = Math.hypot(sim.tug.vel.x, sim.tug.vel.y);
+    sim.screenShake = Math.min(22, 6 + (releaseMomentum / 30) * 8 + (sim.tetherTension / 150) * 6);
+
     sim.isLatched = false;
     sim.tetherTension = 0;
 
@@ -663,17 +693,34 @@ export default function App() {
         chiptuneAudio.playThrusterPulse();
       }
 
-      // Thruster exhaust sparks
-      for (let i = 0; i < 2; i++) {
-        const spread = (Math.random() - 0.5) * 0.45;
-        const pSpd = Math.random() * 120 + 80;
+      // Thruster exhaust multi-particle plume (core plasma needle + turbulent spray sparks)
+      const baseVx = -Math.cos(tug.angle);
+      const baseVy = -Math.sin(tug.angle);
+
+      // Core plasma needle (focused, bright)
+      sim.particles.push({
+        x: tug.pos.x + baseVx * 12,
+        y: tug.pos.y + baseVy * 12,
+        vx: baseVx * (Math.random() * 160 + 130) + tug.vel.x * 0.2,
+        vy: baseVy * (Math.random() * 160 + 130) + tug.vel.y * 0.2,
+        color: '#EDF2F7',
+        size: Math.random() * 1.5 + 2.5,
+        life: 0.18,
+        decay: 4.8,
+      });
+
+      // Wide turbulent exhaust sparks
+      for (let i = 0; i < 3; i++) {
+        const spread = (Math.random() - 0.5) * 0.55;
+        const pSpd = Math.random() * 140 + 80;
+        const sparkAngle = tug.angle + Math.PI + spread;
         sim.particles.push({
-          x: tug.pos.x - Math.cos(tug.angle) * 12,
-          y: tug.pos.y - Math.sin(tug.angle) * 12,
-          vx: -Math.cos(tug.angle + spread) * pSpd + (Math.random() - 0.5) * 20,
-          vy: -Math.sin(tug.angle + spread) * pSpd + (Math.random() - 0.5) * 20,
-          color: Math.random() > 0.4 ? '#FF9E3D' : '#B8FF4D',
-          size: Math.random() * 2.8 + 1.2,
+          x: tug.pos.x + baseVx * 11 + (Math.random() - 0.5) * 4,
+          y: tug.pos.y + baseVy * 11 + (Math.random() - 0.5) * 4,
+          vx: Math.cos(sparkAngle) * pSpd + (Math.random() - 0.5) * 25 + tug.vel.x * 0.1,
+          vy: Math.sin(sparkAngle) * pSpd + (Math.random() - 0.5) * 25 + tug.vel.y * 0.1,
+          color: Math.random() > 0.45 ? '#FF9E3D' : (Math.random() > 0.3 ? '#B8FF4D' : '#4DFFDF'),
+          size: Math.random() * 2.2 + 1.2,
           life: 0.35,
           decay: 2.2,
         });
@@ -879,7 +926,12 @@ export default function App() {
       sim.isSpinMatched = false;
     }
 
-    // 7. Update Particles
+    // 7. Update Particles & Screen Shake Decay
+    if (sim.screenShake > 0.05) {
+      sim.screenShake *= 0.88;
+      if (sim.screenShake <= 0.05) sim.screenShake = 0;
+    }
+
     for (let i = sim.particles.length - 1; i >= 0; i--) {
       const p = sim.particles[i];
       p.x += p.vx * dt;
@@ -932,6 +984,20 @@ export default function App() {
     if (sim.hulkDeorbiting) {
       sim.hulkBurnProgress += dt * 0.75;
       hulk.vel.y += 260 * dt; // Gravity well pull
+
+      // Atmospheric entry fiery spark trail & disintegrating fragments
+      for (let i = 0; i < 3; i++) {
+        sim.particles.push({
+          x: hulk.pos.x + (Math.random() - 0.5) * hulk.radius * 1.2,
+          y: hulk.pos.y - hulk.radius * 0.5 + (Math.random() - 0.5) * 8,
+          vx: -hulk.vel.x * 0.15 + (Math.random() - 0.5) * 60,
+          vy: -Math.random() * 120 - 40,
+          color: Math.random() > 0.5 ? '#FF9E3D' : (Math.random() > 0.25 ? '#FF4D4D' : '#EDF2F7'),
+          size: Math.random() * 3.8 + 1.8,
+          life: 0.55,
+          decay: 1.8,
+        });
+      }
 
       if (sim.hulkBurnProgress >= 1.0) {
         sim.hulkDeorbiting = false;
@@ -1032,17 +1098,64 @@ export default function App() {
     ctx.fillStyle = '#0D0618';
     ctx.fillRect(0, 0, w, h);
 
-    // 2. Drifting Space Dust
+    // Screen Shake Transform for all in-world objects
     ctx.save();
-    sim.spaceDust.forEach((d) => {
-      d.y += d.speed;
-      if (d.y > h) d.y = 0;
-      ctx.fillStyle = `rgba(140, 77, 255, ${d.alpha})`;
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.restore();
+    if (sim.screenShake > 0.05) {
+      const shakeX = (Math.random() - 0.5) * sim.screenShake;
+      const shakeY = (Math.random() - 0.5) * sim.screenShake;
+      ctx.translate(shakeX, shakeY);
+    }
+
+    // 2. 3-Layer Parallax Starfield (Near: fast/bright/sparse, Mid: medium, Deep: slow/dim/dense)
+    if (sim.starLayers) {
+      const { deep, mid, near } = sim.starLayers;
+      const tugVx = tug ? tug.vel.x : 0;
+      const tugVy = tug ? tug.vel.y : 0;
+
+      // Deep Layer (dense, slow, dim)
+      ctx.save();
+      deep.forEach((s) => {
+        s.x = (s.x - tugVx * 0.012 * 0.016 + 0.03 + w) % w;
+        s.y = (s.y - tugVy * 0.012 * 0.016 + 0.05 + h) % h;
+        ctx.fillStyle = s.color;
+        ctx.globalAlpha = s.alpha;
+        ctx.fillRect(s.x, s.y, s.size, s.size);
+      });
+
+      // Mid Layer (medium speed, cyan/violet)
+      mid.forEach((s) => {
+        s.x = (s.x - tugVx * 0.055 * 0.016 + 0.09 + w) % w;
+        s.y = (s.y - tugVy * 0.055 * 0.016 + 0.14 + h) % h;
+        ctx.fillStyle = s.color;
+        ctx.globalAlpha = s.alpha;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Near Layer (fast, bright, sparse with glints)
+      near.forEach((s) => {
+        s.x = (s.x - tugVx * 0.16 * 0.016 + 0.22 + w) % w;
+        s.y = (s.y - tugVy * 0.16 * 0.016 + 0.32 + h) % h;
+        ctx.fillStyle = s.color;
+        ctx.globalAlpha = s.alpha;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (s.glint) {
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(s.x - s.size * 1.8, s.y);
+          ctx.lineTo(s.x + s.size * 1.8, s.y);
+          ctx.moveTo(s.x, s.y - s.size * 1.8);
+          ctx.lineTo(s.x, s.y + s.size * 1.8);
+          ctx.stroke();
+        }
+      });
+      ctx.restore();
+    }
 
     // 3. Grid Violet Coordinate Ticks (#8C4DFF)
     ctx.save();
@@ -1151,57 +1264,62 @@ export default function App() {
     const isReEntryReady = evalResult.isDeorbit;
     const distToHulk = tug.pos.dist(hulk.pos);
 
-    // 5. PART C — SOLID GLOWING TRAJECTORY RIBBON (Visibly sags toward atmosphere)
+    // 5. ANGRY BIRDS SPACE STYLE TRAJECTORY PREDICTION LINE
     if (isLatched || sim.hulkDeorbiting) {
       ctx.save();
-      const projectedPoints = predictOrbitalPath(hulk.pos, hulk.vel, 54, 0.04);
+      const projectedPoints = predictOrbitalPath(hulk.pos, hulk.vel, 60, 0.04);
 
-      // Find the lowest point along the ribbon path (maximum y in canvas coordinates)
+      // Find the lowest point along the trajectory (closest approach to Earth)
       let lowestPoint = projectedPoints[0];
       projectedPoints.forEach((pt) => {
         if (pt.y > lowestPoint.y) lowestPoint = pt;
       });
 
       const isPrograde = sim.progradeWarnTimer > 0;
+      // Red when perigee < 100 km (guaranteed re-entry), cyan/grey otherwise
+      const strokeColor = isPrograde ? '#DC2626' : (isReEntryReady ? '#FF4D4D' : '#4DFFDF');
+      const glowColor = isPrograde ? '#DC2626' : (isReEntryReady ? '#FF2626' : '#4DFFDF');
 
-      // Outer Bloom Ribbon
+      // 5a. Faint continuous dashed guideline arc
       ctx.beginPath();
       projectedPoints.forEach((pt, i) => {
         if (i === 0) ctx.moveTo(pt.x, pt.y);
         else ctx.lineTo(pt.x, pt.y);
       });
+      ctx.strokeStyle = isReEntryReady ? 'rgba(255, 77, 77, 0.32)' : 'rgba(77, 255, 223, 0.22)';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([4, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-      if (isPrograde) {
-        ctx.strokeStyle = 'rgba(220, 50, 50, 0.45)';
-        ctx.lineWidth = 3.5;
-        ctx.shadowColor = '#DC2626';
-        ctx.shadowBlur = 6;
-      } else if (isReEntryReady) {
-        ctx.strokeStyle = '#B8FF4D';
-        ctx.lineWidth = 7.5;
-        ctx.shadowColor = '#B8FF4D';
-        ctx.shadowBlur = 18;
-      } else {
-        ctx.strokeStyle = '#FF4DE1';
-        ctx.lineWidth = 5.0;
-        ctx.shadowColor = '#FF4DE1';
-        ctx.shadowBlur = 14;
+      // 5b. Angry Birds Space Style Dotted Markers (alpha & radius fade along length)
+      const numPts = projectedPoints.length;
+      for (let i = 0; i < numPts; i += 2) {
+        const pt = projectedPoints[i];
+        const frac = i / numPts;
+        const alpha = Math.max(0.14, 1.0 - frac * 0.85);
+        const dotRadius = Math.max(1.8, 4.4 * (1.0 - frac * 0.6));
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = strokeColor;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = isReEntryReady ? 14 : 6;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // High-contrast bright core glint on first half
+        if (i < numPts * 0.45) {
+          ctx.fillStyle = '#EDF2F7';
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, dotRadius * 0.45, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
-      ctx.stroke();
 
-      // Inner Core Ribbon Line
-      ctx.beginPath();
-      projectedPoints.forEach((pt, i) => {
-        if (i === 0) ctx.moveTo(pt.x, pt.y);
-        else ctx.lineTo(pt.x, pt.y);
-      });
-      ctx.strokeStyle = isReEntryReady ? '#EDF2F7' : 'rgba(237, 242, 247, 0.85)';
-      ctx.lineWidth = 2.0;
-      ctx.shadowBlur = 0;
-      ctx.stroke();
-
-      // ATMOSPHERE HAZE IGNITION & CAPTURE LABEL
-      // Lowest point touches/crosses the atmospheric haze threshold (rAtmosphere)
+      // 5c. Atmospheric Haze Ignition & Capture Contact Label
       const distToEarthCenter = Math.hypot(lowestPoint.x - earthCx, lowestPoint.y - earthCy);
       const touchesHaze = distToEarthCenter <= rAtmosphere || lowestPoint.y >= h - 185;
       if (touchesHaze) {
@@ -1209,7 +1327,6 @@ export default function App() {
           sim.hasCapturedAtmosphere = true;
           chiptuneAudio.playHazeCaptureRumble();
 
-          // Spawn orange ignition sparks
           for (let i = 0; i < 18; i++) {
             sim.hazeSparks.push({
               x: lowestPoint.x,
@@ -1221,7 +1338,6 @@ export default function App() {
           }
         }
 
-        // Pinned glowing "CAPTURE" label at the contact point
         ctx.save();
         ctx.fillStyle = '#B8FF4D';
         ctx.font = 'bold 12px "JetBrains Mono", monospace';
@@ -1232,17 +1348,17 @@ export default function App() {
         ctx.restore();
       }
 
-      // Word "perigee" appears exactly once pinned to the lowest point, fading after capture
+      // Pinned Perigee Label fading after capture
       if (sim.perigeeLabelAlpha > 0.05) {
         if (touchesHaze) {
           sim.perigeeLabelAlpha = Math.max(0, sim.perigeeLabelAlpha - 0.015);
         }
         ctx.save();
         ctx.globalAlpha = sim.perigeeLabelAlpha;
-        ctx.fillStyle = '#FF9E3D';
+        ctx.fillStyle = isReEntryReady ? '#B8FF4D' : '#FF9E3D';
         ctx.font = 'bold 10px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
-        ctx.shadowColor = '#FF9E3D';
+        ctx.shadowColor = isReEntryReady ? '#B8FF4D' : '#FF9E3D';
         ctx.shadowBlur = 8;
         ctx.fillText("PERIGEE — ORBIT'S LOWEST POINT", lowestPoint.x, lowestPoint.y + 18);
         ctx.restore();
@@ -1262,17 +1378,91 @@ export default function App() {
     });
     ctx.restore();
 
-    // 6. PART A — TENSION = TETHER GLOW (Thickens & brightens with tension)
+    // 5d. OPTIMAL RELEASE INDICATOR (Visual cue on swing arc for maximum retrograde effect)
+    if (isLatched && !sim.hulkDeorbiting) {
+      ctx.save();
+      const toTugX = tug.pos.x - anchorX;
+      const toTugY = tug.pos.y - anchorY;
+      const swingRadius = Math.hypot(toTugX, toTugY) || CONSTANTS.TETHER_REST_LENGTH;
+
+      // Retrograde kick maximizes when tangential velocity points leftward (-X)
+      // For CCW rotation (av >= 0): top apex (-pi/2) moves left (-X)
+      // For CW rotation (av < 0): bottom apex (+pi/2) moves left (-X)
+      const optAngle = hulk.av >= 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
+      const windowHalfArc = 0.38; // ~22 degrees sweet spot
+
+      const curTugAngle = Math.atan2(toTugY, toTugX);
+      const angleDiff = Math.abs(Math.atan2(Math.sin(curTugAngle - optAngle), Math.cos(curTugAngle - optAngle)));
+      const isInsideOptimal = angleDiff <= windowHalfArc;
+
+      // 1. Subtle circular swing path guide
+      ctx.strokeStyle = 'rgba(140, 77, 255, 0.22)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      ctx.arc(anchorX, anchorY, swingRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 2. Glowing Sweet-Spot Arc Segment
+      ctx.beginPath();
+      ctx.arc(anchorX, anchorY, swingRadius, optAngle - windowHalfArc, optAngle + windowHalfArc);
+      ctx.lineWidth = isInsideOptimal ? 6.5 : 4.0;
+      ctx.strokeStyle = isInsideOptimal ? '#B8FF4D' : 'rgba(77, 255, 223, 0.65)';
+      ctx.shadowColor = isInsideOptimal ? '#B8FF4D' : '#4DFFDF';
+      ctx.shadowBlur = isInsideOptimal ? 18 : 8;
+      ctx.stroke();
+
+      // 3. Notch tick markers at arc boundary and apex
+      [-windowHalfArc, 0, windowHalfArc].forEach((offset) => {
+        const a = optAngle + offset;
+        const innerR = swingRadius - (offset === 0 ? 8 : 5);
+        const outerR = swingRadius + (offset === 0 ? 8 : 5);
+        ctx.beginPath();
+        ctx.moveTo(anchorX + Math.cos(a) * innerR, anchorY + Math.sin(a) * innerR);
+        ctx.lineTo(anchorX + Math.cos(a) * outerR, anchorY + Math.sin(a) * outerR);
+        ctx.strokeStyle = isInsideOptimal ? '#B8FF4D' : '#4DFFDF';
+        ctx.lineWidth = offset === 0 ? 2.5 : 1.5;
+        ctx.stroke();
+      });
+
+      // 4. Directional prompt label
+      const apexX = anchorX + Math.cos(optAngle) * (swingRadius + (isInsideOptimal ? 24 : 18));
+      const apexY = anchorY + Math.sin(optAngle) * (swingRadius + (isInsideOptimal ? 24 : 18));
+      ctx.fillStyle = isInsideOptimal ? '#B8FF4D' : '#4DFFDF';
+      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = isInsideOptimal ? '#B8FF4D' : '#4DFFDF';
+      ctx.shadowBlur = 8;
+      ctx.fillText(isInsideOptimal ? '◄ RELEASE NOW [Q]' : '◄ OPTIMAL RELEASE ARC', apexX, apexY);
+
+      ctx.restore();
+    }
+
+    // 6. ELASTIC SAG & WOBBLE TETHER (Physical tension feedback)
     if (isLatched) {
       ctx.save();
       const strainRatio = Math.min(1.0, tetherTension / 420);
 
-      // Jitter when under intense tension
-      const jitterX = strainRatio > 0.6 ? (Math.random() - 0.5) * 2.2 : 0;
-      const jitterY = strainRatio > 0.6 ? (Math.random() - 0.5) * 2.2 : 0;
+      const midX = (tug.pos.x + anchorX) * 0.5;
+      const midY = (tug.pos.y + anchorY) * 0.5;
+      const tetherDx = anchorX - tug.pos.x;
+      const tetherDy = anchorY - tug.pos.y;
+      const tLen = Math.hypot(tetherDx, tetherDy) || 1;
+      const perpX = -tetherDy / tLen;
+      const perpY = tetherDx / tLen;
+
+      // Elastic harmonic wobble when under tension + gravitational sag when slack
+      const wobbleFreq = 24.0;
+      const wobblePhase = (performance.now() * 0.001) * wobbleFreq;
+      const wobbleAmp = (1.0 - strainRatio) * 6.0 * Math.sin(wobblePhase) + (strainRatio > 0.55 ? (Math.random() - 0.5) * 3.5 : 0);
+      const gravitySag = (1.0 - strainRatio) * 5.5; // sags toward Earth's atmospheric basin (+Y)
+
+      const ctrlX = midX + perpX * wobbleAmp;
+      const ctrlY = midY + perpY * wobbleAmp + gravitySag;
 
       const tetherColor = strainRatio > 0.6 ? '#FF4DE1' : strainRatio > 0.25 ? '#FF9E3D' : '#4DFFDF';
-      const tetherWidth = 1.8 + strainRatio * 4.2; // 1.8px (dim wire) -> 6px (hot cable)
+      const tetherWidth = 1.8 + strainRatio * 4.4;
 
       ctx.strokeStyle = tetherColor;
       ctx.lineWidth = tetherWidth;
@@ -1280,27 +1470,26 @@ export default function App() {
       ctx.shadowBlur = 6 + strainRatio * 16;
 
       ctx.beginPath();
-      ctx.moveTo(tug.pos.x + jitterX, tug.pos.y + jitterY);
-      ctx.lineTo(anchorX + jitterX, anchorY + jitterY);
+      ctx.moveTo(tug.pos.x, tug.pos.y);
+      ctx.quadraticCurveTo(ctrlX, ctrlY, anchorX, anchorY);
       ctx.stroke();
 
-      // Traveling pulse node along the cable
+      // Traveling pulse node along quadratic curve
       const pulseTime = (performance.now() * 0.003) % 1.0;
-      const nodeX = tug.pos.x + (anchorX - tug.pos.x) * pulseTime;
-      const nodeY = tug.pos.y + (anchorY - tug.pos.y) * pulseTime;
+      const oneMinusT = 1.0 - pulseTime;
+      const nodeX = oneMinusT * oneMinusT * tug.pos.x + 2 * oneMinusT * pulseTime * ctrlX + pulseTime * pulseTime * anchorX;
+      const nodeY = oneMinusT * oneMinusT * tug.pos.y + 2 * oneMinusT * pulseTime * ctrlY + pulseTime * pulseTime * anchorY;
       ctx.fillStyle = '#EDF2F7';
       ctx.beginPath();
       ctx.arc(nodeX, nodeY, 3.5, 0, Math.PI * 2);
       ctx.fill();
 
-      // Optional tiny N readout beside tether midpoint (no text walls)
-      const midX = (tug.pos.x + anchorX) * 0.5;
-      const midY = (tug.pos.y + anchorY) * 0.5;
+      // Tension readout in Newtons at the control midpoint
       ctx.fillStyle = '#EDF2F7';
       ctx.font = '10px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.shadowBlur = 0;
-      ctx.fillText(`${Math.round(tetherTension)} N`, midX, midY - 8);
+      ctx.fillText(`${Math.round(tetherTension)} N`, ctrlX, ctrlY - 8);
       ctx.restore();
     }
 
@@ -1373,6 +1562,77 @@ export default function App() {
     }
 
     ctx.restore();
+
+    // 7b. Atmospheric Entry Bow Shock Shockwave Arc (when deorbiting)
+    if (sim.hulkDeorbiting) {
+      ctx.save();
+      ctx.translate(hulk.pos.x, hulk.pos.y);
+      ctx.strokeStyle = '#FF9E3D';
+      ctx.lineWidth = 4.5;
+      ctx.shadowColor = '#FF4D4D';
+      ctx.shadowBlur = 24;
+      ctx.beginPath();
+      ctx.arc(0, 8, hulk.radius + 12, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2.0;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.arc(0, 8, hulk.radius + 10, Math.PI * 0.2, Math.PI * 0.8);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 7c. Pulsing Target Reticle over Derelict (Contract 0 / Mission 1 when not latched)
+    if (!isLatched && !sim.hulkDeorbiting && sim.hulkIndex <= 1) {
+      ctx.save();
+      ctx.translate(hulk.pos.x, hulk.pos.y);
+      const pulse = Math.sin(performance.now() * 0.005) * 3.5;
+      const reticleR = hulk.radius + 20 + pulse;
+
+      // Outer sci-fi corner brackets
+      ctx.strokeStyle = '#4DFFDF';
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = '#4DFFDF';
+      ctx.shadowBlur = 8;
+      const bracketLen = 10;
+      const bDist = reticleR + 4;
+
+      ctx.beginPath();
+      // Top-left
+      ctx.moveTo(-bDist, -bDist + bracketLen);
+      ctx.lineTo(-bDist, -bDist);
+      ctx.lineTo(-bDist + bracketLen, -bDist);
+      // Top-right
+      ctx.moveTo(bDist - bracketLen, -bDist);
+      ctx.lineTo(bDist, -bDist);
+      ctx.lineTo(bDist, -bDist + bracketLen);
+      // Bottom-right
+      ctx.moveTo(bDist, bDist - bracketLen);
+      ctx.lineTo(bDist, bDist);
+      ctx.lineTo(bDist - bracketLen, bDist);
+      // Bottom-left
+      ctx.moveTo(-bDist + bracketLen, bDist);
+      ctx.lineTo(-bDist, bDist);
+      ctx.lineTo(-bDist, bDist - bracketLen);
+      ctx.stroke();
+
+      // Dashed pulsing reticle circle
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, reticleR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Range indicator tag
+      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.fillStyle = '#4DFFDF';
+      ctx.textAlign = 'center';
+      ctx.shadowBlur = 4;
+      ctx.fillText(`TARGET · ${Math.round(distToHulk)}m`, 0, reticleR + 16);
+      ctx.restore();
+    }
 
     // 8. Player Tug & Afterimage Wake
     ctx.save();
@@ -1515,6 +1775,9 @@ export default function App() {
     });
     ctx.restore();
 
+    // End screen shake transform for world elements
+    ctx.restore();
+
     // Compute Single Objective Chip (Max 4 words)
     let chipText = 'APPROACH TARGET';
     if (sim.hulkDeorbiting) {
@@ -1561,7 +1824,7 @@ export default function App() {
       canvas.height = window.innerHeight;
       simRef.current.width = canvas.width;
       simRef.current.height = canvas.height;
-      simRef.current.spaceDust = initSpaceDust(canvas.width, canvas.height);
+      simRef.current.starLayers = initStarLayers(canvas.width, canvas.height);
       if (!simRef.current.tug) {
         spawnHulk(hulkIndex);
       }
@@ -1858,6 +2121,34 @@ export default function App() {
         )}
       </div>
 
+      {/* Onboarding Contextual Tip Pill (Contract 0 / Mission 1) */}
+      {(() => {
+        if (hulkIndex <= 1 && !hud.isDeorbiting) {
+          let tipText = null;
+          if (!hud.isLatched) {
+            if (hud.distanceToHulk > (hulkIndex === 0 ? 350 : 260)) {
+              tipText = 'HOLD [W] TO BURN NOSE · APPROACH TARGET';
+            } else {
+              tipText = 'PRESS [E] TO LATCH TETHER PIN';
+            }
+          } else if (!hud.isSpinMatched) {
+            tipText = 'HOLD [A/D] TO ALIGN & [W] TO MATCH ROTATION';
+          } else if (!hud.isReEntryWindow) {
+            tipText = 'PUMP [W] ON TANGENT · DRIVE PERIGEE < 100 KM';
+          } else {
+            tipText = 'SWEET SPOT REACHED · PRESS [Q] TO RELEASE';
+          }
+          if (tipText) {
+            return (
+              <div className="onboarding-hint-pill">
+                <span>{tipText}</span>
+              </div>
+            );
+          }
+        }
+        return null;
+      })()}
+
       {/* Conjunction Countdown Hazard Banner (Only active on Target 3) */}
       {hud.conjunctionTime !== null && (
         <div
@@ -2139,17 +2430,30 @@ export default function App() {
         </div>
       )}
 
-      {/* Clean Bottom Keybindings Bar (Zero // separators) */}
-      <div className="controls-banner">
-        <div>
-          <strong>[W / SPACE / MOUSE-HOLD]</strong> THRUST NOSE &nbsp;|&nbsp;
-          <strong>[A / D / ← / →]</strong> ROTATE &nbsp;|&nbsp;
-          <strong>[E]</strong> LATCH &nbsp;|&nbsp;
-          <strong>[Q]</strong> RELEASE &nbsp;|&nbsp;
-          {currentHulkConfig.isTutorial && <span><strong>[T]</strong> SKIP &nbsp;|&nbsp;</span>}
-          <strong>[R]</strong> RESET &nbsp;|&nbsp;
-          <strong>[M]</strong> MUTE
-        </div>
+      {/* Collapsible Keybindings Bar */}
+      <div className="controls-banner-mini">
+        <button
+          onClick={() => setIsControlsExpanded((prev) => !prev)}
+          className="controls-toggle-btn"
+          title="Toggle Keybinding Guide"
+        >
+          {isControlsExpanded ? '▲ HIDE CONTROLS' : '▼ CONTROLS'}
+        </button>
+        {!isControlsExpanded ? (
+          <span style={{ color: 'var(--titanium-white)' }}>
+            <strong>[W]</strong> THRUST &nbsp;|&nbsp; <strong>[A/D]</strong> ROTATE &nbsp;|&nbsp; <strong>[E]</strong> LATCH &nbsp;|&nbsp; <strong>[Q]</strong> RELEASE &nbsp;|&nbsp; <strong>[R]</strong> RESET
+          </span>
+        ) : (
+          <div style={{ color: 'var(--titanium-white)' }}>
+            <strong>[W / SPACE / MOUSE-HOLD]</strong> THRUST NOSE &nbsp;|&nbsp;
+            <strong>[A / D / ← / →]</strong> ROTATE &nbsp;|&nbsp;
+            <strong>[E]</strong> LATCH &nbsp;|&nbsp;
+            <strong>[Q]</strong> RELEASE &nbsp;|&nbsp;
+            {currentHulkConfig.isTutorial && <span><strong>[T]</strong> SKIP &nbsp;|&nbsp;</span>}
+            <strong>[R]</strong> RESET &nbsp;|&nbsp;
+            <strong>[M]</strong> MUTE
+          </div>
+        )}
       </div>
     </div>
   );

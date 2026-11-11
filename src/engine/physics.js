@@ -149,36 +149,42 @@ export function evaluateDeorbit(vel) {
 }
 
 /**
+ * Single step integration for an unconstrained body in the local orbital shell.
+ * Computes gravitational pull toward Earth modulated by along-track retrograde velocity.
+ * Shared by both the live simulation step and the trajectory predictor.
+ *
+ * @param {{x: number, y: number}} pos
+ * @param {{x: number, y: number}} vel
+ * @param {number} dt
+ */
+export function stepOrbitalPhysics(pos, vel, dt) {
+  const retroFactor = Math.max(0, -vel.x / 40.0);
+  const orbitalGravity = 18.0 + retroFactor * 32.0;
+
+  pos.x += vel.x * dt;
+  pos.y += vel.y * dt;
+  vel.y += orbitalGravity * dt;
+}
+
+/**
  * Predicts the forward orbital trajectory points of an object if released right now.
  * In the orbital reference frame, retrograde along-track velocity (vx < 0) creates
  * an orbital decay curve that curves downward toward Earth's atmospheric boundary.
  *
  * @param {Vec} pos - Starting position
  * @param {Vec} vel - Instantaneous velocity
- * @param {number} steps - Number of projection points
+ * @param {number} steps - Number of projection points (forward 30-60s)
  * @param {number} dt - Prediction timestep
  * @returns {Array<{x: number, y: number}>}
  */
 export function predictOrbitalPath(pos, vel, steps = 60, dt = 0.04) {
   const points = [];
-  let curX = pos.x;
-  let curY = pos.y;
-  let curVx = vel.x;
-  let curVy = vel.y;
-
-  // In local frame: downward acceleration toward Earth increases with retrograde velocity
-  // Vis-viva downward curvature factor: a_y = -35.0 * (1 - v_x / v_circular)
-  const retroFactor = Math.max(0, -curVx / 40.0);
-  const orbitalGravity = 18.0 + retroFactor * 32.0;
+  const p = { x: pos.x, y: pos.y };
+  const v = { x: vel.x, y: vel.y };
 
   for (let i = 0; i < steps; i++) {
-    curX += curVx * dt;
-    curY += curVy * dt;
-
-    // Apply atmospheric/gravity orbital dip
-    curVy += orbitalGravity * dt;
-
-    points.push({ x: curX, y: curY });
+    stepOrbitalPhysics(p, v, dt);
+    points.push({ x: p.x, y: p.y });
   }
 
   return points;

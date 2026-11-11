@@ -1,12 +1,12 @@
 {
-  "name": "debris-darling-server",
+  "name": "astral-zero-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "build": "node -e \"console.log('Server build verified')\""
+    "build": "node -e \"console.log('Astral Zero Server build verified')\""
   },
   "dependencies": {
     "cors": "^2.8.5",

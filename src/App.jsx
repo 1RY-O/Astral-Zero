@@ -1091,8 +1091,11 @@ export default function App() {
     const { tug, hulk, isLatched, anchorOffsetWorld, tetherTension } = sim;
     if (!tug || !hulk) return;
 
-    const w = canvas.width;
-    const h = canvas.height;
+    const dpr = sim.dpr || Math.min(window.devicePixelRatio || 1, 2);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const w = sim.width;
+    const h = sim.height;
 
     // 1. Deep Vacuum Indigo-Black (#0D0618)
     ctx.fillStyle = '#0D0618';
@@ -1820,11 +1823,15 @@ export default function App() {
     if (!canvas) return;
 
     const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      simRef.current.width = canvas.width;
-      simRef.current.height = canvas.height;
-      simRef.current.starLayers = initStarLayers(canvas.width, canvas.height);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(window.innerWidth * dpr);
+      canvas.height = Math.round(window.innerHeight * dpr);
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      simRef.current.width = window.innerWidth;
+      simRef.current.height = window.innerHeight;
+      simRef.current.dpr = dpr;
+      simRef.current.starLayers = initStarLayers(window.innerWidth, window.innerHeight);
       if (!simRef.current.tug) {
         spawnHulk(hulkIndex);
       }

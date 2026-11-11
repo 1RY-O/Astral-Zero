@@ -4,33 +4,53 @@ const router = express.Router();
 
 const MISSIONS = [
   {
+    id: 0,
+    name: 'CONTRACT 0 — LEO PROVING GROUND (TUTORIAL)',
+    shortName: 'CONTRACT 0 · DRILL',
+    orbitShell: '350 KM LEO TRAINING SHELL',
+    target: 'ORBITAL RIGGER DRILL · SIM-00',
+    briefing: 'Latch docking pin, match rotation, swing and release into retrograde arc.',
+    massKg: 380,
+    conjunctionLimitSec: null,
+  },
+  {
     id: 1,
-    name: 'Sector 01: Low Earth Orbit (LEO)',
-    taunt: 'Calibrate your tug. 160-2000 km altitude is dense with spent rocket boosters.',
-    debrisCount: 12,
-    basePayout: 350,
+    name: 'MISSION 01 — SL-16 BOOSTER',
+    shortName: 'MISSION 01 · SL-16',
+    orbitShell: '450 KM LEO ORBIT',
+    target: 'SL-16 BOOSTER DEBRIS #4182',
+    briefing: 'Latch tumbling stage, pump angular momentum, drive perigee under 100 km.',
+    massKg: 450,
+    conjunctionLimitSec: null,
   },
   {
     id: 2,
-    name: 'Sector 02: Medium Earth Orbit (MEO)',
-    taunt: 'Navigation constellation corridor. High-velocity orbital junk hazards.',
-    debrisCount: 18,
-    basePayout: 550,
+    name: 'MISSION 02 — DELTA-K UPPER STAGE',
+    shortName: 'MISSION 02 · DELTA-K',
+    orbitShell: '620 KM SSO ORBIT',
+    target: 'DELTA-K HULL #8821',
+    briefing: 'Heavy angular spin. Use scroll wheel to reel in cable and accelerate rotation.',
+    massKg: 740,
+    conjunctionLimitSec: null,
   },
   {
     id: 3,
-    name: 'Sector 03: Geostationary Orbit (GEO)',
-    taunt: 'High-value communications belt. Clear derelicts before catastrophic cascade.',
-    debrisCount: 25,
-    basePayout: 900,
+    name: 'MISSION 03 — COSMOS RESIDUAL',
+    shortName: 'MISSION 03 · COSMOS',
+    orbitShell: '780 KM POLAR ORBIT',
+    target: 'COSMOS RESIDUAL #0944',
+    briefing: 'Cascade threat detected. Complete retrograde deorbit before 75s conjunction.',
+    massKg: 890,
+    conjunctionLimitSec: 75.0,
   },
 ];
 
 // GET /api/missions
-router.get('/', (req, res) => {
+router.get('/', (_req, res) => {
   res.json({
     status: 'ok',
-    aiPersona: 'CORRUPTED_NASA_FLIGHT_CONTROLLER_V4',
+    game: 'Astral Zero',
+    tagline: 'DRIVE THE PERIGEE TO ZERO.',
     missions: MISSIONS,
   });
 });
@@ -41,7 +61,7 @@ router.get('/:id', (req, res) => {
   if (!mission) {
     return res.status(404).json({
       error: 'MISSION_NOT_FOUND',
-      message: 'Specified orbital sector corrupted or purged from memory.',
+      message: 'Specified salvage mission not found in campaign manifest.',
     });
   }
   return res.json({ status: 'ok', mission });
